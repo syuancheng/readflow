@@ -715,6 +715,24 @@ for p in / /words /export /stats /texts/<id>; do curl -s -o /dev/null -w "$p %{h
 
 ---
 
+### 12.4 真实写卡（不可逆，只在用户明确同意后跑）
+
+```bash
+npm run push:one -- list                                   # 列牌组/章节（只读）
+npm run push:one -- push <词> qa <deckId> <chapterId> --dry # 只打印全文，不写
+npm run push:one -- push <词> qa <deckId> <chapterId>       # 真写一张
+```
+
+`scripts/push-one.ts` 复用 `buildCard` / `lintCard` / `createCard`，和 `/api/export` 走同一套逻辑，
+只是把取数写短。它存在的原因是：某些受限环境里 dev server 起不来（Next 启动时要删
+`.next/dev/cache/**/*.del`，会被安全策略拒绝），但「墨墨到底收不收这张卡」只能用真实请求验证。
+
+写之前的闸门和路由一致：语法自检不过不写、`exports` 里已有 `done` 记录就直接拒绝
+（除非 `--force`）。**墨墨没有删除端点，写错只能去 App 里手删**，所以这两道闸门不能省。
+
+已验证过的结果（2026-11-02）：写入后 `GET /decks/{deck}/cards/{card}` 回读的 content
+与提交内容逐字一致，`grammar_version` 为 3，章节卡片数 +1。
+
 ## 13. 代码地图与改动指引
 
 | 想改什么 | 改哪里 | 注意 |
