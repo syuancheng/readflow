@@ -11,7 +11,7 @@
  *   choice 选择题（我们没有的）  原句挖空 + 4 选项  →  答案
  */
 
-import { normalizeTranslation } from "./text";
+import { normalizePhonetic, normalizeTranslation } from "./text";
 
 export type CardType = "qa" | "cloze" | "choice";
 export const CARD_TYPES: { key: CardType; label: string; hint: string }[] = [
@@ -80,7 +80,7 @@ function split(sentence: string, offset: number, len: number) {
 
 function head(word: string, phonetic: string | null) {
   const lines = [`[P#H1,center#[T#B#${oneLine(word)}]]`];
-  if (phonetic) lines.push(`[P#center#[T#${GREY}#/${oneLine(phonetic)}/]]`);
+  if (phonetic) lines.push(`[P#center#[T#${GREY}#/${normalizePhonetic(phonetic)}/]]`);
   return lines;
 }
 

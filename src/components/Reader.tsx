@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
-import { normalizeTranslation } from "@/lib/text";
+import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 
 type Para = { id: string; idx: number; content: string };
 export type ReaderPara = Para;
@@ -354,7 +354,7 @@ function PickCard({
               </p>
               {dict?.entry?.phonetic && (
                 <p className="text-[13px] font-mono text-ink-soft mt-0.5">
-                  /{dict.entry.phonetic}/
+                  /{normalizePhonetic(dict.entry.phonetic)}/
                 </p>
               )}
             </div>

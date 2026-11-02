@@ -3,7 +3,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { userWords, contexts, texts, LOCAL_USER } from "@/db/schema";
 import { getStats } from "@/lib/stats";
-import { normalizeTranslation } from "@/lib/text";
+import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +102,7 @@ export default async function WordsPage() {
                       <h3 className="text-[17px] font-extrabold">{w.displayForm}</h3>
                       {w.phonetic && (
                         <span className="text-[13px] font-medium text-ink-faint font-mono">
-                          /{w.phonetic}/
+                          /{normalizePhonetic(w.phonetic)}/
                         </span>
                       )}
                     </div>

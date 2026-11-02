@@ -110,20 +110,45 @@ children      →  "0:child/1:s"     复数
 better        →  "0:good/1:r"      比较级
 ```
 
-`src/lib/dict.ts` 的 `lemma()` 只用一行正则 `^0:([^/]+)` 就拿到了原形——**不需要任何 NLP 库、不需要规则表**。这是整个项目性价比最高的一个发现。
+`src/lib/dict.ts` 的 `lemma()` 用一行正则就从 exchange 里拿到了原形——**不需要任何 NLP 库、不需要规则表**。这是整个项目性价比最高的一个发现。
+
+⚠️ 但这行正则踩过两个坑，都是实测数据才暴露的：
+
+```
+1. `0:` 不一定在首位
+   went      "0:go/1:p"        （0: 在首位）
+   glistened "1:pd/0:glisten"  （0: 在第二段）← 原来的 ^0: 正则直接失配
+   glasses   "1:s3/0:glass"
+   → 改成 /(?:^|\/)0:([^\/]+)/
+
+2. 有些变形词 exchange 是空的，只在中文释义里留了指针
+   was → exchange = null，translation = "be的过去式"
+   → 退一步解析中文，正则必须锚在开头，否则
+     "下雨（rain的过去式）" 里括号内的补充说明会被误当成原形来源
+```
 
 `lookup()` 的三步：
 
 ```
-1. 直接查词 → 命中且 translation 长度 > 10（说明是实义释义而非「go 的过去式」这种短标注）
-   → 直接返回 { entry: 自己, lemmaForm: 自己 }
-2. 否则用 exchange 还原到原形再查 → 命中
-   → 返回原形条目，word 标注成 "go (went)"，lemmaForm = "go"
-3. 直接查到但释义太短 / 原形也查不到
-   → 返回直查结果；都没有则 entry = null（前端切第 2 层走 AI）
+1. 先算原形：exchange 的 0: 段 → 中文指针 → 自己
+2. 是变形词（lemma ≠ 自己）就查原形词条，然后决定展示哪条释义：
+   - 变形词自己是正经词条（有柯林斯星级 / 牛津核心词 / 词频）→ 用自己的
+     glasses 眼镜、better 较好的、running 赛跑 —— 这些义项丢了很亏
+   - 释义是「xx 的过去式」这种指针 → 用原形的（went → go）
+   - 释义和原形释义**没有汉字重合** → 用自己的
+     leaves 的 exchange 指向 leave「离开」，但它自己的释义是「树叶」；
+     直接用原形会把阅读时的意思讲错
+   - 其余 → 用原形的（glistened → glisten、studies → study）
+3. 原形查不到 → 用直查结果；都没有则 entry = null（前端切第 2 层走 AI）
 ```
 
-注意一个**已知的语义小瑕疵**：`rained` 在 ECDICT 里有自己的条目且 translation 长度足够，所以会以 `lemma = "rained"` 落库，而不是 `rain`。行为上不算错（释义是「下雨（rain 的过去式）」），但会让「同一动词的不同变形」在词库里分成两条。修法：判断 `exchange` 存在时优先走原形（P4 前建议修）。
+**旧实现（已废弃）**：用 `translation.length > 10` 猜「有没有实义释义」。结果是 `glistened`
+的 "v. 湿物闪耀, 闪亮( glisten的过去式和过去分词 )" 被当成独立词条，lemma 存成了
+`glistened` —— 词库里 glisten / glistened 分成两条，卡片标题也是变形。
+
+改完之后**历史数据要用 `npm run backfill:lemma` 对齐**（默认 dry-run，加 `--apply` 才写库）：
+它按新规则重算每个词的 lemma，顺带刷新指针式释义；lemma 撞上已有词时合并
+（上下文和导出记录一起迁过去，导出记录撞唯一键则丢弃）。
 
 ---
 
@@ -730,6 +755,15 @@ npm run push:one -- push <词> qa <deckId> <chapterId>       # 真写一张
 写之前的闸门和路由一致：语法自检不过不写、`exports` 里已有 `done` 记录就直接拒绝
 （除非 `--force`）。**墨墨没有删除端点，写错只能去 App 里手删**，所以这两道闸门不能省。
 
+```bash
+# 改了词典规则或卡片版式之后，把已经推上去的卡一起修好
+npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
+```
+
+`retouch` 从 `exports` 查回 card_id，按当前数据重新生成全文，再走更新接口
+**全量替换**（更新接口和 create 不同：请求体要带 deck_id/card_id，且 content 是替换不是补丁）。
+内容没变就直接跳过。
+
 已验证过的结果（2026-11-02）：写入后 `GET /decks/{deck}/cards/{card}` 回读的 content
 与提交内容逐字一致，`grammar_version` 为 3，章节卡片数 +1。
 
@@ -748,10 +782,13 @@ npm run push:one -- push <词> qa <deckId> <chapterId>       # 真写一张
 | 加页面 | `src/app/<route>/page.tsx` + `duo-card` 等现成类 | 记得挂进 `layout.tsx` 与 `BottomNav.tsx` |
 | 改视觉 | `src/app/globals.css` 的 CSS 变量 + `.duo-*` 类 | 颜色改变量，别硬编码 |
 | 加表/字段 | `db/schema.ts` **和** `db/index.ts` 的 `SCHEMA_SQL` + `migrate()` | 三处必须一致（8.4 / 11.5） |
+| 改词典还原规则 | `lib/dict.ts` 的 `lemma()` / `lookup()` | 改完跑 `npm run backfill:lemma`，否则历史数据是旧规则 |
+| 改音标显示 | `lib/text.ts` 的 `normalizePhonetic()` | ECDICT 用 `'`/`,` 表示重音，别再把它当普通标点 |
 
-### 建议优先修的四件事
+### 建议优先修的三件事
 
-1. `lookup()` 的 lemma 判断（2.3 末尾）——影响词库去重质量。
-2. `explain` 的 SSE 帧格式（5.4）——现在能用但是「假 SSE」，早晚要接标准事件流。
-3. `db/index.ts` 的忙等退避（8.5）——阻塞事件循环，改动小、收益明确。
-4. 导出改成后台任务（11.6）——现在是同步串行，词一多请求就长；应该有 job 表 + 进度轮询。
+1. `explain` 的 SSE 帧格式（5.4）——现在能用但是「假 SSE」，早晚要接标准事件流。
+2. `db/index.ts` 的忙等退避（8.5）——阻塞事件循环，改动小、收益明确。
+3. 导出改成后台任务（11.6）——现在是同步串行，词一多请求就长；应该有 job 表 + 进度轮询。
+
+（`lookup()` 的 lemma 判断已于 2026-11-02 修掉，见 2.3。）

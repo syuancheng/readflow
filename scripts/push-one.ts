@@ -1,5 +1,5 @@
 /**
- * 一次性的端到端联调脚本：把词库里的某个词真的写进墨墨牌组。
+ * 端到端联调脚本：把词库里的词真的写进墨墨牌组，或修正已经写进去的卡片。
  *
  * 这个脚本存在的唯一原因：dev server 在某些受限环境里起不来（Next 启动时要删
  * .next/dev/cache 下的 .del 文件），而「能不能写进墨墨」这件事只能用真实请求验证。
@@ -8,14 +8,19 @@
  *
  * 用法：
  *   node .verify/scripts/push-one.js list
- *   node .verify/scripts/push-one.js push <词> <qa|cloze|choice> <deckId> <chapterId> [--dry]
+ *   node .verify/scripts/push-one.js push <词> <qa|cloze|choice> <deckId> <chapterId> [--dry] [--force]
+ *   node .verify/scripts/push-one.js retouch <词> <qa|cloze|choice> <deckId> [--dry]
+ *
+ * retouch 用来自动修正「已经推上去但内容不对」的卡：从 exports 里查回 card_id，
+ * 按当前词典数据重新生成全文，再走更新接口**全量替换**。墨墨删不掉卡片，
+ * 所以内容写错了这个命令比「删了重推」更实用。
  */
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { resolveAnchor } from "../src/lib/tokenize";
 import { sentenceAround } from "../src/lib/split";
 import { buildCard, lintCard, type CardType } from "../src/lib/cardgen";
-import { createCard, listChapters, listDecks, markjiToken } from "../src/lib/markji";
+import { createCard, getCard, listChapters, listDecks, markjiToken, updateCard } from "../src/lib/markji";
 import { distractors } from "../src/lib/dict";
 import { normalizeTranslation } from "../src/lib/text";
 
@@ -63,24 +68,9 @@ function loadWord(db: Database.Database, key: string) {
   return row;
 }
 
-async function cmdPush(key: string, type: CardType, deckId: string, chapterId: string, dry: boolean) {
-  if (!markjiToken()) throw new Error("没有 MARKJI_TOKEN，先配置 .env");
-  const db = openDb();
+/** 按当前词典数据生成卡片全文（push 和 retouch 共用） */
+function renderCard(db: Database.Database, key: string, type: CardType) {
   const row = loadWord(db, key);
-
-  // 幂等闸门：墨墨删不掉卡片，重复推送就是往牌组里堆垃圾。
-  // 和 /api/export 用同一个唯一键，所以这里能拦住脚本层面的误跑。
-  const already = db
-    .prepare(
-      `SELECT id, card_id FROM exports
-        WHERE user_word_id = ? AND deck_id = ? AND card_type = ? AND status = 'done'`,
-    )
-    .get(row.id, deckId, type) as { id: string; card_id: string } | undefined;
-  if (already && !process.argv.includes("--force")) {
-    throw new Error(
-      `这个词的 ${type} 卡已经推送过（card_id=${already.card_id}），跳过。确实要再写一张加 --force。`,
-    );
-  }
 
   const hit = resolveAnchor(row.para, {
     start: row.start,
@@ -115,6 +105,35 @@ async function cmdPush(key: string, type: CardType, deckId: string, chapterId: s
   console.log("=== 语法自检 ===", lint.ok ? "通过" : `失败：${lint.problems.join("；")}`);
   if (!lint.ok) throw new Error("卡片语法自检没有通过，拒绝写入");
 
+  return { row, content };
+}
+
+async function cmdPush(
+  key: string,
+  type: CardType,
+  deckId: string,
+  chapterId: string,
+  dry: boolean,
+) {
+  if (!markjiToken()) throw new Error("没有 MARKJI_TOKEN，先配置 .env");
+  const db = openDb();
+  const { row, content } = renderCard(db, key, type);
+
+  // 幂等闸门：墨墨删不掉卡片，重复推送就是往牌组里堆垃圾。
+  // 和 /api/export 用同一个唯一键，所以这里能拦住脚本层面的误跑。
+  const already = db
+    .prepare(
+      `SELECT card_id FROM exports
+        WHERE user_word_id = ? AND deck_id = ? AND card_type = ? AND status = 'done'`,
+    )
+    .get(row.id, deckId, type) as { card_id: string } | undefined;
+  if (already && !process.argv.includes("--force")) {
+    throw new Error(
+      `这个词的 ${type} 卡已经推送过（card_id=${already.card_id}），跳过。` +
+        `要改内容用 retouch，确实要再写一张加 --force。`,
+    );
+  }
+
   if (dry) {
     console.log("\n[dry] 未写入墨墨");
     return;
@@ -136,17 +155,63 @@ async function cmdPush(key: string, type: CardType, deckId: string, chapterId: s
   db.close();
 }
 
+async function cmdRetouch(key: string, type: CardType, deckId: string, dry: boolean) {
+  if (!markjiToken()) throw new Error("没有 MARKJI_TOKEN，先配置 .env");
+  const db = openDb();
+  const { row, content } = renderCard(db, key, type);
+
+  const record = db
+    .prepare(
+      `SELECT card_id FROM exports
+        WHERE user_word_id = ? AND deck_id = ? AND card_type = ? AND status = 'done'`,
+    )
+    .get(row.id, deckId, type) as { card_id: string } | undefined;
+  if (!record?.card_id) throw new Error("没有找到已推送的卡片记录，先跑 push");
+
+  const before = await getCard(deckId, record.card_id);
+  if (before.content === content) {
+    console.log("\n卡片内容与重新生成的一致，无需更新。");
+    db.close();
+    return;
+  }
+
+  console.log("\n=== 原内容 ===");
+  console.log(before.content);
+
+  if (dry) {
+    console.log("\n[dry] 未更新墨墨");
+    db.close();
+    return;
+  }
+
+  const after = await updateCard(deckId, record.card_id, content);
+  console.log("\n=== 已更新 === card.id =", after.id);
+  db.close();
+}
+
 async function main() {
   const [mode, ...rest] = process.argv.slice(2);
+  const positional = rest.filter((a) => !a.startsWith("--"));
+
   if (mode === "list") return cmdList();
+
   if (mode === "push") {
-    const [key, type, deckId, chapterId] = rest.filter((a) => !a.startsWith("--"));
+    const [key, type, deckId, chapterId] = positional;
     if (!key || !type || !deckId || !chapterId) {
-      throw new Error("用法：push <词> <qa|cloze|choice> <deckId> <chapterId> [--dry]");
+      throw new Error("用法：push <词> <qa|cloze|choice> <deckId> <chapterId> [--dry] [--force]");
     }
     return cmdPush(key, type as CardType, deckId, chapterId, rest.includes("--dry"));
   }
-  throw new Error("用法：list | push ...");
+
+  if (mode === "retouch") {
+    const [key, type, deckId] = positional;
+    if (!key || !type || !deckId) {
+      throw new Error("用法：retouch <词> <qa|cloze|choice> <deckId> [--dry]");
+    }
+    return cmdRetouch(key, type as CardType, deckId, rest.includes("--dry"));
+  }
+
+  throw new Error("用法：list | push ... | retouch ...");
 }
 
 main().catch((e) => {

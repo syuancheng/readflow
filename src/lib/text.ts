@@ -21,3 +21,22 @@ export function translationLines(raw: string | null | undefined): string[] {
     .map((l) => l.trim())
     .filter(Boolean);
 }
+
+/**
+ * 统一音标写法。
+ *
+ * ECDICT 的音标是混着来的：绝大多数条目用 `'glisn` 这种 ASCII 重音记号，
+ * 少数条目（多为变形词）用真正的 IPA `ˈglɪsənd`。直接塞进 `/.../` 里，
+ * 前者会显示成 `/'glisn/`，看起来像坏了。
+ *
+ * 这里只做符号替换，不猜音值：' -> ˈ、, -> ˌ（ECDICT 用逗号表示次重音）。
+ * 已经带 IPA 重音符号的不会被改到。
+ */
+export function normalizePhonetic(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .replace(/'/g, "ˈ")
+    .replace(/,/g, "ˌ")
+    .replace(/\s+/g, " ")
+    .trim();
+}

@@ -14,6 +14,7 @@
     "scripts/verify-export.ts",
     "scripts/verify-markji.ts",
     "src/lib/**/*.ts",
-    "scripts/push-one.ts"
+    "scripts/push-one.ts",
+    "scripts/backfill-lemma.ts"
   ]
 }

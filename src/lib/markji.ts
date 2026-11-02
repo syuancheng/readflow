@@ -155,3 +155,42 @@ export async function createCard(
   if (!data?.card?.id) throw new MarkjiError("墨墨没有返回卡片 id", 502);
   return data.card;
 }
+
+/**
+ * 更新一张卡片的内容。
+ *
+ * 与 create 不同，这个接口**按文档工作**：请求体里的 deck_id / card_id 要一起传，
+ * 且 content 是**全量替换**而不是补丁 —— 所以改卡前必须先取回原内容，
+ * 在原有语法骨架上改，否则会把整张卡冲掉。
+ */
+export async function updateCard(
+  deckId: string,
+  cardId: string,
+  content: string,
+): Promise<MarkjiCard> {
+  const data = await serialize(() =>
+    call<{ card: MarkjiCard }>(
+      `/decks/${encodeURIComponent(deckId)}/cards/${encodeURIComponent(cardId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          deck_id: deckId,
+          card_id: cardId,
+          card: { content, grammar_version: 3 },
+        }),
+      },
+    ),
+  );
+
+  if (!data?.card?.id) throw new MarkjiError("墨墨没有返回卡片 id", 502);
+  return data.card;
+}
+
+/** 读回一张卡片（改卡前先取原内容，避免全量替换时丢掉别的部分） */
+export async function getCard(deckId: string, cardId: string): Promise<MarkjiCard> {
+  const data = await call<{ card: MarkjiCard }>(
+    `/decks/${encodeURIComponent(deckId)}/cards/${encodeURIComponent(cardId)}`,
+  );
+  if (!data?.card) throw new MarkjiError("墨墨没有返回卡片内容", 502);
+  return data.card;
+}
