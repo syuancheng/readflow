@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
+import { normalizeTranslation } from "@/lib/text";
 
 type Para = { id: string; idx: number; content: string };
 export type ReaderPara = Para;
@@ -538,7 +539,7 @@ function DictView({
 
       {entry.translation && (
         <p className="text-[15px] font-medium leading-relaxed text-ink mb-2 whitespace-pre-line">
-          {entry.translation}
+          {normalizeTranslation(entry.translation)}
         </p>
       )}
 
@@ -548,7 +549,7 @@ function DictView({
             英文释义
           </summary>
           <p className="text-[13px] leading-relaxed text-ink-soft mt-1.5 whitespace-pre-line">
-            {entry.definition}
+            {normalizeTranslation(entry.definition)}
           </p>
         </details>
       )}

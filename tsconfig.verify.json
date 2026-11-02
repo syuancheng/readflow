@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": false,
+    "outDir": ".verify",
+    "rootDir": "."
+  },
+  "include": [
+    "scripts/verify-export.ts",
+    "scripts/verify-markji.ts",
+    "src/lib/**/*.ts"
+  ]
+}

@@ -3,8 +3,8 @@
 > 面向要改这个仓库的人（包括三个月后的自己）。
 > 产品定位与背景见 [`../README.md`](../README.md)。
 
-**版本**：MVP（P0–P3 完成，P4 未开始）
-**代码规模**：`src/` + `scripts/` 约 3.4k 行（TypeScript / TSX / CSS）
+**版本**：MVP（P0–P4 完成，全链路可用）
+**代码规模**：`src/` + `scripts/` 约 4.5k 行（TypeScript / TSX / CSS）
 **最后核对的运行环境**：Node 24.x，Next.js 16.4.3，React 19.3.0
 
 ---
@@ -21,7 +21,7 @@
 8. [关键取舍与论证](#8-关键取舍与论证)
 9. [踩坑记录](#9-踩坑记录)
 10. [Readlang 逆向结论](#10-readlang-逆向结论)
-11. [P4 设计草案：导出墨墨记忆卡](#11-p4-设计草案导出墨墨记忆卡)
+11. [链路六：导出墨墨记忆卡](#11-链路六导出墨墨记忆卡)
 12. [验证方法](#12-验证方法)
 13. [代码地图与改动指引](#13-代码地图与改动指引)
 
@@ -76,7 +76,7 @@ texts ──1:N──> paragraphs
         │
 user_words ──1:N──> contexts ──> (text_id, paragraph_id, 位置, quote, prefix, suffix)
   │
-  └──1:N──> exports（P4 用，已建表未使用）
+  └──1:N──> exports（导出幂等记录：word + deck + card_type 唯一）
 ```
 
 ### 2.1 表定义
@@ -87,7 +87,8 @@ user_words ──1:N──> contexts ──> (text_id, paragraph_id, 位置, quo
 | `paragraphs` | `id`(uuid), `text_id`, `idx`, `content` | **锚定基准**。索引 `(text_id, idx)` |
 | `user_words` | `id`(uuid), `user_id`, `lemma`, `display_form`, `pos`, `phonetic`, `translation`, `note`, `created_at` | 唯一索引 `(user_id, lemma)` —— 一个词只存一行 |
 | `contexts` | `id`, `user_word_id`, `text_id`, `paragraph_id`, `start`, `end`, `quote`, `prefix`, `suffix`, `ai_gloss`, `created_at` | 每次收词一条，**刻意不去重** |
-| `exports` | `id`, `user_word_id`, `deck_id`, `chapter_id`, `card_id`, `status`, `error`, `pushed_at` | 唯一索引 `(user_word_id, deck_id)`，用于幂等（P4） |
+| `exports` | `id`, `user_word_id`, `deck_id`, `chapter_id`, `card_id`, `card_type`, `status`, `error`, `pushed_at` | 唯一索引 `(user_word_id, deck_id, card_type)`，导出幂等的物理保证（11.5） |
+| `settings` | `key`, `value`, `updated_at` | 键值配置：记住上次选的牌组/章节 |
 
 ### 2.2 为什么 `contexts` 是独立表而不是 JSON 字段
 
@@ -552,52 +553,106 @@ Next dev 热重载会让多个模块实例几乎同时求值 `db/index.ts`。`CR
 | AI 解释 | SSE，可目标语言/母语 | 同 | 保留 monolingual |
 | 整句/短语 | Translate API | 直接 AI | 词典查不了短语 |
 | Ask AI | 独立输入框 | 独立输入框 | 可追问 |
-| 卡片类型 | 2 种（问答 + cloze） | 计划 3 种（+选择题，用墨墨语法） | 墨墨原生支持选择题，是超额能力 |
+| 卡片类型 | 2 种（问答 + cloze） | 3 种（+选择题） | 墨墨原生支持选择题，是超额能力 |
 
 关键判断：Readlang 不做本地词典是因为它要覆盖 119 种语言对，没有词典能全覆盖；我们只做中→英，77 万词条的 ECDICT 白捡，能省掉约 80% 的 AI 调用。**架构照抄，成本结构按自己的场景优化。**
 
 ---
 
-## 11. P4 设计草案：导出墨墨记忆卡
+## 11. 链路六：导出墨墨记忆卡
 
-尚未实现，但约束已经摸清，先把结论记下来。
+### 11.1 墨墨开放 API 的真实边界（推翻了原设计）
 
-### 11.1 墨墨开放 API 的硬约束
+最初的设计是「我们建章节，逐张塞卡」。实测发现这条路走不通 —— **开放 API 只能写卡片和媒体**：
 
-| 约束 | 对设计的影响 |
-|---|---|
-| 不能建/删**牌组**，只能建章节和卡片 | 牌组由用户在 App 内先建好，配置里存 deck_id |
-| **没有删除端点** | 必须幂等：先写本地 `exports` 记录再推，失败可重试 |
-| 每天最多创建 600 条 | 批量导出要排队 + 断点续传；超过则次日继续 |
-| 卡片内容是 Markji 语法文本 | 需要把「原句 + 挖空 + 释义」拼成它的语法 |
+| 想做的事 | 能不能做 | 后果 |
+|---|---|---|
+| 建 / 改 / 删 **牌组** | ❌ | 牌组必须在 App 或网页端手工建 |
+| 建 / 改 / 删 **章节** | ❌ | 章节也必须手工建 |
+| 删 **卡片** | ❌ | 推错的卡片只能在 App 里手删 |
+| 建卡片 | ✅ | 只能追加到已有章节 |
 
-### 11.2 卡片模板
+所以设计从「我们负责建结构」改成了「**用户选结构，我们只负责写**」：导出页做成「牌组下拉 → 章节下拉 → 选卡片类型 → 预览 → 写入」。
 
-| 卡片 | 正面 | 背面 | 墨墨语法 |
+另外两个实测坑（写错会直接 4xx）：
+
+- **创建卡片的请求体必须省略 `deck` / `chapter`**。文档标它们必填，但服务端按 24 位 ObjectId 校验，而开放 API 从不暴露 ObjectId → 传了必报 `not a valid ObjectId`。牌组和章节由 URL 路径决定。
+- **不要传 `order`**。它是相对整个章节的 0 基插入索引；往非空章节从 0 递增会把新卡全插到旧卡前面。省略即按提交顺序追加到末尾。
+
+### 11.2 三种卡片
+
+| 卡片 | 正面 | 背面 | 语法要点 |
 |---|---|---|---|
-| 看词猜义（= Passive） | 单词 + 音标 + 上下文句 | 中文释义 + 词性 | 问答卡，`---` 分隔正反面 |
-| 挖空填空（= Active） | 句中目标词挖空 + 释义提示 | 原词 | `[F#1#word]`（编号从 1 起） |
-| 选择题（额外） | 句中挖空 + 4 选项 | 答案 + 解析 | `[Choice##…]`，干扰项从 ECDICT 同词性词随机取 3 个 |
+| `qa` 看词猜义（≈ Passive） | 词 + 音标 + 出处 + 原句（词标蓝） | 释义（首行红、其余灰） | `[P#H1,center#…]` 标题 + `---` 答案线 |
+| `cloze` 挖空填空（≈ Active） | 原句挖空 + 释义提示 | 原词 + 释义 | 句中 `[F#1#word]` |
+| `choice` 选择题（Readlang 没有） | 原句挖空 + 4 个候选词 | 答案 + 释义 | `[Choice##` + `* `/`- ` 选项 + 独占一行的 `]` |
 
-> 注意：早前误记为 `{{c1::}}`，实际墨墨挖空语法是 `[F#编号#内容]`。
+三种都是**确定性拼装**：词、音标、释义、原句全部来自数据库，干扰项来自 ECDICT，**不经过 AI**。
 
-### 11.3 幂等与限速
+### 11.3 原句从哪来（别用 40 字符的前后文）
+
+`contexts` 只存了 `prefix/suffix` 各 40 字符 —— 长句会被截断成半句，卡片正面就废了。所以导出时回到 `paragraphs.content` 重新定位：
 
 ```
-exports(user_word_id, deck_id) 唯一索引  ← 天然幂等键
-status: pending → done / failed(+error)
-
-导出流程：
-  1. 选出目标词（全部 / 未推过的 / 某篇文章的）
-  2. 无章节则 create chapter，记 chapter_id
-  3. 逐词遍历：
-     - exports 已有 done → 跳过
-     - 每推一条 → 立即落库（不要批量到最后再落，中途失败会丢进度）
-     - 每 N 条 sleep，遵守 600/天
-  4. 返回 { ok, skipped, pushed, failed }
+resolveAnchor(段落原文, {start, end, quote, prefix, suffix})   ← 三级降级定位
+  → 命中：sentenceAround(段落原文, s, e)                       ← 按 . ! ? 向两侧扩成整句
+  → 未命中：这个词直接标失败，不生成卡（宁缺，不要做出一张引用了错句子的卡）
 ```
 
-`exports` 表已经建好但还没用——P4 直接接上即可。
+`sentenceAround` 同时返回目标词在句内的偏移，供模板精确地「把词包起来 / 替换成空格」——不能靠 `replace(word, ...)` 字符串替换，一个词在一句里出现两次就会替换错位置。
+
+### 11.4 卡片语法是最容易翻车的地方
+
+Markji 语法写错**不会报错**，只会静默渲染成一团乱码，而且卡片删不掉。所以做了两道闸：
+
+**第一道：`cardgen.ts` 里的 `lintCard()`（发送前）**
+
+- 有且只有一条 `---`（答案线）
+- 方括号配对（跳过 `\[` 转义）
+- 没有残留 `**` / ``` ``` ``` / HTML 标签
+- `[P#…]` / `[Choice#…]` / `[E##…]` 这类块级标签必须顶格
+
+**第二道：写库前人工看预览**
+
+`POST /api/export { dryRun: true }` 返回真正要发送的原始语法全文，页面用 `<pre>` 摊开。
+
+开发期间还有第三道：`npm run verify:cards` 会把生成的卡片写到 `/tmp/cards`，可以逐张过 `markji.py lint`（官方语法校验器）。实测 9 张全部通过。
+
+最容易踩的三个具体坑：
+
+1. **ECDICT 的释义用字面量 `\n`（反斜杠 + n）分隔多行**，不是真实换行。不还原会渲染出 `n. 夜\n[法] 夜` 这种东西 → `lib/text.ts` 的 `normalizeTranslation()`。
+2. **释义里有中括号**（`[医] 库`、`[法] 夜`），普通文字里的 `[` `]` 必须转义成 `\[` `\]`，否则提前闭合外层标签 → `esc()`。
+3. **干扰项不能纯随机**。77 万词条里随机抽会抽到 `piasters` / `batisse` 这种，选项一眼假。用 `frq`（COCA 词频排名）过滤出常用词，再按「同词性 + 长度 ±2」筛。
+
+### 11.5 幂等：不是防御性编程，是唯一的安全网
+
+墨墨没有删除接口，重复推送 = 往牌组里堆垃圾且无法清理。所以幂等做在数据库层，而不是靠调用方的 if：
+
+```
+exports 唯一索引 (user_word_id, deck_id, card_type)
+   ↓
+推送前：查出该牌组内所有 status=done 的键 → 命中即 skipped
+推送后：insert ... onConflictDoUpdate → done + card_id + pushed_at
+失败：  → failed + error（下次可重试，因为不是 done）
+```
+
+`card_type` 是后加的列 —— 老库（`exports` 只有 word+deck 唯一键）由 `db/index.ts` 的 `migrate()` 补列并重建索引，可重复执行。
+
+### 11.6 限速与配额
+
+```
+createCard() 内部串行闸门：writeChain.then(() => sleep(600ms) → fetch)
+```
+600ms 对应「10 秒 20 次」的硬上限（500ms 理论值留了余量）。另外按天计数封顶 600 条，超了就在结果里逐条标失败并提示明天继续。
+
+**串行而不是并发**是有意的：并发抢频控会得到 429，重试还会打乱顺序；串行虽然慢（3 张卡 ≈ 2 秒），但结果可预测。
+
+### 11.7 一个词的失败不应该拖垮整批
+
+错误分两类处理：
+
+- **5xx / 网络抖动** → 记 `failed`，继续下一个词（下次可重试）
+- **4xx（401 令牌失效、400 参数错）** → 立刻停止整批并返回错误。继续跑只会刷出一堆同样的失败记录，还白占配额。
 
 ---
 
@@ -611,20 +666,40 @@ status: pending → done / failed(+error)
 npx tsc --noEmit          # 必须零错误
 ```
 
-### 12.2 API 级回归（curl，注意绕代理）
+### 12.2 离线验证卡片（P4 之后新增）
+
+```bash
+npm run verify:cards      # 收词 → 生成三种卡片 → 语法自检 → 输出到 /tmp/cards
+npm run verify:markji     # 用自研客户端只读列牌组/章节，验证鉴权与信封解析
+```
+
+`verify:cards` 走的是真实的 DB 数据与真实模板，跑完可以再逐张过官方校验器：
+
+```bash
+python3 ~/.workbuddy/skills/markji/scripts/markji.py lint /tmp/cards/xxx-qa.txt
+```
+
+这样即使不启动 dev server、不写入墨墨，也能确认模板语法合法。
+
+### 12.3 API 级回归（curl，注意绕代理）
 
 ```bash
 curl -s --noproxy '*' "http://localhost:3000/api/dict?word=went"     # 期望 lemmaForm: "go"
 curl -s --noproxy '*' "http://localhost:3000/api/dict?word=bank"     # 期望多义项
 curl -s --noproxy '*' "http://localhost:3000/api/dict?word=river%20bank"  # 期望 entry: null
 curl -s --noproxy '*' "http://localhost:3000/api/explain?word=bank&context=..."  # 无 key 时应返回提示文案
-curl -s --noproxy '*' -X POST http://localhost:3000/api/words -H 'content-type: application/json' -d '{...}'
-for p in / /words /stats /texts/<id>; do curl -s -o /dev/null -w "$p %{http_code}\n" --noproxy '*' "http://localhost:3000$p"; done
+curl -s --noproxy '*' "http://localhost:3000/api/export"             # 导出状态：tokenReady / 各类计数
+curl -s --noproxy '*' "http://localhost:3000/api/markji/decks"       # 牌组列表（token 有效时）
+curl -s --noproxy '*' -X POST http://localhost:3000/api/export \
+  -H 'content-type: application/json' \
+  -d '{"types":["qa","cloze","choice"],"dryRun":true}'               # 只看卡片原文，不写入
+for p in / /words /export /stats /texts/<id>; do curl -s -o /dev/null -w "$p %{http_code}\n" --noproxy '*' "http://localhost:3000$p"; done
 ```
 
 收词幂等的验证：同一个词 POST 两次，然后查 `user_words` 应为 1 行、`contexts` 应为 2 行。
+导出幂等的验证：同一批 dryRun 后再 dryRun，第二次 `summary.skipped` 应等于上次的 `pushed`。
 
-### 12.3 交互级（CDP 驱动真实 Chrome）
+### 12.4 交互级（CDP 驱动真实 Chrome）
 
 启动带调试端口的 Chrome，用 `Target.createTarget` 开页，`Runtime.evaluate` 里直接点 `.w` 元素、读弹层 DOM 尺寸：
 
@@ -635,6 +710,8 @@ for p in / /words /stats /texts/<id>; do curl -s -o /dev/null -w "$p %{http_code
 ```
 
 **经验**：小窗口下 `vh` 可能只有 469px，弹层 `maxHeight` 的实测值会跟着变——验证时要打印 `vh`、`top`、`clientHeight`，不要只看截图。
+
+**注意**：Next 16 dev 启动时会清理 `.next/dev/logs`，如果进程被限制删除（沙箱、只读盘），dev server 会直接退出，报 `safe-delete broker denied delete`。这种情况下要换个终端/不受限的环境启动，而不是改代码。
 
 ---
 
@@ -647,13 +724,16 @@ for p in / /words /stats /texts/<id>; do curl -s -o /dev/null -w "$p %{http_code
 | 加词典字段 | `lib/dict.ts` 的 SELECT + `DictEntry` + `Reader.tsx` 的 `DictView` | 三处同步 |
 | 改分词规则 | `lib/tokenize.ts` 的 `TOKEN_RE` | 必须保持确定性（不能依赖环境） |
 | 改切段规则 | `lib/split.ts` | ⚠️ 会让历史锚点失效，先读 3.2 |
+| 改卡片版式 | `lib/cardgen.ts` 的 `buildQaCard` / `buildClozeCard` / `buildChoiceCard` | 改完必须跑 `npm run verify:cards` + 官方 lint |
+| 加卡片类型 | `CARD_TYPES` 数组 + `buildCard()` 分支 + `exports.card_type` 取值 | 幂等键含 card_type，新类型天然不冲突 |
+| 换卡片样式参数 | `cardgen.ts` 顶部的 `GREY` / `RED` / `BLUE` | 颜色是不带 `#` 的 6 位小写十六进制 |
 | 加页面 | `src/app/<route>/page.tsx` + `duo-card` 等现成类 | 记得挂进 `layout.tsx` 与 `BottomNav.tsx` |
 | 改视觉 | `src/app/globals.css` 的 CSS 变量 + `.duo-*` 类 | 颜色改变量，别硬编码 |
-| 加表/字段 | `db/schema.ts` **和** `db/index.ts` 的 `SCHEMA_SQL` | 两处必须一致（8.4） |
-| 接导出 | 新建 `src/app/api/export/route.ts`，用 `exports` 表 | 先读 11.1 的约束 |
+| 加表/字段 | `db/schema.ts` **和** `db/index.ts` 的 `SCHEMA_SQL` + `migrate()` | 三处必须一致（8.4 / 11.5） |
 
-### 建议优先修的三件事
+### 建议优先修的四件事
 
 1. `lookup()` 的 lemma 判断（2.3 末尾）——影响词库去重质量。
 2. `explain` 的 SSE 帧格式（5.4）——现在能用但是「假 SSE」，早晚要接标准事件流。
 3. `db/index.ts` 的忙等退避（8.5）——阻塞事件循环，改动小、收益明确。
+4. 导出改成后台任务（11.6）——现在是同步串行，词一多请求就长；应该有 job 表 + 进度轮询。

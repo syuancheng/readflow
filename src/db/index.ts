@@ -105,11 +105,19 @@ CREATE TABLE IF NOT EXISTS exports (
   deck_id TEXT NOT NULL,
   chapter_id TEXT,
   card_id TEXT,
+  card_type TEXT NOT NULL DEFAULT 'qa',
   status TEXT NOT NULL DEFAULT 'pending',
   error TEXT,
   pushed_at INTEGER
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_exports_word_deck ON exports(user_word_id, deck_id);
+-- 唯一索引不写在这里：老库的 exports 还没有 card_type 列，
+-- 要先 ALTER 加列再建索引，统一放到下面的 migrate() 里做。
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 let lastError: unknown;
@@ -129,6 +137,28 @@ for (let attempt = 0; attempt < 5; attempt++) {
   }
 }
 if (lastError) throw lastError;
+
+/**
+ * 轻量迁移：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，
+ * 而 exports 早期版本没有 card_type（唯一键是 word+deck）。
+ * 这一步把旧库升到「word+deck+card_type」的唯一键，可以重复执行。
+ */
+function migrate(): void {
+  const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "card_type")) {
+    sqlite.exec("ALTER TABLE exports ADD COLUMN card_type TEXT NOT NULL DEFAULT 'qa'");
+  }
+  sqlite.exec("DROP INDEX IF EXISTS uq_exports_word_deck");
+  sqlite.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_exports_word_deck_type ON exports(user_word_id, deck_id, card_type)",
+  );
+}
+
+try {
+  migrate();
+} catch {
+  // 迁移失败不应该让整个应用起不来：导出功能会自己报错，其余功能不受影响
+}
 
 export const db = drizzle(sqlite, { schema });
 export { sqlite, dbPath };

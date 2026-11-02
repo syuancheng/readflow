@@ -50,7 +50,98 @@ export type DictEntry = {
 };
 
 /**
+ * 取若干个「同词性、长度相近、且常用」的干扰项，供选择题卡片使用。
+ *
+ * 两个坑：
+ *   1. ECDICT 的 `pos` 列基本都是空的，词性其实写在释义开头（"n. 银行…"），
+ *      所以按释义前缀过滤。直接查不到词性时，退一步用原形的词性。
+ *   2. 不能纯随机 —— 77 万词条里随机抽会抽到 piasters / batisse 这种，
+ *      选项一眼假，题目就废了。用 frq（COCA 词频排名）卡住常用词。
+ */
+export function distractors(opts: {
+  translation: string | null;
+  word: string;
+  lemma?: string;
+  count?: number;
+}): string[] {
+  const db = getDictDb();
+  const { word, lemma, count = 3 } = opts;
+
+  let posTag = derivePos(opts.translation);
+
+  // 直接查不到词性（如 "下雨（rain的过去式）"）就用原形的释义推
+  if (!posTag && lemma && lemma.toLowerCase() !== word.toLowerCase()) {
+    const row = db
+      .prepare("SELECT translation FROM ecdict WHERE word = ? COLLATE NOCASE")
+      .get(lemma) as { translation: string | null } | undefined;
+    posTag = derivePos(row?.translation ?? null);
+  }
+
+  const len = word.length;
+  const lo = Math.max(3, len - 2);
+  const hi = len + 2;
+
+  // 常用词优先：frq 是 COCA 排名，数字越小越常用。抽 120 个再挑。
+  const posClause = posTag ? "AND translation LIKE ?" : "";
+  const params: unknown[] = [lo, hi, 30000];
+  if (posTag) params.push(`${posTag}. %`);
+
+  const rows = db
+    .prepare(
+      `SELECT word FROM ecdict
+       WHERE length(word) BETWEEN ? AND ?
+         AND frq > 0 AND frq < ?
+         AND word GLOB '[a-z]*'
+         AND word NOT LIKE '% %'
+         AND translation IS NOT NULL
+         ${posClause}
+       ORDER BY random() LIMIT 120`,
+    )
+    .all(...params) as { word: string }[];
+
+  const banned = new Set([word.toLowerCase(), (lemma ?? "").toLowerCase()]);
+  const out: string[] = [];
+  for (const r of rows) {
+    const w = r.word.toLowerCase();
+    if (banned.has(w) || out.includes(w)) continue;
+    out.push(w);
+    if (out.length >= count) break;
+  }
+
+  // 同词性常用词不够（生僻词/短语）时放宽词频，但仍然是常用词
+  if (out.length < count) {
+    const fallback = db
+      .prepare(
+        `SELECT word FROM ecdict
+         WHERE length(word) BETWEEN ? AND ?
+           AND frq > 0 AND frq < 30000
+           AND word GLOB '[a-z]*'
+           AND word NOT LIKE '% %'
+         ORDER BY random() LIMIT 120`,
+      )
+      .all(lo, hi) as { word: string }[];
+
+    for (const r of fallback) {
+      const w = r.word.toLowerCase();
+      if (banned.has(w) || out.includes(w)) continue;
+      out.push(w);
+      if (out.length >= count) break;
+    }
+  }
+
+  return out;
+}
+
+/** 从中文释义里抠出词性标记：`n. 银行` → `n`；`vt. 放弃` → `vt` */
+export function derivePos(translation: string | null | undefined): string | null {
+  if (!translation) return null;
+  const m = translation.trim().match(/^([a-z]{1,5})\./i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
  * 查词典。先直接查词，查不到就做词形还原再查。
+ *
  * 例如查 "went" -> 先查 went（有结果，但 translation 是 "go的过去式"）
  * -> 同时用 exchange 还原到 go，再查 go，返回完整释义。
  */

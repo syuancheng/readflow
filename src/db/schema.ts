@@ -69,6 +69,13 @@ export const contexts = sqliteTable(
   ],
 );
 
+/**
+ * 导出去重键。
+ *
+ * 墨墨开放 API 没有删除端点，写进去的卡片只能在 App 端手删 ——
+ * 所以「同一个词 + 同一个牌组 + 同一种卡片」必须只能成功推一次，
+ * 这个唯一索引就是幂等的物理保证（不是靠代码里的 if 判断）。
+ */
 export const exports = sqliteTable(
   "exports",
   {
@@ -79,14 +86,24 @@ export const exports = sqliteTable(
     deckId: text("deck_id").notNull(),
     chapterId: text("chapter_id"),
     cardId: text("card_id"),
+    /** qa=看词猜义 | cloze=挖空填空 | choice=选择题 */
+    cardType: text("card_type").notNull().default("qa"),
     status: text("status").notNull().default("pending"), // pending | done | failed
     error: text("error"),
     pushedAt: integer("pushed_at"),
   },
-  (t) => [uniqueIndex("uq_exports_word_deck").on(t.userWordId, t.deckId)],
+  (t) => [uniqueIndex("uq_exports_word_deck_type").on(t.userWordId, t.deckId, t.cardType)],
 );
+
+/** 键值配置：当前只存墨墨导出的目标牌组 / 章节，将来放任何单值设置 */
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
 
 export type Text = typeof texts.$inferSelect;
 export type Paragraph = typeof paragraphs.$inferSelect;
 export type UserWord = typeof userWords.$inferSelect;
 export type Context = typeof contexts.$inferSelect;
+export type ExportRow = typeof exports.$inferSelect;

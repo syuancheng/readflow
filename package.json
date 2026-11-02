@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "import:ecdict": "node scripts/import-ecdict.mjs"
+    "import:ecdict": "node scripts/import-ecdict.mjs",
+    "verify:cards": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-export.js",
+    "verify:markji": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-markji.js"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

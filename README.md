@@ -4,7 +4,7 @@
 
 一个给中文母语者的英文阅读器：上传文章 → 边读边点词查义（词典 + AI 结合上下文）→ 生词带着原句收进词库 → 之后导出到墨墨记忆卡复习。
 
-> **状态**：MVP 已跑通 P0–P3（能读、能查、能收词、有词库和战绩页）。P4「导出墨墨记忆卡」尚未实现。
+> **状态**：MVP 全链路跑通 P0–P4（能读、能查、能收词、能导出到墨墨记忆卡）。
 > 技术实现细节见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ---
@@ -89,7 +89,7 @@ Lexreader 把这个流程压成一条链，只做三个动作：
 | **词库页** | 按时间倒序、每词展示最多 3 条原句 + 来源文章、可删词 | ✅ |
 | **战绩页** | 收集总数 / 连续天数 / 文本数、14 天柱状图、最近收的词、书架 | ✅ |
 | **游戏化 UI** | 多邻国风格：粗底边实体按钮、大圆角、进度条 + 终点旗标、`+1 词` 飘字、底部导航 | ✅ |
-| **导出墨墨** | 建章节、多类型卡片（问答 / 挖空 / 选择）、幂等、限速 | ⬜ P4 |
+| **导出墨墨** | 三种卡片（看词猜义 / 挖空 / 选择）、牌组章节选择器、语法预览、幂等去重、限速与日配额 | ✅ |
 
 ---
 
@@ -113,11 +113,19 @@ npm run import:ecdict
 # 4. 配置 AI 释义（可选；不配则 AI 层返回提示文案，其余功能正常）
 export DEEPSEEK_API_KEY=sk-xxxxxxxx
 
-# 5. 启动
+# 5. 配置墨墨开放 API 令牌（可选；不配则导出页只提示，其余功能正常）
+#    墨墨 App → 我的 → 更多设置 → 实验功能 → 开放 API
+export MARKJI_TOKEN=xxxxxxxx
+
+# 6. 启动
 npm run dev
 ```
 
-打开 <http://localhost:3000>：粘贴一段英文 → 开始阅读 → 点任意单词。
+打开 <http://localhost:3000>：粘贴一段英文 → 开始阅读 → 点任意单词 → 收进词库 → 去「导出」页推到墨墨。
+
+> **导出前请注意**：墨墨开放 API 只能写卡片，**不能建牌组、也不能建章节，更没有删除接口**。
+> 所以要先在墨墨 App 或网页端把牌组和章节建好，卡片推错了只能在 App 里手删。
+> 界面上的「预览」会把真正要发送的原始语法摊开给你看，确认后再点写入。
 
 > **代理提示**：若本机设置了 `http_proxy`，`localhost` 请求可能被代理拦截（表现为页面 502、脚本连不上）。用 `NO_PROXY=localhost,127.0.0.1` 或 `curl --noproxy '*'` 绕过。
 
@@ -149,6 +157,7 @@ lexreader/
 │   │   ├── globals.css           多邻国设计系统（色板、按钮、进度条、弹层）
 │   │   ├── texts/[id]/page.tsx   阅读页（SSR 查出段落 + 已收词）
 │   │   ├── words/page.tsx        词库页
+│   │   ├── export/page.tsx       导出页：选牌组/章节、选卡片类型、预览、写入
 │   │   ├── stats/page.tsx        战绩页
 │   │   └── api/
 │   │       ├── texts/route.ts        GET 列表 / POST 导入（粘贴·文件·URL）
@@ -156,24 +165,33 @@ lexreader/
 │   │       ├── words/route.ts        GET 列表 / POST 收词
 │   │       ├── words/[id]/route.ts   DELETE 删词或删单条 context
 │   │       ├── dict/route.ts         GET 词典查询（含词形还原）
-│   │       └── explain/route.ts      GET AI 流式释义
+│   │       ├── explain/route.ts      GET AI 流式释义
+│   │       ├── export/route.ts       GET 导出状态 / POST 生成并写入卡片
+│   │       └── markji/decks/route.ts GET 牌组 / 章节列表（服务端代理，token 不出后端）
 │   ├── components/
 │   │   ├── Reader.tsx            核心：分词渲染 + 命中 + 三层释义弹层（575 行）
 │   │   ├── ReaderShell.tsx       进度条 + 阅读卡片外壳
+│   │   ├── ExportPanel.tsx       导出交互：牌组章节选择、类型勾选、预览与结果
 │   │   ├── DuoProgress.tsx       多邻国式进度条
-│   │   ├── BottomNav.tsx         底部三 tab 导航
+│   │   ├── BottomNav.tsx         底部四 tab 导航
 │   │   └── ImportForm.tsx        三种导入方式
 │   ├── db/
 │   │   ├── schema.ts             Drizzle 表定义
-│   │   └── index.ts              连接单例 + WAL + 建表（带退避重试）
+│   │   └── index.ts              连接单例 + WAL + 建表 + 轻量迁移（带退避重试）
 │   └── lib/
 │       ├── tokenize.ts           确定性分词 + W3C 式锚点（build/resolve）
-│       ├── split.ts              切段 + 词数统计
+│       ├── split.ts              切段、词数统计、按句截取
 │       ├── readability.ts        URL → 正文段落
-│       ├── dict.ts               ECDICT 查询 + lemma 反查
+│       ├── dict.ts               ECDICT 查询 + lemma 反查 + 选择题干扰项
 │       ├── ai.ts                 DeepSeek prompt 与流式生成
+│       ├── cardgen.ts            Markji 卡片模板（三种）+ 发送前语法自检
+│       ├── markji.ts             墨墨开放 API 客户端（读牌组/章节、写卡片、限速）
+│       ├── text.ts               释义清洗（ECDICT 的字面量 `\n` 还原）
 │       └── stats.ts              按天聚合统计
-├── scripts/import-ecdict.mjs     CSV → SQLite 批量导入
+├── scripts/
+│   ├── import-ecdict.mjs         CSV → SQLite 批量导入
+│   ├── verify-export.ts          离线验证：收词 → 生成卡片 → 语法自检
+│   └── verify-markji.ts          只读联调：用自研客户端列牌组/章节
 ├── docs/ARCHITECTURE.md          技术实现文档
 └── data/                         本地数据（已 gitignore）
     ├── lexreader.db              用户数据
@@ -229,6 +247,9 @@ lexreader/
 | `GET` | `/api/words` | 词库列表（`?textId=` 过滤某篇文章） |
 | `POST` | `/api/words` | 收词：写 `user_words`（按 lemma upsert）+ `contexts` |
 | `DELETE` | `/api/words/{id}` | 删词；带 `?contextId=` 时只删单条上下文 |
+| `GET` | `/api/export` | 导出状态：token 是否就绪、目标牌组/章节、各类已推数量、今日已推 |
+| `POST` | `/api/export` | 生成并写入卡片；`{deckId, chapterId, types, dryRun}`，`dryRun` 只返回卡片原文 |
+| `GET` | `/api/markji/decks` | 牌组列表；带 `?deckId=` 返回该牌组的章节 |
 
 ---
 
@@ -236,7 +257,7 @@ lexreader/
 
 - 用户数据：`data/lexreader.db`（SQLite，WAL 模式）。**不入库**，备份直接拷文件。
 - 词典：`data/dict/ecdict.db` + `ecdict.csv`，**不入库**（94MB / 63MB），由 `scripts/import-ecdict.mjs` 重新生成。
-- AI key：只读服务端环境变量 `DEEPSEEK_API_KEY`，不写前端、不进仓库。参考 `.env.example`。
+- AI key 只读服务端环境变量 `DEEPSEEK_API_KEY`，墨墨令牌同理 `MARKJI_TOKEN`，两者都不写前端、不进仓库。参考 `.env.example`。
 - 单机模式下所有记录挂 `user_id = 'local'`；将来加登录只需把常量换成真实用户 id，表结构不动。
 
 ---
@@ -249,15 +270,16 @@ lexreader/
 | P1 | 阅读器：分词、点击命中、拖选短语、锚点 | ✅ |
 | P2 | 三层释义：ECDICT + AI 流式 + 追问 | ✅ |
 | P3 | 收词落库 + 词库页 + 已收词高亮 | ✅ |
-| **P4** | **导出墨墨记忆卡**：建章节、多类型卡片、幂等、限速 | ⬜ 下一步 |
+| **P4** | **导出墨墨记忆卡**：三种卡片、预览、幂等、限速、日配额 | ✅ |
 | P5 | 长文性能：段落虚拟滚动（阈值约 5000 字/块） | 待定 |
 | P6 | 阅读进度 / 学习日历 / streak 的轻量版 | 待定 |
 | P7 | 多用户 + 云端同步（表结构已预留） | 待定 |
 
-P4 的两个前置约束（已确认过墨墨开放 API）：
+P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节）：
 
-1. **不能建/删牌组**，只能建章节和卡片 → 牌组需用户在 App 内先建好。
-2. **没有删除端点** → 必须做幂等（`exports` 表记录「哪条词已推过」），否则重复导出会污染牌组且无法清理；另需遵守每天 600 条的上限。
+1. **不能建/删牌组，也不能建/删章节**，只能写卡片 → 牌组和章节由用户在 App 里先建好，我们只做「往里写」，页面上给出选择器。
+2. **没有删除端点** → 幂等必须是硬约束：`exports` 表上 `(user_word_id, deck_id, card_type)` 唯一，已推过的直接跳过。
+3. **频控 10 秒 20 次 + 每天 600 条** → 写请求串行 + 最小间隔 600ms，并且按天计数封顶。
 
 ---
 
@@ -269,7 +291,10 @@ P4 的两个前置约束（已确认过墨墨开放 API）：
 - **AI 层无缓存**：同一个词重复点会重复计费。Readlang 用内存 + 服务端缓存规避，我们还没做。
 - **中文按字切**：分词器对 CJK 只做单字切分，中文阅读需替换分词实现。
 - **移动端未适配**：弹层宽度固定 360px，小屏靠 `max-height` 兜底，没有专门的移动布局。
-- **无自动化测试**：目前靠 `tsc --noEmit` + 脚本化手工回归（详见技术文档的验证章节）。
+- **无自动化测试**：目前靠 `tsc --noEmit` + 两个验证脚本（`npm run verify:cards` / `npm run verify:markji`）手工回归。
+- **导出不可逆**：墨墨没有删除接口，推错的卡片只能在 App 里手删。幂等只保证「不重复推」，不保证「推对了」——所以写入前必须先看预览。
+- **一个词只取一条上下文**：导出时用该词最近一条 `contexts` 生成卡片，多语境暂不生成多张卡。
+- **导出是同步的**：一次请求最多处理 200 个词 × 3 种卡，全部串行发（600ms/次）。词多时要分几次点，没有后台任务队列。
 
 ---
 

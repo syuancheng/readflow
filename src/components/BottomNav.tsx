@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const ITEMS = [
   { href: "/", label: "阅读", icon: "📖" },
   { href: "/words", label: "词库", icon: "⚡" },
+  { href: "/export", label: "导出", icon: "📤" },
   { href: "/stats", label: "战绩", icon: "🏆" },
 ];
 

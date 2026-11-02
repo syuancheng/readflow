@@ -37,6 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/words" className="duo-nav-link">
                 我的词库
               </Link>
+              <Link href="/export" className="duo-nav-link">
+                导出墨墨
+              </Link>
               <Link href="/stats" className="duo-nav-link">
                 战绩
               </Link>

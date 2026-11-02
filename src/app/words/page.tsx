@@ -3,6 +3,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { userWords, contexts, texts, LOCAL_USER } from "@/db/schema";
 import { getStats } from "@/lib/stats";
+import { normalizeTranslation } from "@/lib/text";
 
 export const dynamic = "force-dynamic";
 
@@ -61,11 +62,16 @@ export default async function WordsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
-      <div className="mb-7">
-        <h1 className="text-[28px] font-extrabold tracking-tight mb-1.5">我的词库</h1>
-        <p className="text-[15px] text-ink-soft font-medium">
-          阅读时收下的词，都带着出现时的原句。
-        </p>
+      <div className="mb-7 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-[28px] font-extrabold tracking-tight mb-1.5">我的词库</h1>
+          <p className="text-[15px] text-ink-soft font-medium">
+            阅读时收下的词，都带着出现时的原句。
+          </p>
+        </div>
+        <Link href="/export" className="duo-btn duo-btn-primary duo-btn-sm shrink-0">
+          📤 导出到墨墨
+        </Link>
       </div>
 
       <div className="grid lg:grid-cols-[1fr_320px] gap-7 items-start">
@@ -113,7 +119,9 @@ export default async function WordsPage() {
                     <span className="duo-badge duo-badge-purple mb-1.5 inline-block">{w.pos}</span>
                   )}
 
-                  <p className="text-[14px] text-ink-soft font-medium mb-2">{w.translation}</p>
+                  <p className="text-[14px] text-ink-soft font-medium mb-2 whitespace-pre-line">
+                    {normalizeTranslation(w.translation)}
+                  </p>
 
                   {/* 上下文原句 */}
                   {w.contexts.length > 0 && (
