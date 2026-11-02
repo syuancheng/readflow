@@ -32,6 +32,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local data: user db (private) + dictionary (regenerable, ~150MB)
+/data/*.db
+/data/*.db-wal
+/data/*.db-shm
+/data/dict/
 
 # vercel
 .vercel
