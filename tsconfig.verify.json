@@ -8,11 +8,17 @@
     "strict": false,
     "noEmit": false,
     "outDir": ".verify",
-    "rootDir": "."
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
   },
+  "exclude": [
+    "src/lib/stats.ts"
+  ],
   "include": [
     "scripts/verify-export.ts",
     "scripts/verify-markji.ts",
+    "scripts/verify-stats.ts",
     "src/lib/**/*.ts",
     "scripts/push-one.ts",
     "scripts/backfill-lemma.ts"

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { texts, userWords, LOCAL_USER } from "@/db/schema";
 import { getStats } from "@/lib/stats";
+import HeatCalendar, { HeatLegend } from "@/components/HeatCalendar";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export default async function StatsPage() {
   const [stats, textRows, wordRows] = await Promise.all([
-    getStats(14),
+    getStats(14, 18),
     db
       .select()
       .from(texts)
@@ -26,13 +27,6 @@ export default async function StatsPage() {
 
   const maxBar = Math.max(1, ...stats.recent.map((r) => r.count));
 
-  // 连续收集天数
-  let streak = 0;
-  for (let i = stats.recent.length - 1; i >= 0; i--) {
-    if (stats.recent[i].count > 0) streak++;
-    else if (i !== stats.recent.length - 1) break;
-  }
-
   return (
     <div className="max-w-3xl mx-auto px-6 py-8">
       <div className="mb-7">
@@ -40,8 +34,8 @@ export default async function StatsPage() {
         <p className="text-[15px] text-ink-soft font-medium">看看你读了多少、记住了多少。</p>
       </div>
 
-      {/* 顶部三连卡 */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      {/* 顶部四连卡 */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <BigStat
           value={stats.savedCount}
           label="收集生词"
@@ -50,11 +44,18 @@ export default async function StatsPage() {
           bg="var(--duo-green-soft)"
         />
         <BigStat
-          value={streak}
+          value={stats.streakDays}
           label="连续天数"
           icon="🔥"
           color="var(--duo-orange-dark)"
           bg="var(--duo-orange-soft)"
+        />
+        <BigStat
+          value={stats.bestStreak}
+          label="最长连续"
+          icon="🏅"
+          color="var(--duo-purple-dark)"
+          bg="var(--duo-purple-soft)"
         />
         <BigStat
           value={stats.textCount}
@@ -63,6 +64,39 @@ export default async function StatsPage() {
           color="var(--duo-blue-dark)"
           bg="var(--duo-blue-soft)"
         />
+      </div>
+
+      {/* 学习日历 */}
+      <div className="duo-card p-6 mb-6">
+        <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+          <div className="duo-section-title">
+            <span style={{ color: "var(--duo-green)" }}>📅</span>
+            学习日历
+          </div>
+          <HeatLegend />
+        </div>
+
+        <HeatCalendar cells={stats.calendar} />
+
+        <p className="text-[13px] font-medium text-ink-faint mt-4 pt-4 border-t border-[var(--duo-border)]">
+          {stats.activeDays === 0 ? (
+            <>还没有收过词 —— 日历上点亮的每一格，都是你读过的一天</>
+          ) : (
+            <>
+              共 <b style={{ color: "var(--duo-green-dark)" }}>{stats.activeDays}</b>{" "}
+              天有收词记录
+              {stats.bestStreak > 1 && (
+                <>
+                  ，最长连续{" "}
+                  <b style={{ color: "var(--duo-purple-dark)" }}>
+                    {stats.bestStreak}
+                  </b>{" "}
+                  天
+                </>
+              )}
+            </>
+          )}
+        </p>
       </div>
 
       {/* 14 天柱状图 */}

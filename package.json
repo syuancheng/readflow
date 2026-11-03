@@ -11,7 +11,8 @@
     "verify:cards": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-export.js",
     "verify:markji": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-markji.js",
     "push:one": "tsc -p tsconfig.verify.json && node .verify/scripts/push-one.js",
-    "backfill:lemma": "tsc -p tsconfig.verify.json && node .verify/scripts/backfill-lemma.js"
+    "backfill:lemma": "tsc -p tsconfig.verify.json && node .verify/scripts/backfill-lemma.js",
+    "verify:stats": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-stats.js"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

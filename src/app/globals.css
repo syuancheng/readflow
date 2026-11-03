@@ -27,6 +27,13 @@
   --duo-border: #e5e5e5;
   --duo-border-dark: #e5e5e5;
 
+  /* 学习日历热力图色阶：0 空 → 4 最热 */
+  --heat-0: #ededed;
+  --heat-1: #d7ffb8;
+  --heat-2: #a8e86a;
+  --heat-3: #7acb2e;
+  --heat-4: #58a700;
+
   /* 阅读器专用（保持衬线 + 高对比，不跟多邻国撞） */
   --reader-bg: #ffffff;
   --reader-ink: #1a1a1a;
