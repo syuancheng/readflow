@@ -46,7 +46,7 @@ export default async function TextPage({
   // 每日目标进度条已按用户要求移除
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-7">
+    <div className="max-w-[1440px] mx-auto px-6 py-7">
       <div className="mb-6">
         <Link href="/" className="duo-nav-link inline-block">
           ← 返回我的文本

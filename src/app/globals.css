@@ -784,6 +784,63 @@ body {
   filter: brightness(0.96);
 }
 
+/* ====== AI 释义 Markdown 排版 ====== */
+
+.rf-md-h {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--duo-ink);
+  margin: 10px 0 4px;
+}
+
+.rf-md-p {
+  margin: 6px 0;
+}
+
+.rf-md-list {
+  margin: 6px 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rf-md-ul {
+  list-style: disc;
+}
+
+.rf-md-ol {
+  list-style: decimal;
+}
+
+.rf-md-list li::marker {
+  color: var(--duo-ink-faint);
+  font-weight: 700;
+}
+
+.rf-md-quote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--duo-green);
+  background: var(--duo-green-soft);
+  border-radius: 0 8px 8px 0;
+  color: var(--duo-green-dark);
+  font-size: 13.5px;
+}
+
+.rf-md-quote p {
+  margin: 2px 0;
+}
+
+.rf-md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--duo-surface);
+  border: 1px solid var(--duo-border);
+  border-radius: 5px;
+  padding: 0 4px;
+}
+
 /* 正文当前批注锚点的高亮 */
 .w-anchor {
   background: var(--duo-green-soft);
