@@ -12,7 +12,8 @@
     "verify:markji": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-markji.js",
     "push:one": "tsc -p tsconfig.verify.json && node .verify/scripts/push-one.js",
     "backfill:lemma": "tsc -p tsconfig.verify.json && node .verify/scripts/backfill-lemma.js",
-    "verify:stats": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-stats.js"
+    "verify:stats": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-stats.js",
+    "bench": "node scripts/bench-reader.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
@@ -32,6 +33,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.11",
+    "playwright": "^1.64.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
