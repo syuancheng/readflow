@@ -645,9 +645,17 @@ body {
   background: var(--duo-green-soft);
 }
 
-/* 给底部导航让出空间 */
-body {
-  padding-bottom: 68px;
+/* 给底部导航让出空间（仅窄屏；桌面端底部导航隐藏，只用顶栏） */
+@media (max-width: 767px) {
+  body {
+    padding-bottom: 68px;
+  }
+}
+
+@media (min-width: 768px) {
+  .duo-bottom-nav {
+    display: none;
+  }
 }
 
 /* 手机端：顶栏变简洁 */
@@ -658,62 +666,88 @@ body {
 }
 
 
-/* ====== Readlang 对齐：内联译文气泡 / 段落定位 / 自动收词开关 ====== */
+/* ====== 黄金分割双栏：文章 61.8% + 右侧批注栏 38.2%（飞书/腾讯文档式）====== */
 
-/* 点词后的内联译文（固定定位，不挤占正文版式） */
-.word-bubble {
-  position: fixed;
-  z-index: 40;
-  background: var(--duo-bg);
-  border: 2px solid var(--duo-green);
-  border-radius: 12px;
-  box-shadow: 0 6px 18px rgba(60, 60, 60, 0.14);
-  padding: 10px 12px 8px;
-  animation: bubble-in 120ms ease;
+.reader-split {
+  display: grid;
+  grid-template-columns: minmax(0, 61.8fr) minmax(0, 38.2fr);
+  gap: 26px;
+  align-items: start;
 }
 
-@keyframes bubble-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(3px); }
-  to   { opacity: 1; }
+.reader-main {
+  min-width: 0;
 }
 
-.word-bubble-text {
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--duo-ink);
-  max-height: 4.5em;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+.reader-article-card {
+  padding: 36px 40px;
 }
 
-.word-bubble-actions {
+/* 批注栏：滚动文章时吸附在顶栏下方，内容超高时栏内自滚 */
+.reader-aside {
+  position: sticky;
+  top: 84px; /* 顶栏 h-16 = 64px + 20px 间距 */
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  min-width: 0;
+  scrollbar-width: thin;
+  padding-bottom: 4px;
+}
+
+.reader-aside::-webkit-scrollbar {
+  width: 6px;
+}
+
+.reader-aside::-webkit-scrollbar-thumb {
+  background: var(--duo-border);
+  border-radius: 999px;
+}
+
+.reader-aside-head {
   display: flex;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.word-bubble-btn {
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 4px;
-  border-radius: 6px;
-  background: var(--duo-surface);
-  color: var(--duo-ink-soft);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 100ms ease, color 100ms ease;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.word-bubble-btn:hover {
+.reader-aside-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--duo-ink);
+}
+
+/* 批注卡：铺满右栏宽度，常驻不再悬浮定位 */
+.reader-note {
+  width: 100%;
+}
+
+/* 正文当前批注锚点的高亮 */
+.w-anchor {
   background: var(--duo-green-soft);
-  color: var(--duo-green-dark);
+  box-shadow: inset 0 -2px 0 var(--duo-green);
+  border-radius: 3px;
+}
+
+/* 右栏空状态 */
+.reader-aside-empty {
+  border: 2px dashed var(--duo-border);
+  border-radius: 16px;
+  background: var(--duo-bg);
+  padding: 44px 24px;
+  text-align: center;
+}
+
+/* 窄屏回退：单栏，批注栏跟在文章下方 */
+@media (max-width: 1023px) {
+  .reader-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader-aside {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 /* 词库"跳到原文"后目标段落的短暂高亮 */

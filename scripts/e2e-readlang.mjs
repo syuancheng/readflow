@@ -1,14 +1,15 @@
 /**
- * Readlang 对齐改造的端到端验证。
+ * Readlang 对齐改造的端到端验证（批注栏版）。
  *
- * 用法：BASE=http://127.0.0.1:3103 node /tmp/inkwell-perf/e2e-readlang.mjs
+ * 用法：BASE=http://127.0.0.1:3103 node scripts/e2e-readlang.mjs
  *
  * 覆盖：
- *  A. 点词 → 内联译文气泡出现
+ *  A. 点词 → 右侧批注栏出现释义卡（黄金分割双栏）
  *  B. 自动收词开 → 点词即入库（API 计数 +1）
- *  C. 再点同一词 → 气泡收起且词被移除（delete on deselect）
- *  D. 自动收词关 → 只出气泡不入库
- *  E. 气泡「深入查看」→ 弹出完整词典卡
+ *  C. 再点同一词 → 批注卡收起且词被移除（delete on deselect）
+ *  D. 自动收词关 → 只出批注卡不入库，手动收词可用
+ *  E. 批注卡内含 AI 释义入口
+ *  E2. 拖选整句（起点在词中间）→ 吸附到完整词并出批注卡
  *  F. 词库页：状态筛选 / 星标 / 标记已掌握 / 搜索
  *  G. 词库「跳到原文」→ URL 带 ?p= 且目标段落高亮
  */
@@ -57,28 +58,34 @@ try {
 
   const before = await wordCount();
   const keepIds = new Set(before.words.map((w) => w.id));
+  const known = before.words.flatMap((w) => [w.displayForm.toLowerCase(), w.lemma.toLowerCase()]);
   console.log(`\n-- 起始词库 ${before.total} 词 --`);
 
-  // 找一个正经英文单词（长度 >= 5 且纯字母）来点
-  const target = await page.evaluate(() => {
+  // 找一个正经英文单词（长度 >= 5 且纯字母，且词库里还没有）来点
+  const target = await page.evaluate((knownArr) => {
+    const set = new Set(knownArr);
     const ws = [...document.querySelectorAll(".reading-body .w")];
-    const el = ws.find((e) => /^[A-Za-z]{5,}$/.test(e.textContent || ""));
+    const el = ws.find(
+      (e) =>
+        /^[A-Za-z]{5,}$/.test(e.textContent || "") &&
+        !set.has((e.textContent || "").toLowerCase()),
+    );
     if (!el) return null;
     el.setAttribute("data-e2e", "1");
     return el.textContent;
-  });
-  if (!target) throw new Error("找不到可点的单词");
+  }, known);
+  if (!target) throw new Error("找不到可点的单词（词库里已全部收录？）");
   console.log(`  点词目标: ${target}`);
 
   await page.locator('[data-e2e="1"]').scrollIntoViewIfNeeded();
   await page.locator('[data-e2e="1"]').click();
   await page.waitForTimeout(900);
 
-  const bubbleVisible = await page.locator(".word-bubble").isVisible().catch(() => false);
-  const bubbleText = bubbleVisible
-    ? (await page.locator(".word-bubble-text").innerText()).trim().slice(0, 60)
+  const noteVisible = await page.locator(".reader-note").isVisible().catch(() => false);
+  const noteTitle = noteVisible
+    ? (await page.locator(".reader-note p.font-extrabold").first().innerText()).trim().slice(0, 60)
     : "";
-  check("A 点词出现内联译文气泡", bubbleVisible, bubbleText);
+  check("A 点词在右侧批注栏出现释义卡", noteVisible, noteTitle);
 
   await page.waitForTimeout(600);
   const afterSave = await wordCount();
@@ -91,8 +98,8 @@ try {
   // ---------- C：再点一次 = 收起 + 删词 ----------
   await page.locator('[data-e2e="1"]').click();
   await page.waitForTimeout(900);
-  const bubbleGone = !(await page.locator(".word-bubble").isVisible().catch(() => false));
-  check("C1 再点一次气泡收起", bubbleGone);
+  const noteGone = !(await page.locator(".reader-note").isVisible().catch(() => false));
+  check("C1 再点一次批注卡收起", noteGone);
 
   const afterDeselect = await wordCount();
   check(
@@ -101,13 +108,18 @@ try {
     `${afterSave.total} → ${afterDeselect.total}`,
   );
 
-  // ---------- E：深入查看弹层 ----------
+  // ---------- E：批注卡自带词典与 AI 入口 ----------
   await page.locator('[data-e2e="1"]').click();
-  await page.waitForTimeout(800);
-  await page.locator('.word-bubble-btn[aria-label="深入查看"]').click();
   await page.waitForTimeout(900);
-  const popover = await page.locator(".duo-popover").isVisible().catch(() => false);
-  check("E 气泡「深入查看」打开完整词典卡", popover);
+  const aiBtn = await page.locator('.reader-note button:has-text("AI")').count();
+  const saveBtnEarly = await page
+    .locator('[aria-label="收进词库"], [aria-label="已在词库，点击移出"]')
+    .count();
+  check(
+    "E 批注卡内含 AI 释义入口与收词按钮",
+    aiBtn > 0 && saveBtnEarly > 0,
+    `AI按钮=${aiBtn} 收词按钮=${saveBtnEarly}`,
+  );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   // E 步骤（自动收词仍开着）会顺带收词，清掉，保证 D 阶段起点干净
@@ -121,26 +133,27 @@ try {
   check("D0 开关显示关闭态", pillText.includes("关"), pillText.replace(/\n/g, " "));
 
   const beforeOff = await wordCount();
-  const t2 = await page.evaluate((TARGET) => {
+  const t2 = await page.evaluate(([TARGET, knownArr]) => {
+    const set = new Set([...knownArr, String(TARGET).toLowerCase()]);
     const ws = [...document.querySelectorAll(".reading-body .w")];
     const el = ws.find(
-      (e) => /^[A-Za-z]{6,}$/.test(e.textContent || "") && e.textContent !== TARGET,
+      (e) =>
+        /^[A-Za-z]{6,}$/.test(e.textContent || "") &&
+        !set.has((e.textContent || "").toLowerCase()),
     );
     if (!el) return null;
     el.setAttribute("data-e2e", "2");
     return el.textContent;
-  }, target);
+  }, [target, known]);
   await page.locator('[data-e2e="2"]').scrollIntoViewIfNeeded();
   await page.locator('[data-e2e="2"]').click();
   await page.waitForTimeout(900);
-  const b2 = await page.locator(".word-bubble").isVisible().catch(() => false);
+  const b2 = await page.locator(".reader-note").isVisible().catch(() => false);
   const afterOff = await wordCount();
-  check("D1 关闭后仍显示译文气泡", b2, `点击 ${t2}`);
+  check("D1 关闭后仍显示批注卡", b2, `点击 ${t2}`);
   check("D2 关闭后不自动入库", afterOff.total === beforeOff.total, `${beforeOff.total} → ${afterOff.total}`);
 
-  // 在弹层里手动收词
-  await page.locator('.word-bubble-btn[aria-label="深入查看"]').click();
-  await page.waitForTimeout(800);
+  // 在批注卡里手动收词
   const saveBtn = page.locator('[aria-label="收进词库"]');
   if (await saveBtn.count()) {
     await saveBtn.click();
@@ -149,7 +162,7 @@ try {
     check("D3 弹层手动收词生效", afterManual.total === beforeOff.total + 1, `${beforeOff.total} → ${afterManual.total}`);
   } else {
     const labels = await page.evaluate(() =>
-      [...document.querySelectorAll(".duo-popover button")].map((b) => b.getAttribute("aria-label")),
+      [...document.querySelectorAll(".reader-note button")].map((b) => b.getAttribute("aria-label")),
     );
     check("D3 弹层手动收词生效", false, `找不到「收进词库」按钮，实际按钮: ${labels.join(",")}`);
   }
@@ -176,7 +189,7 @@ try {
     await page.mouse.up();
     await page.waitForTimeout(800);
     const sel = await page.evaluate(() => window.getSelection()?.toString());
-    const pop = await page.evaluate(() => !!document.querySelector(".duo-popover"));
+    const pop = await page.evaluate(() => !!document.querySelector(".reader-note"));
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
     return { sel, pop };

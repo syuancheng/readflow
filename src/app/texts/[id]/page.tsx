@@ -43,11 +43,10 @@ export default async function TextPage({
     .all()
     .filter((w) => w.status !== "deleted");
 
-  // 每日目标：按文本长度的 5% 算，最少 20 词
-  const goal = Math.max(20, Math.round(text.wordCount * 0.05));
+  // 每日目标进度条已按用户要求移除
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-7">
+    <div className="max-w-6xl mx-auto px-6 py-7">
       <div className="mb-6">
         <Link href="/" className="duo-nav-link inline-block">
           ← 返回我的文本
@@ -74,11 +73,10 @@ export default async function TextPage({
         paragraphs={rows.map((r) => ({ id: r.id, idx: r.idx, content: r.content }))}
         savedWords={savedWords}
         focusParaId={p}
-        goal={goal}
       />
 
       <p className="text-center text-[13px] font-bold text-ink-faint mt-6">
-        点单词自动收词 · 再点一次收起 · 点 ⤢ 深入查看 · 拖选查短语 · Esc 关闭
+        点单词或拖选一句话 · 释义显示在右侧批注栏 · 再点一次收起 · Esc 关闭
       </p>
     </div>
   );

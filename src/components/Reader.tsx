@@ -13,6 +13,10 @@ type Pick = {
   anchor: Anchor;
   x: number;
   y: number;
+  /** 来源：点词 or 拖选。点词才支持「再点一次收起」 */
+  source: "word" | "select";
+  /** 点词自动入库时，本次是新建词条 —— 收起批注时撤销（delete-on-deselect） */
+  justSaved?: boolean;
 };
 
 /** 把 DOM 里的 (node, offset) 换算成段落内的字符偏移 */
@@ -121,55 +125,55 @@ function buildSavedMap(words: SavedWordInfo[]): Map<string, SavedWordInfo> {
   return map;
 }
 
-type BubbleState = {
-  key: string;
-  displayForm: string;
-  translation: string | null;
-  loading: boolean;
-  saved: SavedWordInfo | null;
-  /** 这次气泡里的词是本次点击刚新建的——收起时可以安全撤销（Readlang 的 delete-on-deselect） */
-  justSaved: boolean;
-  rect: { left: number; right: number; top: number; bottom: number };
-  pick: Pick;
-};
+/** 正文里当前被批注的锚点高亮（飞书/腾讯文档式） */
+function markActiveAnchor(els: Iterable<Element>) {
+  document.querySelectorAll(".w-anchor").forEach((el) => el.classList.remove("w-anchor"));
+  for (const el of els) el.classList.add("w-anchor");
+}
 
 export default function Reader({
   textId,
   paragraphs,
   savedWords,
   focusParaId,
-  autoSave,
-  onCollect,
 }: {
   textId: string;
   paragraphs: Para[];
   savedWords: SavedWordInfo[];
   focusParaId?: string;
-  autoSave: boolean;
-  onCollect?: () => void;
 }) {
   const [pick, setPick] = useState<Pick | null>(null);
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
+  const [autoSave, setAutoSave] = useState(true);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 已收词表（含状态），键为小写 displayForm / lemma
   const [savedMap, setSavedMap] = useState<Map<string, SavedWordInfo>>(() =>
     buildSavedMap(savedWords),
   );
-  // 内联译文气泡（Readlang 式：点词出现，再点收起）
-  const [bubble, setBubble] = useState<BubbleState | null>(null);
 
+  useEffect(() => {
+    setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
+  }, []);
+
+  function toggleAutoSave() {
+    setAutoSave((v) => {
+      const next = !v;
+      localStorage.setItem("readflow.autoSave", next ? "1" : "0");
+      return next;
+    });
+  }
+
+  /** 关闭右侧批注：清空选区 + 去掉正文锚点高亮 */
   const close = useCallback(() => {
     setPick(null);
+    markActiveAnchor([]);
     window.getSelection()?.removeAllRanges();
   }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setBubble(null);
-        close();
-      }
+      if (e.key === "Escape") close();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -203,8 +207,7 @@ export default function Reader({
 
     const wordEl = (e.target as HTMLElement).closest<HTMLElement>(".w");
     if (!wordEl) {
-      setPick(null);
-      setBubble(null);
+      close();
       return;
     }
     const pEl = wordEl.closest<HTMLElement>("[data-pid]");
@@ -220,12 +223,10 @@ export default function Reader({
     const displayForm = wordEl.textContent ?? "";
     const key = displayForm.toLowerCase();
 
-    // Readlang 式 toggle：气泡已开着再点同一个词 = 收起
-    if (bubble && bubble.key === key) {
-      // delete-on-deselect：本次点击刚收的词，收起气泡即撤销入库。
-      // 只对本会话新建的词生效——老词可能已标记已掌握/星标，误删代价太大。
-      const victim = bubble.justSaved ? bubble.saved : null;
-      setBubble(null);
+    // 再点同一个词 = 收起批注（本次自动新建的词随之撤销，delete-on-deselect）
+    if (pick && pick.source === "word" && pick.anchor.quote.toLowerCase() === key) {
+      const victim = pick.justSaved ? savedMap.get(key) : null;
+      close();
       if (victim) void unsaveWord(victim, key);
       return;
     }
@@ -236,35 +237,22 @@ export default function Reader({
       anchor: buildAnchor(p.content, s, en),
       x: rect.left + rect.width / 2,
       y: rect.bottom,
+      source: "word",
     };
-    const rectInfo = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    markActiveAnchor([wordEl]);
+    setPick(pickData);
 
-    // 已收过的词：直接展示已存释义，不再请求
+    // 已收过的词：右栏直接展示已存释义，不再请求
     const saved = savedMap.get(key) ?? null;
-    if (saved && saved.status !== "deleted") {
-      setBubble({ key, displayForm, translation: saved.translation, loading: false, saved, justSaved: false, rect: rectInfo, pick: pickData });
-      return;
-    }
+    if (saved && saved.status !== "deleted") return;
+    if (!autoSave) return;
 
-    if (!autoSave) {
-      // 仅查询模式：没有释义可显示，提示去深入查看
-      setBubble({ key, displayForm, translation: null, loading: false, saved: null, justSaved: false, rect: rectInfo, pick: pickData });
-      return;
-    }
-
-    // 自动入库：先显示 loading，落库后填充释义
-    setBubble({ key, displayForm, translation: null, loading: true, saved: null, justSaved: false, rect: rectInfo, pick: pickData });
+    // 自动收词：落库后回填 justSaved（收起批注时可撤销）
     void saveWord(pickData).then((info) => {
-      setBubble((b) =>
-        b && b.key === key
-          ? {
-              ...b,
-              loading: false,
-              translation: info?.translation ?? null,
-              saved: info ?? b.saved,
-              justSaved: info?.created === true,
-            }
-          : b,
+      setPick((cur) =>
+        cur && cur.source === "word" && cur.anchor.quote.toLowerCase() === key
+          ? { ...cur, justSaved: info?.created === true }
+          : cur,
       );
     });
   }
@@ -290,22 +278,26 @@ export default function Reader({
     const end = offsetIn(pEl, range.endContainer, range.endOffset);
     if (end <= start) return;
 
-    // 定位用「鼠标落点」而不是选区矩形：整段/整句的选区可能比视口还高，
-    // 用选区 bottom 定位会把弹层甩到屏幕外。落点永远在当前视口里。
-    setBubble(null);
+    // 拖选：批注卡直接进右栏（不再用鼠标旁浮层）
+    const anchors = [...pEl.querySelectorAll<HTMLElement>(".w")].filter((el) => {
+      const s = Number(el.dataset.s);
+      const en = Number(el.dataset.e);
+      return en > start && s < end;
+    });
+    markActiveAnchor(anchors);
     setPick({
       paragraphId: pid,
       paragraphIdx: p.idx,
       anchor: buildAnchor(p.content, start, end),
       x: e.clientX,
       y: e.clientY,
+      source: "select",
     });
   }
 
   function celebrate(x: number, y: number, label: string) {
     const id = Date.now() + Math.random();
     setFloats((f) => [...f, { id, x, y, text: label }]);
-    onCollect?.();
     setTimeout(() => setFloats((f) => f.filter((i) => i.id !== id)), 1200);
   }
 
@@ -393,34 +385,59 @@ export default function Reader({
   }
 
   return (
-    <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
-      {paragraphs.map((p) => (
-        <Para key={p.id} p={p} savedLemmas={savedSet} />
-      ))}
+    <div className="reader-split">
+      {/* 左栏（61.8%）：正文 */}
+      <div className="reader-main">
+        <div className="duo-card reader-article-card">
+          <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
+            {paragraphs.map((p) => (
+              <Para key={p.id} p={p} savedLemmas={savedSet} />
+            ))}
+          </div>
+        </div>
+      </div>
 
-      {bubble && (
-        <WordBubble
-          bubble={bubble}
-          onExpand={() => {
-            setPick(bubble.pick);
-            setBubble(null);
-          }}
-          onClose={() => setBubble(null)}
-        />
-      )}
+      {/* 右栏（38.2%）：飞书/腾讯文档式批注栏，滚动时吸附在顶栏下方 */}
+      <aside className="reader-aside">
+        <div className="reader-aside-head">
+          <p className="reader-aside-title">批注</p>
+          <button
+            className="autosave-pill"
+            onClick={toggleAutoSave}
+            title="开启后，点词会自动收进词库；关闭则只看释义，手动点 + 收词"
+          >
+            <span
+              className="autosave-dot"
+              style={{ background: autoSave ? "var(--duo-green)" : "var(--duo-ink-faint)" }}
+            />
+            自动收词 {autoSave ? "开" : "关"}
+          </button>
+        </div>
 
-      {pick && (
-        <PickCard
-          pick={pick}
-          saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
-          onClose={close}
-          onSave={(aiGloss?: string) => saveWord(pick, aiGloss)}
-          onDelete={() => {
-            const info = savedMap.get(pick.anchor.quote.toLowerCase());
-            if (info) void removeWord(info.id);
-          }}
-        />
-      )}
+        {pick ? (
+          <PickCard
+            key={`${pick.paragraphId}:${pick.anchor.start}:${pick.anchor.end}:${pick.source}`}
+            pick={pick}
+            saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
+            onClose={close}
+            onSave={(aiGloss?: string) => void saveWord(pick, aiGloss)}
+            onDelete={() => {
+              const info = savedMap.get(pick.anchor.quote.toLowerCase());
+              if (info) void removeWord(info.id);
+            }}
+          />
+        ) : (
+          <div className="reader-aside-empty">
+            <p className="text-[16px] mb-1.5">📝</p>
+            <p className="text-[14px] font-bold text-ink-soft">还没有批注</p>
+            <p className="text-[13px] text-ink-faint mt-1 leading-relaxed">
+              点击文章中的单词，或拖选一句话，
+              <br />
+              释义和 AI 解释会显示在这里
+            </p>
+          </div>
+        )}
+      </aside>
 
       {floats.map((f) => (
         <div key={f.id} className="duo-float-up" style={{ left: f.x, top: f.y }}>
@@ -431,70 +448,7 @@ export default function Reader({
   );
 }
 
-// ====== WordBubble：内联译文气泡（对齐 Readlang 的点词体验）======
-
-function WordBubble({
-  bubble,
-  onExpand,
-  onClose,
-}: {
-  bubble: BubbleState;
-  onExpand: () => void;
-  onClose: () => void;
-}) {
-  const W = 300;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const centerX = (bubble.rect.left + bubble.rect.right) / 2;
-  const left = Math.min(Math.max(centerX, W / 2 + 12), vw - W / 2 - 12);
-
-  // 优先放词上方；上方空间不够就放下方
-  const SPACE = 120;
-  const placeBelow = bubble.rect.top < SPACE;
-  const top = placeBelow ? bubble.rect.bottom + 8 : undefined;
-  const bottom = placeBelow ? undefined : vh - bubble.rect.top + 8;
-
-  return (
-    <div
-      className="word-bubble"
-      style={{
-        left,
-        top,
-        bottom,
-        width: W,
-        transform: `translateX(-50%) ${placeBelow ? "" : "translateY(-4px)"}`,
-      }}
-      onClick={(e) => e.stopPropagation()}
-      onMouseUp={(e) => e.stopPropagation()}
-    >
-      <div className="word-bubble-text">
-        {bubble.loading
-          ? "查词典中…"
-          : bubble.translation
-            ? normalizeTranslation(bubble.translation)
-            : bubble.saved
-              ? "（已在词库）"
-              : "未收录 · 点⤴深入查看"}
-      </div>
-      <div className="word-bubble-actions">
-        <button className="word-bubble-btn" onClick={() => speak(bubble.displayForm)} title="发音" aria-label="发音">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
-            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-          </svg>
-        </button>
-        <button className="word-bubble-btn" onClick={onExpand} title="深入查看（词典 / AI / 收词）" aria-label="深入查看">
-          ⤢
-        </button>
-        <button className="word-bubble-btn" onClick={onClose} title="收起" aria-label="收起">
-          ✕
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ====== PickCard：三层递进释义面板 ======
+// ====== PickCard：批注卡（右栏常驻，三层递进释义）======
 
 type DictResult = {
   entry: {
@@ -534,23 +488,10 @@ function PickCard({
   onSave: (aiGloss?: string) => void;
   onDelete: () => void;
 }) {
-  const { anchor, paragraphIdx, x, y } = pick;
+  const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
   const quote = anchor.quote.trim();
   const titleSize = quote.length > 60 ? 15 : quote.length > 28 ? 16 : quote.length > 14 ? 18 : 20;
-  const W = 360;
-  const vw = typeof window === "undefined" ? 1200 : window.innerWidth;
-  const vh = typeof window === "undefined" ? 900 : window.innerHeight;
-  const left = Math.min(Math.max(x, W / 2 + 16), vw - W / 2 - 16);
-
-  // 垂直定位：优先放在落点下方，下方放不下翻到上方，
-  // 最后再把 top 夹进视口（弹层高度上限 H_MAX），保证永远不会被挤出屏幕。
-  const H_MAX = Math.min(560, Math.max(320, vh - 32));
-  const GAP = 14;
-  let top = y + GAP;
-  if (top + H_MAX > vh - 16) top = y - GAP - H_MAX;
-  top = Math.max(16, Math.min(top, vh - H_MAX - 16));
-  const maxHeight = Math.min(H_MAX, vh - top - 16);
 
   // 词典查询
   const [dict, setDict] = useState<DictResult | null>(null);
@@ -627,20 +568,11 @@ function PickCard({
 
   return (
     <div
-      className="fixed z-50 duo-anim-pop"
-      style={{
-        left,
-        top,
-        width: W,
-        maxHeight,
-        transform: "translateX(-50%)",
-        display: "flex",
-        flexDirection: "column",
-      }}
+      className="reader-note duo-anim-pop"
       onClick={(e) => e.stopPropagation()}
       onMouseUp={(e) => e.stopPropagation()}
     >
-      <div className="duo-popover" style={{ display: "flex", flexDirection: "column", minHeight: 0, maxHeight: "100%" }}>
+      <div className="duo-popover" style={{ display: "flex", flexDirection: "column" }}>
         {/* 标题区：白底 + 分隔线，不再用蓝色块 */}
         <div className="px-5 pt-4 pb-3" style={{ borderBottom: "2px solid var(--duo-border)" }}>
           <div className="flex items-start justify-between gap-2.5">
@@ -694,14 +626,11 @@ function PickCard({
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {/* 收词按钮：已收显示 ✓（点击移出词库），未收显示 + */}
+              {/* 收词按钮：已收显示 ✓（点击移出词库），未收显示 +；批注卡常驻右栏，收/移出后不关闭 */}
               {saved && saved.status !== "deleted" ? (
                 <button
                   className="duo-icon-btn duo-icon-btn-sm duo-icon-btn-saved"
-                  onClick={() => {
-                    onDelete();
-                    onClose();
-                  }}
+                  onClick={onDelete}
                   title="已在词库 · 点击移出"
                   aria-label="已在词库，点击移出"
                 >
@@ -710,10 +639,7 @@ function PickCard({
               ) : (
                 <button
                   className="duo-icon-btn duo-icon-btn-sm"
-                  onClick={() => {
-                    onSave(aiStatus === "done" ? aiText : undefined);
-                    onClose();
-                  }}
+                  onClick={() => onSave(aiStatus === "done" ? aiText : undefined)}
                   title="收进词库"
                   aria-label="收进词库"
                 >
@@ -731,8 +657,8 @@ function PickCard({
           </div>
         </div>
 
-        {/* 释义区 */}
-        <div className="px-5 py-4 overflow-y-auto" style={{ flex: "1 1 auto", minHeight: 0 }}>
+        {/* 释义区（右栏整体滚动，这里不再单独限制高度） */}
+        <div className="px-5 py-4">
           {/* 第 1 层：词典 */}
           {dictLoading ? (
             <div className="text-center py-3">
@@ -823,10 +749,10 @@ function PickCard({
           {/* 收词按钮已移到标题栏 */}
         </div>
 
-        {/* 底部固定操作条：不随内容滚动 */}
+        {/* 底部操作条 */}
         <div
           className="px-5 py-3"
-          style={{ background: "var(--duo-bg)", borderTop: "2px solid var(--duo-border)", flex: "0 0 auto" }}
+          style={{ background: "var(--duo-bg)", borderTop: "2px solid var(--duo-border)" }}
         >
           {aiStatus === "idle" && (
             <div className="duo-action-row">
