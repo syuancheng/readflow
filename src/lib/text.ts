@@ -23,6 +23,29 @@ export function translationLines(raw: string | null | undefined): string[] {
 }
 
 /**
+ * 音标里混进来的「长得像 IPA 但不是」的字符。
+ *
+ * ECDICT 由多个来源合并，schwa 这一位上污染最严重：真正的 IPA `ə`(U+0259)
+ * 只有 5.8 万条，而西里尔字母 `ә`(U+04D9) 有 15 万条 —— 也就是**七成的
+ * schwa 是假的**。肉眼几乎看不出区别，但字体渲染、复制粘贴、搜索都不同。
+ *
+ * 其余几个同理：`є`(西里尔) / `ε`(希腊) 都是 ε 的替身，`ˊ` 是重音记号的变体。
+ * 私有区字符（U+E000–U+F8FF）一定是转换过程的乱码，直接丢掉。
+ */
+const PHONETIC_FIXES: [RegExp, string][] = [
+  [/ә/g, "ə"], // U+04D9 西里尔 → U+0259 IPA
+  [/є/g, "ɛ"], // U+0454 西里尔 → U+025B
+  [/ε/g, "ɛ"], // U+03B5 希腊   → U+025B
+  [/ˊ/g, "ˈ"], // U+02CA       → U+02C8
+  [/ /g, " "], // NBSP
+  [/（/g, "("],
+  [/）/g, ")"],
+  [/；/g, ";"],
+  [/，/g, ","],
+  [/[\uE000-\uF8FF]/g, ""], // 私有区乱码
+];
+
+/**
  * 统一音标写法。
  *
  * ECDICT 的音标是混着来的：绝大多数条目用 `'glisn` 这种 ASCII 重音记号，
@@ -34,7 +57,11 @@ export function translationLines(raw: string | null | undefined): string[] {
  */
 export function normalizePhonetic(raw: string | null | undefined): string {
   if (!raw) return "";
-  return raw
+
+  let out = raw;
+  for (const [from, to] of PHONETIC_FIXES) out = out.replace(from, to);
+
+  return out
     .replace(/'/g, "ˈ")
     .replace(/,/g, "ˌ")
     .replace(/\s+/g, " ")

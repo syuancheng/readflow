@@ -1,17 +1,49 @@
 import { desc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
-import { userWords, contexts, texts, LOCAL_USER } from "@/db/schema";
+import { userWords, contexts, paragraphs, texts, LOCAL_USER } from "@/db/schema";
 import { getStats } from "@/lib/stats";
+import { resolveAnchor } from "@/lib/tokenize";
+import { sentenceAround } from "@/lib/split";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 
 export const dynamic = "force-dynamic";
 
-/** 从 context 的 prefix/suffix/quote 重建完整句子 */
+/**
+ * 兜底：从 context 的 prefix/suffix/quote 拼一句。
+ *
+ * 注意 prefix/suffix 只是锚点定位用的**有限窗口**（CONTEXT_WINDOW），
+ * 所以这里拼出来的常常是半句话。能用 sentenceAround 就别用这个 ——
+ * 它回段落原文按句读扩成整句。只在锚点定位失败（文本被重新导入过）时才退化到这里。
+ */
 function sentenceOf(prefix: string, quote: string, suffix: string): string {
   const prefixSent = (prefix || "").replace(/^.*[.!?]\s*/, "");
   const suffixSent = (suffix || "").replace(/\s*[.!?].*$/, "");
   return `${prefixSent}${quote}${suffixSent}`.trim() || quote;
+}
+
+/**
+ * 回段落原文按句读扩成整句，和 /api/export 用同一套逻辑。
+ * 定位不到（文本被重新导入过，锚点失效）时返回 null，由调用方退化。
+ */
+function fullSentence(c: {
+  paraContent: string | null;
+  start: number;
+  end: number;
+  quote: string;
+  prefix: string;
+  suffix: string;
+}): string | null {
+  if (!c.paraContent) return null;
+  const hit = resolveAnchor(c.paraContent, {
+    start: c.start,
+    end: c.end,
+    quote: c.quote,
+    prefix: c.prefix,
+    suffix: c.suffix,
+  });
+  if (!hit) return null;
+  return sentenceAround(c.paraContent, hit.start, hit.end).sentence;
 }
 
 export default async function WordsPage() {
@@ -24,38 +56,42 @@ export default async function WordsPage() {
       .orderBy(desc(userWords.createdAt)),
   ]);
 
-  // 为每个词查出它的 context 记录（含原句和来源文本标题）
-  const wordsWithContexts = await Promise.all(
-    rows.map(async (w) => {
-      const ctxs = db
+  // 为每个词查出它的 context 记录（含原句和来源文本标题）。
+  // better-sqlite3 是同步驱动，所以这里没有 await，也不用 Promise.all。
+  const wordsWithContexts = rows.map((w) => {
+    const ctxs = db
         .select({
           id: contexts.id,
           quote: contexts.quote,
           prefix: contexts.prefix,
           suffix: contexts.suffix,
+          start: contexts.start,
+          end: contexts.end,
           aiGloss: contexts.aiGloss,
           textId: contexts.textId,
           textTitle: texts.title,
+          paraContent: paragraphs.content,
           createdAt: contexts.createdAt,
         })
         .from(contexts)
         .leftJoin(texts, eq(texts.id, contexts.textId))
+        .leftJoin(paragraphs, eq(paragraphs.id, contexts.paragraphId))
         .where(eq(contexts.userWordId, w.id))
         .orderBy(desc(contexts.createdAt))
         .limit(3)
         .all();
 
-      return {
-        ...w,
-        contexts: ctxs.map((c) => ({
-          id: c.id,
-          sentence: sentenceOf(c.prefix, c.quote, c.suffix),
-          textTitle: c.textTitle ?? "",
-          aiGloss: c.aiGloss,
-        })),
-      };
-    }),
-  );
+    return {
+      ...w,
+      contexts: ctxs.map((c) => ({
+        id: c.id,
+        // 回原文按句读扩成整句；定位不到（文本被重新导入过）才退回锚点窗口
+        sentence: fullSentence(c) ?? sentenceOf(c.prefix, c.quote, c.suffix),
+        textTitle: c.textTitle ?? "",
+        aiGloss: c.aiGloss,
+      })),
+    };
+  });
 
   const maxBar = Math.max(1, ...stats.recent.map((r) => r.count));
   const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
