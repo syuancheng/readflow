@@ -29,6 +29,45 @@ function paraOf(node: Node | null): HTMLElement | null {
   return el?.closest<HTMLElement>("[data-pid]") ?? null;
 }
 
+/**
+ * 把选区的两端吸附到词边界。
+ * 用户按下/松开鼠标的位置经常落在词的中间（比如从 "This" 的 T 和 h 之间开始拖），
+ * 字符级选区会变成 "is post…" 这样的半截词。这里把：
+ *   - 起点：落在某词内部（offset > 0）→ 扩展到该词开头
+ *   - 终点：落在某词内部（offset < 词长）→ 扩展到该词结尾
+ * 标点和空白不在 .w span 里，保持原样不吸附。
+ * 返回新 Range 并把视觉选区一并更新，保证高亮和弹层内容一致。
+ */
+function snapRangeToWords(range: Range): Range {
+  const r = range.cloneRange();
+
+  const startEl =
+    r.startContainer.nodeType === 3 ? r.startContainer.parentElement : (r.startContainer as HTMLElement);
+  const startWord = startEl?.closest<HTMLElement>(".w");
+  if (
+    startWord &&
+    r.startContainer.nodeType === 3 &&
+    r.startOffset > 0 &&
+    r.startOffset < (r.startContainer as Text).length
+  ) {
+    r.setStartBefore(startWord);
+  }
+
+  const endEl =
+    r.endContainer.nodeType === 3 ? r.endContainer.parentElement : (r.endContainer as HTMLElement);
+  const endWord = endEl?.closest<HTMLElement>(".w");
+  if (endWord && r.endContainer.nodeType === 3 && r.endOffset > 0 && r.endOffset < (r.endContainer as Text).length) {
+    r.setEndAfter(endWord);
+  }
+
+  if (!r.collapsed) {
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+  }
+  return r;
+}
+
 /** 从 anchor 重建整句话作为 context */
 function sentenceOf(anchor: Anchor): string {
   const prefix = anchor.prefix || "";
@@ -234,7 +273,10 @@ export default function Reader({
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
 
-    const range = sel.getRangeAt(0);
+    // 先把两端吸附到词边界（起点落在词中间时扩展到整词），再走判定
+    const range = snapRangeToWords(sel.getRangeAt(0));
+    if (range.collapsed) return;
+
     const pEl = paraOf(range.commonAncestorContainer);
     if (!pEl) return;
 
