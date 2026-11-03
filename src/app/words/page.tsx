@@ -5,16 +5,13 @@ import { userWords, contexts, paragraphs, texts, LOCAL_USER } from "@/db/schema"
 import { getStats } from "@/lib/stats";
 import { resolveAnchor } from "@/lib/tokenize";
 import { sentenceAround } from "@/lib/split";
-import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
+import WordList, { type WordRow } from "@/components/WordList";
 
 export const dynamic = "force-dynamic";
 
 /**
  * 兜底：从 context 的 prefix/suffix/quote 拼一句。
- *
- * 注意 prefix/suffix 只是锚点定位用的**有限窗口**（CONTEXT_WINDOW），
- * 所以这里拼出来的常常是半句话。能用 sentenceAround 就别用这个 ——
- * 它回段落原文按句读扩成整句。只在锚点定位失败（文本被重新导入过）时才退化到这里。
+ * 只在锚点定位失败（文本被重新导入过）时才退化到这里。
  */
 function sentenceOf(prefix: string, quote: string, suffix: string): string {
   const prefixSent = (prefix || "").replace(/^.*[.!?]\s*/, "");
@@ -22,10 +19,7 @@ function sentenceOf(prefix: string, quote: string, suffix: string): string {
   return `${prefixSent}${quote}${suffixSent}`.trim() || quote;
 }
 
-/**
- * 回段落原文按句读扩成整句，和 /api/export 用同一套逻辑。
- * 定位不到（文本被重新导入过，锚点失效）时返回 null，由调用方退化。
- */
+/** 回段落原文按句读扩成整句，和 /api/export 用同一套逻辑。 */
 function fullSentence(c: {
   paraContent: string | null;
   start: number;
@@ -56,39 +50,49 @@ export default async function WordsPage() {
       .orderBy(desc(userWords.createdAt)),
   ]);
 
-  // 为每个词查出它的 context 记录（含原句和来源文本标题）。
+  // 为每个词查出它的 context 记录（含原句、来源文本与段落 id —— 段落 id 用于"跳到原文"）。
   // better-sqlite3 是同步驱动，所以这里没有 await，也不用 Promise.all。
-  const wordsWithContexts = rows.map((w) => {
+  const words: WordRow[] = rows.map((w) => {
     const ctxs = db
-        .select({
-          id: contexts.id,
-          quote: contexts.quote,
-          prefix: contexts.prefix,
-          suffix: contexts.suffix,
-          start: contexts.start,
-          end: contexts.end,
-          aiGloss: contexts.aiGloss,
-          textId: contexts.textId,
-          textTitle: texts.title,
-          paraContent: paragraphs.content,
-          createdAt: contexts.createdAt,
-        })
-        .from(contexts)
-        .leftJoin(texts, eq(texts.id, contexts.textId))
-        .leftJoin(paragraphs, eq(paragraphs.id, contexts.paragraphId))
-        .where(eq(contexts.userWordId, w.id))
-        .orderBy(desc(contexts.createdAt))
-        .limit(3)
-        .all();
+      .select({
+        id: contexts.id,
+        quote: contexts.quote,
+        prefix: contexts.prefix,
+        suffix: contexts.suffix,
+        start: contexts.start,
+        end: contexts.end,
+        aiGloss: contexts.aiGloss,
+        textId: contexts.textId,
+        paragraphId: contexts.paragraphId,
+        textTitle: texts.title,
+        paraContent: paragraphs.content,
+        createdAt: contexts.createdAt,
+      })
+      .from(contexts)
+      .leftJoin(texts, eq(texts.id, contexts.textId))
+      .leftJoin(paragraphs, eq(paragraphs.id, contexts.paragraphId))
+      .where(eq(contexts.userWordId, w.id))
+      .orderBy(desc(contexts.createdAt))
+      .limit(3)
+      .all();
 
     return {
-      ...w,
+      id: w.id,
+      lemma: w.lemma,
+      displayForm: w.displayForm,
+      phonetic: w.phonetic,
+      pos: w.pos,
+      translation: w.translation,
+      status: w.status,
+      starred: w.starred,
+      isPhrase: w.isPhrase,
       contexts: ctxs.map((c) => ({
         id: c.id,
         // 回原文按句读扩成整句；定位不到（文本被重新导入过）才退回锚点窗口
         sentence: fullSentence(c) ?? sentenceOf(c.prefix, c.quote, c.suffix),
+        textId: c.textId,
+        paragraphId: c.paragraphId,
         textTitle: c.textTitle ?? "",
-        aiGloss: c.aiGloss,
       })),
     };
   });
@@ -102,7 +106,7 @@ export default async function WordsPage() {
         <div>
           <h1 className="text-[28px] font-extrabold tracking-tight mb-1.5">我的词库</h1>
           <p className="text-[15px] text-ink-soft font-medium">
-            阅读时收下的词，都带着出现时的原句。
+            阅读时点过的词都在这里，带着原句，可跳回原文定位。
           </p>
         </div>
         <Link href="/export" className="duo-btn duo-btn-primary duo-btn-sm shrink-0">
@@ -112,78 +116,7 @@ export default async function WordsPage() {
 
       <div className="grid lg:grid-cols-[1fr_320px] gap-7 items-start">
         <div>
-          <div className="duo-section-title mb-3">
-            <span style={{ color: "var(--duo-green)" }}>⚡</span>
-            已收集
-            <span className="text-[13px] font-bold text-ink-faint">({rows.length})</span>
-          </div>
-
-          {rows.length === 0 ? (
-            <div className="duo-card duo-empty">
-              <div className="duo-empty-icon">📝</div>
-              <p className="text-[17px] font-bold mb-1.5">词库还是空的</p>
-              <p className="text-[14px] text-ink-faint">
-                去阅读器里点几个词，收下的词会出现在这里
-              </p>
-              <Link href="/" className="duo-btn duo-btn-blue mt-5">
-                去读一篇
-              </Link>
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {wordsWithContexts.map((w) => (
-                <li key={w.id} className="duo-text-item">
-                  <div className="flex items-baseline justify-between gap-4 mb-1">
-                    <div className="flex items-baseline gap-2">
-                      <h3 className="text-[17px] font-extrabold">{w.displayForm}</h3>
-                      {w.phonetic && (
-                        <span className="text-[13px] font-medium text-ink-faint font-mono">
-                          /{normalizePhonetic(w.phonetic)}/
-                        </span>
-                      )}
-                    </div>
-                    <form
-                      action={`/api/words/${w.id}`}
-                      method="post"
-                      className="hidden"
-                    >
-                      <input type="hidden" name="_method" value="DELETE" />
-                    </form>
-                  </div>
-
-                  {w.pos && (
-                    <span className="duo-badge duo-badge-purple mb-1.5 inline-block">{w.pos}</span>
-                  )}
-
-                  <p className="text-[14px] text-ink-soft font-medium mb-2 whitespace-pre-line">
-                    {normalizeTranslation(w.translation)}
-                  </p>
-
-                  {/* 上下文原句 */}
-                  {w.contexts.length > 0 && (
-                    <div className="mt-2 space-y-1.5">
-                      {w.contexts.map((c) => (
-                        <div
-                          key={c.id}
-                          className="rounded-lg px-3 py-2 text-[13px] leading-relaxed"
-                          style={{ background: "var(--duo-surface)" }}
-                        >
-                          <p className="text-ink-soft italic">
-                            &ldquo;{c.sentence}&rdquo;
-                          </p>
-                          {c.textTitle && (
-                            <p className="text-[11px] font-bold text-ink-faint mt-1">
-                              ← {c.textTitle}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+          <WordList words={words} />
         </div>
 
         {/* 侧栏统计 */}

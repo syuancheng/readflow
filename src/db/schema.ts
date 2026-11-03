@@ -42,6 +42,17 @@ export const userWords = sqliteTable(
     translation: text("translation").notNull(),
     note: text("note"),
     createdAt: integer("created_at").notNull(),
+    /**
+     * 收词状态（对齐 Readlang 的词表状态机）：
+     * learning = 学习中（默认） | learned = 已掌握（手动标记） | deleted = 已移出（软删除）
+     * 软删除而不是物理删：已导出到墨墨的记录（exports）必须保留，
+     * 否则幂等去重会失效，同一个词会被再推一次。
+     */
+    status: text("status").notNull().default("learning"),
+    /** 星标：手动挑出的重点词 */
+    starred: integer("starred").notNull().default(0),
+    /** 是否短语（含空格）。存列而不是运行时推导，方便词库里按类型筛选 */
+    isPhrase: integer("is_phrase").notNull().default(0),
   },
   (t) => [uniqueIndex("uq_user_words_lemma").on(t.userId, t.lemma)],
 );

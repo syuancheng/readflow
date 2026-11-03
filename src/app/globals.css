@@ -657,3 +657,151 @@ body {
   }
 }
 
+
+/* ====== Readlang 对齐：内联译文气泡 / 段落定位 / 自动收词开关 ====== */
+
+/* 点词后的内联译文（固定定位，不挤占正文版式） */
+.word-bubble {
+  position: fixed;
+  z-index: 40;
+  background: var(--duo-bg);
+  border: 2px solid var(--duo-green);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(60, 60, 60, 0.14);
+  padding: 10px 12px 8px;
+  animation: bubble-in 120ms ease;
+}
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(3px); }
+  to   { opacity: 1; }
+}
+
+.word-bubble-text {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--duo-ink);
+  max-height: 4.5em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.word-bubble-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.word-bubble-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--duo-surface);
+  color: var(--duo-ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.word-bubble-btn:hover {
+  background: var(--duo-green-soft);
+  color: var(--duo-green-dark);
+}
+
+/* 词库"跳到原文"后目标段落的短暂高亮 */
+.para-flash {
+  animation: para-flash 2.4s ease;
+  border-radius: 8px;
+}
+
+@keyframes para-flash {
+  0%, 55% { background: var(--duo-green-soft); }
+  100% { background: transparent; }
+}
+
+/* 自动收词开关（阅读页顶栏小药丸） */
+.autosave-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid var(--duo-border);
+  background: var(--duo-bg);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--duo-ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.autosave-pill:hover {
+  border-color: var(--duo-green);
+  color: var(--duo-ink);
+}
+
+.autosave-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 弹层里"已在词库"状态的收词按钮 */
+.duo-icon-btn-saved {
+  background: var(--duo-green);
+  color: #fff;
+  border-color: var(--duo-green-dark);
+}
+
+/* 词库筛选 chip 与行内操作按钮 */
+.duo-filter-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 2px solid var(--duo-border);
+  background: var(--duo-bg);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--duo-ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.duo-filter-chip:hover {
+  border-color: var(--duo-green);
+}
+
+.duo-filter-chip-on {
+  background: var(--duo-green);
+  border-color: var(--duo-green-dark);
+  color: #fff;
+}
+
+.word-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--duo-ink-faint);
+  background: transparent;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.word-action-btn:hover {
+  background: var(--duo-surface);
+  color: var(--duo-ink);
+}

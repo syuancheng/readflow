@@ -119,6 +119,14 @@ export async function POST(req: Request) {
   const now = Date.now();
   const wordId = randomUUID();
   const contextId = randomUUID();
+  const isPhrase = /\s/.test(displayForm) ? 1 : 0;
+
+  let finalWordId: string = wordId;
+  let finalStatus = "learning";
+  let finalStarred = 0;
+  // 本次是否为「新建词条」。已存在的词再点一次只是补一条 context，
+  // 不该被「取消翻译即删除」误删（老词可能已标记已掌握/星标）。
+  let created = true;
 
   // 同步事务：upsert user_words + insert context
   db.transaction((tx) => {
@@ -133,16 +141,23 @@ export async function POST(req: Request) {
 
     if (existing) {
       resolvedWordId = existing.id;
-      // 更新：如果新词典查到了更好的数据，覆盖
+      // 更新：如果新词典查到了更好的数据，覆盖。
+      // 之前被移出词库（deleted）的词再次被点查 = 重新收下。
+      const nextStatus = existing.status === "deleted" ? "learning" : existing.status;
       tx.update(userWords)
         .set({
           displayForm,
           phonetic: phonetic ?? existing.phonetic,
           translation: translation !== "(待补充释义)" ? translation : existing.translation,
           pos: pos ?? existing.pos,
+          isPhrase,
+          status: nextStatus,
         })
         .where(eq(userWords.id, existing.id))
         .run();
+      finalStatus = nextStatus;
+      finalStarred = existing.starred;
+      created = false;
     } else {
       resolvedWordId = wordId;
       tx.insert(userWords)
@@ -156,9 +171,12 @@ export async function POST(req: Request) {
           translation,
           note: null,
           createdAt: now,
+          isPhrase,
         })
         .run();
     }
+
+    finalWordId = resolvedWordId;
 
     // 插入 context（不去重：同一个词在不同位置/不同文本出现，各记一条）
     tx.insert(contexts)
@@ -180,10 +198,17 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    wordId,
+    // 注意：必须返回真正落库的那条记录 id（existing 时 ≠ 新生成的 wordId）
+    wordId: finalWordId,
     contextId,
     lemma: lemmaForm,
     displayForm,
     translation,
+    phonetic,
+    pos,
+    status: finalStatus,
+    starred: finalStarred,
+    isPhrase: isPhrase === 1,
+    created,
   });
 }

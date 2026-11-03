@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS user_words (
   phonetic TEXT,
   translation TEXT NOT NULL,
   note TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'learning',
+  starred INTEGER NOT NULL DEFAULT 0,
+  is_phrase INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_words_lemma ON user_words(user_id, lemma);
 
@@ -144,6 +147,18 @@ if (lastError) throw lastError;
  * 这一步把旧库升到「word+deck+card_type」的唯一键，可以重复执行。
  */
 function migrate(): void {
+  // user_words：2026-11 Readlang 对齐改造新增的列（老库 ALTER 补齐）
+  const wordCols = sqlite.prepare("PRAGMA table_info(user_words)").all() as { name: string }[];
+  if (!wordCols.some((c) => c.name === "status")) {
+    sqlite.exec("ALTER TABLE user_words ADD COLUMN status TEXT NOT NULL DEFAULT 'learning'");
+  }
+  if (!wordCols.some((c) => c.name === "starred")) {
+    sqlite.exec("ALTER TABLE user_words ADD COLUMN starred INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!wordCols.some((c) => c.name === "is_phrase")) {
+    sqlite.exec("ALTER TABLE user_words ADD COLUMN is_phrase INTEGER NOT NULL DEFAULT 0");
+  }
+
   const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "card_type")) {
     sqlite.exec("ALTER TABLE exports ADD COLUMN card_type TEXT NOT NULL DEFAULT 'qa'");

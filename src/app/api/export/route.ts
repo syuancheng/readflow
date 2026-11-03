@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { contexts, exports, paragraphs, settings, texts, userWords, LOCAL_USER } from "@/db/schema";
@@ -130,11 +130,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // 1. 选出要导的词
+  // 1. 选出要导的词（已移出词库的不导——避免把删掉的词再推进墨墨）
   let wordRows = db
     .select()
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")))
     .orderBy(desc(userWords.createdAt))
     .all();
 

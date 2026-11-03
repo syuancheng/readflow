@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { contexts, texts, userWords, LOCAL_USER } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import {
   buildCalendar,
   computeStreaks,
@@ -40,7 +40,7 @@ export async function getStats(days = 7, calendarWeeks = 18): Promise<Stats> {
   const wordRows = await db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER));
+    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")));
 
   // 通过 user_words 关联 contexts，按天聚合。
   // 这里没有日期 where —— recent / 日历 / streak 都基于这份全量数据。
