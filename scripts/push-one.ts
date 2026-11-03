@@ -24,7 +24,7 @@ import { createCard, getCard, listChapters, listDecks, markjiToken, updateCard }
 import { distractors } from "../src/lib/dict";
 import { normalizeTranslation } from "../src/lib/text";
 
-const DB = "data/inkwell.db";
+const DB = "data/readflow.db";
 
 function openDb() {
   const db = new Database(DB);

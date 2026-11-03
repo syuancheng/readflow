@@ -12,7 +12,7 @@
 import Database from "better-sqlite3";
 import { lookup } from "../src/lib/dict";
 
-const DB = "data/inkwell.db";
+const DB = "data/readflow.db";
 const apply = process.argv.includes("--apply");
 
 type Row = {

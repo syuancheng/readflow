@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as schema from "./schema";
 
-const dbPath = process.env.DB_PATH ?? path.join(process.cwd(), "data", "inkwell.db");
+const dbPath = process.env.DB_PATH ?? path.join(process.cwd(), "data", "readflow.db");
 
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
@@ -14,7 +14,7 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
  * 挂到 globalThis 上保证整个进程只有一个连接。
  */
 const globalRef = globalThis as unknown as {
-  __inkwellSqlite?: Database.Database;
+  __readflowSqlite?: Database.Database;
 };
 
 function openDatabase(): Database.Database {
@@ -31,9 +31,9 @@ function openDatabase(): Database.Database {
   return sqlite;
 }
 
-const sqlite: Database.Database = globalRef.__inkwellSqlite ?? openDatabase();
-if (!globalRef.__inkwellSqlite) {
-  globalRef.__inkwellSqlite = sqlite;
+const sqlite: Database.Database = globalRef.__readflowSqlite ?? openDatabase();
+if (!globalRef.__readflowSqlite) {
+  globalRef.__readflowSqlite = sqlite;
   process.on("exit", () => {
     try {
       sqlite.close();
