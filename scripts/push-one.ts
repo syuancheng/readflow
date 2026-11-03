@@ -24,7 +24,7 @@ import { createCard, getCard, listChapters, listDecks, markjiToken, updateCard }
 import { distractors } from "../src/lib/dict";
 import { normalizeTranslation } from "../src/lib/text";
 
-const DB = "data/lexreader.db";
+const DB = "data/inkwell.db";
 
 function openDb() {
   const db = new Database(DB);

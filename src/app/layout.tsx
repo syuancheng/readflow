@@ -8,7 +8,7 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Lexreader — 读你喜欢的，记住不会的",
+  title: "Inkwell — 读你喜欢的，记住不会的",
   description: "上传文本，边读边查，生词带上下文收进词库，再推到墨墨记忆卡。",
 };
 
@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 L
               </span>
-              <span className="duo-hide-mobile">Lexreader</span>
+              <span className="duo-hide-mobile">Inkwell</span>
             </Link>
             <nav className="flex items-center gap-2 text-ink-soft ml-2 duo-hide-mobile">
               <Link href="/" className="duo-nav-link">

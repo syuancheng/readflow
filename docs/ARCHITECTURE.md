@@ -1,4 +1,4 @@
-# Lexreader 技术实现文档
+# Inkwell 技术实现文档
 
 > 面向要改这个仓库的人（包括三个月后的自己）。
 > 产品定位与背景见 [`../README.md`](../README.md)。
@@ -52,7 +52,7 @@
 └──────┬──────────────────────────────┬──────────────────────┬───────┘
        │                              │                      │
 ┌──────▼──────────┐        ┌──────────▼─────────┐   ┌────────▼────────┐
-│ data/lexreader  │        │ data/dict/ecdict.db│   │ api.deepseek.com│
+│ data/inkwell  │        │ data/dict/ecdict.db│   │ api.deepseek.com│
 │ 用户数据 + 词典 │        │ 只读，77 万词条    │   │ OpenAI 兼容接口 │
 │ 索引（可写）    │        │ query_only = ON    │   │ 流式 SSE        │
 └─────────────────┘        └────────────────────┘   └─────────────────┘
@@ -468,7 +468,7 @@ DeepSeek 官方文档第一句就是：API 格式兼容 OpenAI/Anthropic，改�
 ### 8.4 为什么 SQLite + 内联建表 SQL
 
 - 单用户、单机、数据量在万级 → 任何服务端数据库都是过度设计。
-- 备份 = `cp data/lexreader.db`；迁移 = 拷两个文件。
+- 备份 = `cp data/inkwell.db`；迁移 = 拷两个文件。
 - 不用 migration 框架：`CREATE TABLE IF NOT EXISTS` 内联在 `db/index.ts`，启动即建表，克隆下来 `npm run dev` 就能跑。
 
 代价：schema 变更需要在 `schema.ts` 和 `SCHEMA_SQL` 两处同步改，且没有版本记录。表结构稳定前可以接受；一旦有真实用户数据，应切到 `drizzle-kit generate/migrate`。
@@ -481,7 +481,7 @@ Next dev 热重载会让多个模块实例几乎同时求值 `db/index.ts`。`CR
 
 ### 8.6 词典库与用户库分成两个文件
 
-`data/dict/ecdict.db` 以 `readonly + query_only = ON` 打开，`data/lexreader.db` 可写。
+`data/dict/ecdict.db` 以 `readonly + query_only = ON` 打开，`data/inkwell.db` 可写。
 
 好处：词典是「可再生的大文件」（94MB，脚本 3 秒重建），用户数据是「不可再生的小文件」（64KB）。分开后可以单独备份/删除/替换，也不会因为词典写入把用户库锁住。
 
@@ -503,7 +503,7 @@ Next dev 热重载会让多个模块实例几乎同时求值 `db/index.ts`。`CR
 **误判过程**：先怀疑 WAL 不被 sandbox 支持（实测可用）→ 再怀疑多进程并发写（实测并发写正常）→ 最后定位到 **Next dev 热重载累积的僵尸连接**，dev server 进程本身持有已损坏的连接。
 **修法**：重启 dev server 即恢复。同时加了防御（都保留）：
 
-- 连接挂 `globalThis.__lexreaderSqlite` 单例，热重载不新建连接；
+- 连接挂 `globalThis.__inkwellSqlite` 单例，热重载不新建连接；
 - `busy_timeout = 10000`；
 - 建表 SQL 退避重试；
 - `synchronous = NORMAL`（WAL 下安全且快）。

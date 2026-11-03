@@ -16,7 +16,7 @@ import { buildCard, lintCard, CARD_TYPES } from "../src/lib/cardgen";
 import { distractors, lookup } from "../src/lib/dict";
 
 const ROOT = process.cwd();
-const db = new Database(path.join(ROOT, "data", "lexreader.db"));
+const db = new Database(path.join(ROOT, "data", "inkwell.db"));
 db.pragma("foreign_keys = ON");
 
 const OUT = "/tmp/cards";
