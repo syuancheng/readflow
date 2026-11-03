@@ -126,7 +126,7 @@ export default function Reader({
     });
   }
 
-  function onMouseUp() {
+  function onMouseUp(e: React.MouseEvent) {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
 
@@ -144,13 +144,14 @@ export default function Reader({
     const end = offsetIn(pEl, range.endContainer, range.endOffset);
     if (end <= start) return;
 
-    const rect = range.getBoundingClientRect();
+    // 定位用「鼠标落点」而不是选区矩形：整段/整句的选区可能比视口还高，
+    // 用选区 bottom 定位会把弹层甩到屏幕外。落点永远在当前视口里。
     setPick({
       paragraphId: pid,
       paragraphIdx: p.idx,
       anchor: buildAnchor(p.content, start, end),
-      x: rect.left + rect.width / 2,
-      y: rect.bottom,
+      x: e.clientX,
+      y: e.clientY,
     });
   }
 
@@ -232,6 +233,18 @@ type DictResult = {
   lemmaForm: string;
 };
 
+/** 浏览器自带 TTS 朗读，零成本、离线可用 */
+function speak(text: string) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US";
+  u.rate = 0.95;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+}
+
+const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
+
 function PickCard({
   pick,
   onClose,
@@ -242,19 +255,22 @@ function PickCard({
   onSave: (aiGloss?: string) => void;
 }) {
   const { anchor, paragraphIdx, x, y } = pick;
+  // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
+  const quote = anchor.quote.trim();
+  const titleSize = quote.length > 60 ? 15 : quote.length > 28 ? 16 : quote.length > 14 ? 18 : 20;
   const W = 360;
   const vw = typeof window === "undefined" ? 1200 : window.innerWidth;
   const vh = typeof window === "undefined" ? 900 : window.innerHeight;
   const left = Math.min(Math.max(x, W / 2 + 16), vw - W / 2 - 16);
 
-  // 垂直定位：优先放在词下方；下方放不下就翻到上方；上下都放不下就贴着视口顶部。
-  // 弹层高度会随 AI 内容变化，所以这里用一个保守的预估高度做判断，
-  // 同时给弹层本身加 max-height，内容再长也不会溢出视口。
-  const ESTIMATED_H = 420;
-  const belowY = y + 12;
-  const aboveY = y - 12;
-  const flipUp = belowY + ESTIMATED_H > vh - 16;
-  const top = flipUp ? Math.max(16, aboveY - 320) : belowY;
+  // 垂直定位：优先放在落点下方，下方放不下翻到上方，
+  // 最后再把 top 夹进视口（弹层高度上限 H_MAX），保证永远不会被挤出屏幕。
+  const H_MAX = Math.min(560, Math.max(320, vh - 32));
+  const GAP = 14;
+  let top = y + GAP;
+  if (top + H_MAX > vh - 16) top = y - GAP - H_MAX;
+  top = Math.max(16, Math.min(top, vh - H_MAX - 16));
+  const maxHeight = Math.min(H_MAX, vh - top - 16);
 
   // 词典查询
   const [dict, setDict] = useState<DictResult | null>(null);
@@ -336,7 +352,7 @@ function PickCard({
         left,
         top,
         width: W,
-        maxHeight: `min(${Math.round(vh - top - 16)}px, 560px)`,
+        maxHeight,
         transform: "translateX(-50%)",
         display: "flex",
         flexDirection: "column",
@@ -345,23 +361,62 @@ function PickCard({
       onMouseUp={(e) => e.stopPropagation()}
     >
       <div className="duo-popover" style={{ display: "flex", flexDirection: "column", minHeight: 0, maxHeight: "100%" }}>
-        {/* 标题区 */}
-        <div className="px-5 pt-4 pb-3" style={{ background: "var(--duo-blue-soft)" }}>
-          <div className="flex items-start justify-between gap-3">
+        {/* 标题区：白底 + 分隔线，不再用蓝色块 */}
+        <div className="px-5 pt-4 pb-3" style={{ borderBottom: "2px solid var(--duo-border)" }}>
+          <div className="flex items-start justify-between gap-2.5">
             <div className="min-w-0">
-              <p className="text-[20px] font-extrabold leading-snug break-words text-ink">
-                {anchor.quote}
+              <p
+                className="font-extrabold leading-snug break-words text-ink"
+                style={{
+                  fontSize: titleSize,
+                  display: "-webkit-box",
+                  WebkitLineClamp: 4,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
+                title={quote}
+              >
+                {quote}
               </p>
-              {dict?.entry?.phonetic && (
-                <p className="text-[13px] font-mono text-ink-soft mt-0.5">
-                  /{normalizePhonetic(dict.entry.phonetic)}/
-                </p>
-              )}
+              <div className="flex items-center gap-2 mt-1">
+                {dict?.entry?.phonetic && (
+                  <button
+                    className="text-[13px] font-mono text-ink-soft hover:text-ink cursor-pointer leading-none"
+                    onClick={() => speak(quote)}
+                    title="点击朗读"
+                  >
+                    /{normalizePhonetic(dict.entry.phonetic)}/
+                  </button>
+                )}
+                {canSpeak && (
+                  <button
+                    className="duo-speak-btn"
+                    onClick={() => speak(quote)}
+                    aria-label="发音"
+                    title="发音"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="12"
+                      height="12"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
+                      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                      <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               {/* 收词按钮放在标题栏：既显眼又不占用底部空间 */}
               <button
-                className="duo-icon-btn"
+                className="duo-icon-btn duo-icon-btn-sm"
                 onClick={() => {
                   onSave(aiStatus === "done" ? aiText : undefined);
                   onClose();
@@ -373,7 +428,7 @@ function PickCard({
               </button>
               <button
                 onClick={onClose}
-                className="text-ink-faint hover:text-ink-soft text-[18px] leading-none px-1 font-bold"
+                className="text-ink-faint hover:text-ink-soft text-[15px] leading-none px-0.5 font-bold"
                 aria-label="关闭"
               >
                 ×
@@ -405,16 +460,16 @@ function PickCard({
             </div>
           )}
 
-          {/* 第 2 层：AI 释义 */}
+          {/* 第 2 层：AI 释义 —— 与词典卡同一中性底色，仅徽章用品牌绿 */}
           {aiStatus !== "idle" && (
-            <div className="mt-3 rounded-xl p-4" style={{ background: "var(--duo-purple-soft)" }}>
+            <div className="mt-3 rounded-xl p-4" style={{ background: "var(--duo-surface)" }}>
               <div className="flex items-center gap-2 mb-2">
-                <span className="duo-badge duo-badge-purple">AI 解释</span>
+                <span className="duo-badge duo-badge-green">AI 解释</span>
                 {aiStatus === "loading" && (
                   <span className="text-[12px] font-bold text-ink-faint">正在思考…</span>
                 )}
                 {aiStatus === "streaming" && (
-                  <span className="text-[12px] font-bold" style={{ color: "var(--duo-purple-dark)" }}>
+                  <span className="text-[12px] font-bold" style={{ color: "var(--duo-green-dark)" }}>
                     生成中…
                   </span>
                 )}
@@ -425,7 +480,10 @@ function PickCard({
               >
                 {aiText}
                 {aiStatus === "streaming" && (
-                  <span className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse" style={{ background: "var(--duo-purple)" }} />
+                  <span
+                    className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
+                    style={{ background: "var(--duo-green)" }}
+                  />
                 )}
               </div>
             </div>
@@ -447,7 +505,7 @@ function PickCard({
               />
               <div className="flex gap-2">
                 <button
-                  className="duo-btn duo-btn-blue duo-btn-sm flex-1"
+                  className="duo-btn duo-btn-primary duo-btn-sm flex-1"
                   onClick={() => {
                     if (askPrompt.trim()) {
                       triggerAI(askPrompt.trim());
@@ -459,6 +517,7 @@ function PickCard({
                 </button>
                 <button
                   className="duo-btn duo-btn-white duo-btn-sm"
+                  style={{ color: "var(--duo-ink-soft)" }}
                   onClick={() => setShowAskInput(false)}
                 >
                   取消
@@ -477,11 +536,8 @@ function PickCard({
         >
           {aiStatus === "idle" && (
             <div className="duo-action-row">
-              <button
-                className="duo-btn duo-btn-blue duo-btn-sm"
-                onClick={() => triggerAI()}
-              >
-                {suggestAI ? "🔍 用 AI 解释" : "🤖 AI 深度释义"}
+              <button className="duo-btn duo-btn-primary duo-btn-sm" onClick={() => triggerAI()}>
+                {suggestAI ? "🔍 用 AI 解释" : "AI 深度释义"}
               </button>
             </div>
           )}
@@ -490,9 +546,10 @@ function PickCard({
             <div className="duo-action-row">
               <button
                 className="duo-btn duo-btn-white duo-btn-sm"
+                style={{ color: "var(--duo-ink-soft)" }}
                 onClick={() => setShowAskInput(true)}
               >
-                💬 追问
+                追问
               </button>
             </div>
           )}
@@ -529,7 +586,7 @@ function DictView({
   const showLemma = lemmaForm.toLowerCase() !== originalForm.toLowerCase();
 
   return (
-    <div className="rounded-xl p-4" style={{ background: "var(--duo-green-soft)" }}>
+    <div className="rounded-xl p-4" style={{ background: "var(--duo-surface)" }}>
       {showLemma && (
         <div className="flex items-center gap-1.5 mb-2">
           <span className="duo-badge duo-badge-green">{lemmaForm}</span>

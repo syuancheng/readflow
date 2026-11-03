@@ -412,6 +412,33 @@ body {
   user-select: none;
 }
 
+/* 弹层标题栏里的小号收词按钮 */
+.duo-icon-btn-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* 发音按钮（Web Speech TTS） */
+.duo-speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--duo-surface);
+  color: var(--duo-ink-soft);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.duo-speak-btn:hover {
+  background: var(--duo-green-soft);
+  color: var(--duo-green-dark);
+}
+
 .duo-icon-btn:hover {
   background: var(--duo-green-soft);
 }
