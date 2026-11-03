@@ -108,6 +108,23 @@ try {
     `${afterSave.total} → ${afterDeselect.total}`,
   );
 
+  // ---------- C3/C4：批注卡内的显式「撤销」按钮 ----------
+  await page.locator('[data-e2e="1"]').click();
+  await page.waitForTimeout(900);
+  const undoVisible = await page.locator(".rf-undo").isVisible().catch(() => false);
+  check("C3 首次自动收词出现撤销按钮", undoVisible);
+  if (undoVisible) {
+    await page.locator(".rf-undo").click();
+    await page.waitForTimeout(900);
+    const afterUndo = await wordCount();
+    const noteGone2 = !(await page.locator(".reader-note").isVisible().catch(() => false));
+    check(
+      "C4 点击撤销删除词条并收起批注",
+      afterUndo.total === before.total && noteGone2,
+      `${afterUndo.total} 词，卡片收起=${noteGone2}`,
+    );
+  }
+
   // ---------- E：批注卡自带词典与 AI 入口 ----------
   await page.locator('[data-e2e="1"]').click();
   await page.waitForTimeout(900);

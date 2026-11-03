@@ -425,6 +425,11 @@ export default function Reader({
               const info = savedMap.get(pick.anchor.quote.toLowerCase());
               if (info) void removeWord(info.id);
             }}
+            onUndo={() => {
+              const info = savedMap.get(pick.anchor.quote.toLowerCase());
+              close();
+              if (info) void unsaveWord(info, pick.anchor.quote.toLowerCase());
+            }}
           />
         ) : (
           <div className="reader-aside-empty">
@@ -481,12 +486,15 @@ function PickCard({
   onClose,
   onSave,
   onDelete,
+  onUndo,
 }: {
   pick: Pick;
   saved: SavedWordInfo | null;
   onClose: () => void;
   onSave: (aiGloss?: string) => void;
   onDelete: () => void;
+  /** 撤销本次自动收词（仅本次新建的词条会出现） */
+  onUndo: () => void;
 }) {
   const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
@@ -523,9 +531,6 @@ function PickCard({
       })
       .catch(() => setDictLoading(false));
   }, [anchor.quote]);
-
-  // 如果是短语，词典查不到，直接建议走 AI
-  const suggestAI = isPhrase || (!dictLoading && !dict?.entry);
 
   /** 触发 AI 释义（流式） */
   async function triggerAI(prompt?: string) {
@@ -572,221 +577,188 @@ function PickCard({
       onClick={(e) => e.stopPropagation()}
       onMouseUp={(e) => e.stopPropagation()}
     >
-      <div className="duo-popover" style={{ display: "flex", flexDirection: "column" }}>
-        {/* 标题区：白底 + 分隔线，不再用蓝色块 */}
-        <div className="px-5 pt-4 pb-3" style={{ borderBottom: "2px solid var(--duo-border)" }}>
-          <div className="flex items-start justify-between gap-2.5">
-            <div className="min-w-0">
-              <p
-                className="font-extrabold leading-snug break-words text-ink"
-                style={{
-                  fontSize: titleSize,
-                  display: "-webkit-box",
-                  WebkitLineClamp: 4,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }}
-                title={quote}
-              >
-                {quote}
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                {dict?.entry?.phonetic && (
-                  <button
-                    className="text-[13px] font-mono text-ink-soft hover:text-ink cursor-pointer leading-none"
-                    onClick={() => speak(quote)}
-                    title="点击朗读"
-                  >
-                    /{normalizePhonetic(dict.entry.phonetic)}/
-                  </button>
-                )}
-                {canSpeak && (
-                  <button
-                    className="duo-speak-btn"
-                    onClick={() => speak(quote)}
-                    aria-label="发音"
-                    title="发音"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="12"
-                      height="12"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
-                      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                      <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              {/* 收词按钮：已收显示 ✓（点击移出词库），未收显示 +；批注卡常驻右栏，收/移出后不关闭 */}
-              {saved && saved.status !== "deleted" ? (
-                <button
-                  className="duo-icon-btn duo-icon-btn-sm duo-icon-btn-saved"
-                  onClick={onDelete}
-                  title="已在词库 · 点击移出"
-                  aria-label="已在词库，点击移出"
-                >
-                  ✓
-                </button>
-              ) : (
-                <button
-                  className="duo-icon-btn duo-icon-btn-sm"
-                  onClick={() => onSave(aiStatus === "done" ? aiText : undefined)}
-                  title="收进词库"
-                  aria-label="收进词库"
-                >
-                  +
-                </button>
-              )}
+      {/* 标题行：词 + 音标 + 发音，右侧收词/关闭 */}
+      <div className="flex items-start justify-between gap-2.5">
+        <div className="min-w-0">
+          <p
+            className="font-extrabold leading-snug break-words text-ink"
+            style={{
+              fontSize: titleSize,
+              display: "-webkit-box",
+              WebkitLineClamp: 4,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+            title={quote}
+          >
+            {quote}
+          </p>
+          <div className="flex items-center gap-2 mt-1">
+            {dict?.entry?.phonetic && (
               <button
-                onClick={onClose}
-                className="text-ink-faint hover:text-ink-soft text-[15px] leading-none px-0.5 font-bold"
-                aria-label="关闭"
+                className="text-[13px] font-mono text-ink-soft hover:text-ink cursor-pointer leading-none"
+                onClick={() => speak(quote)}
+                title="点击朗读"
               >
-                ×
+                /{normalizePhonetic(dict.entry.phonetic)}/
               </button>
-            </div>
+            )}
+            {canSpeak && (
+              <button
+                className="duo-speak-btn"
+                onClick={() => speak(quote)}
+                aria-label="发音"
+                title="发音"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="12"
+                  height="12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
+                  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                  <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
-
-        {/* 释义区（右栏整体滚动，这里不再单独限制高度） */}
-        <div className="px-5 py-4">
-          {/* 第 1 层：词典 */}
-          {dictLoading ? (
-            <div className="text-center py-3">
-              <p className="text-[14px] font-bold text-ink-faint">查词典中…</p>
-            </div>
-          ) : dict?.entry ? (
-            <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
-          ) : (
-            <div
-              className="rounded-xl px-4 py-3 text-center"
-              style={{ background: "var(--duo-surface)" }}
+        <div className="flex items-center gap-1 shrink-0">
+          {/* 收词按钮：已收显示 ✓（点击移出词库），未收显示 + */}
+          {saved && saved.status !== "deleted" ? (
+            <button
+              className="duo-icon-btn duo-icon-btn-sm duo-icon-btn-saved"
+              onClick={onDelete}
+              title="已在词库 · 点击移出"
+              aria-label="已在词库，点击移出"
             >
-              <p className="text-[14px] font-bold text-ink-faint">
-                {isPhrase ? "短语不在词典中" : "词典未收录"}
-              </p>
-              <p className="text-[13px] text-ink-faint mt-0.5">
-                点击下方按钮用 AI 解释
-              </p>
-            </div>
+              ✓
+            </button>
+          ) : (
+            <button
+              className="duo-icon-btn duo-icon-btn-sm"
+              onClick={() => onSave(aiStatus === "done" ? aiText : undefined)}
+              title="收进词库"
+              aria-label="收进词库"
+            >
+              +
+            </button>
           )}
-
-          {/* 第 2 层：AI 释义 —— 与词典卡同一中性底色，仅徽章用品牌绿 */}
-          {aiStatus !== "idle" && (
-            <div className="mt-3 rounded-xl p-4" style={{ background: "var(--duo-surface)" }}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="duo-badge duo-badge-green">AI 解释</span>
-                {aiStatus === "loading" && (
-                  <span className="text-[12px] font-bold text-ink-faint">正在思考…</span>
-                )}
-                {aiStatus === "streaming" && (
-                  <span className="text-[12px] font-bold" style={{ color: "var(--duo-green-dark)" }}>
-                    生成中…
-                  </span>
-                )}
-              </div>
-              <div
-                className="text-[14px] leading-relaxed whitespace-pre-wrap"
-                style={{ color: "var(--duo-ink)" }}
-              >
-                {aiText}
-                {aiStatus === "streaming" && (
-                  <span
-                    className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
-                    style={{ background: "var(--duo-green)" }}
-                  />
-                )}
-              </div>
-            </div>
-          )}
-
-          {showAskInput && (
-            <div className="mt-3">
-              <input
-                className="duo-input mb-2 !text-[14px]"
-                placeholder="例如：这个词还有别的用法吗？"
-                value={askPrompt}
-                onChange={(e) => setAskPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && askPrompt.trim()) {
-                    triggerAI(askPrompt.trim());
-                    setShowAskInput(false);
-                  }
-                }}
-              />
-              <div className="flex gap-2">
-                <button
-                  className="duo-btn duo-btn-primary duo-btn-sm flex-1"
-                  onClick={() => {
-                    if (askPrompt.trim()) {
-                      triggerAI(askPrompt.trim());
-                      setShowAskInput(false);
-                    }
-                  }}
-                >
-                  提问
-                </button>
-                <button
-                  className="duo-btn duo-btn-white duo-btn-sm"
-                  style={{ color: "var(--duo-ink-soft)" }}
-                  onClick={() => setShowAskInput(false)}
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* 收词按钮已移到标题栏 */}
+          <button
+            onClick={onClose}
+            className="text-ink-faint hover:text-ink-soft text-[15px] leading-none px-0.5 font-bold"
+            aria-label="关闭"
+          >
+            ×
+          </button>
         </div>
+      </div>
 
-        {/* 底部操作条 */}
-        <div
-          className="px-5 py-3"
-          style={{ background: "var(--duo-bg)", borderTop: "2px solid var(--duo-border)" }}
-        >
-          {aiStatus === "idle" && (
-            <div className="duo-action-row">
-              <button className="duo-btn duo-btn-primary duo-btn-sm" onClick={() => triggerAI()}>
-                {suggestAI ? "🔍 用 AI 解释" : "AI 深度释义"}
-              </button>
-            </div>
-          )}
+      {/* 本次自动收词 → 显式撤销入口（delete-on-deselect 之外的可见途径） */}
+      {pick.justSaved && (
+        <button className="rf-undo" onClick={onUndo} title="删除这条刚收进的词">
+          ↩ 已自动收进词库 · 撤销
+        </button>
+      )}
 
-          {aiStatus !== "idle" && !showAskInput && (
-            <div className="duo-action-row">
-              <button
-                className="duo-btn duo-btn-white duo-btn-sm"
-                style={{ color: "var(--duo-ink-soft)" }}
-                onClick={() => setShowAskInput(true)}
-              >
+      {/* 词典释义：无框平铺 */}
+      {dictLoading ? (
+        <p className="text-[14px] font-bold text-ink-faint mt-4">查词典中…</p>
+      ) : dict?.entry ? (
+        <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
+      ) : (
+        <p className="text-[13px] font-bold text-ink-faint mt-4">
+          {isPhrase ? "短语不在词典中" : "词典未收录"} · 可用 AI 解释
+        </p>
+      )}
+
+      {/* AI 释义：小按钮入口 */}
+      {aiStatus === "idle" && (
+        <button className="rf-ai-mini mt-3" onClick={() => triggerAI()}>
+          ✨ AI 释义
+        </button>
+      )}
+
+      {/* AI 内容：平铺展示 */}
+      {aiStatus !== "idle" && (
+        <div className="mt-4">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="duo-badge duo-badge-green">AI 释义</span>
+            {aiStatus === "loading" && (
+              <span className="text-[12px] font-bold text-ink-faint">正在思考…</span>
+            )}
+            {aiStatus === "streaming" && (
+              <span className="text-[12px] font-bold" style={{ color: "var(--duo-green-dark)" }}>
+                生成中…
+              </span>
+            )}
+            {aiStatus === "done" && !showAskInput && (
+              <button className="rf-ask-mini" onClick={() => setShowAskInput(true)}>
                 追问
               </button>
-            </div>
-          )}
-        </div>
-
-        {/* 锚点信息 */}
-        <details className="px-5 py-3" style={{ background: "var(--duo-surface)", borderTop: "2px solid var(--duo-border)" }}>
-          <summary className="text-[11px] font-bold uppercase tracking-wide text-ink-faint cursor-pointer">
-            上下文锚点
-          </summary>
-          <div className="space-y-1.5 mt-2">
-            <Row label="前文" value={anchor.prefix || "（段首）"} />
-            <Row label="后文" value={anchor.suffix || "（段尾）"} />
-            <Row label="位置" value={`第 ${paragraphIdx + 1} 段 · ${anchor.start}–${anchor.end}`} />
+            )}
           </div>
-        </details>
-      </div>
+          <div className="text-[14px] leading-relaxed whitespace-pre-wrap text-ink">
+            {aiText}
+            {aiStatus === "streaming" && (
+              <span
+                className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
+                style={{ background: "var(--duo-green)" }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {showAskInput && (
+        <div className="mt-3">
+          <input
+            className="duo-input mb-2 !text-[14px]"
+            placeholder="例如：这个词还有别的用法吗？"
+            value={askPrompt}
+            onChange={(e) => setAskPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && askPrompt.trim()) {
+                triggerAI(askPrompt.trim());
+                setShowAskInput(false);
+              }
+            }}
+          />
+          <div className="flex gap-2">
+            <button
+              className="rf-ai-mini"
+              onClick={() => {
+                if (askPrompt.trim()) {
+                  triggerAI(askPrompt.trim());
+                  setShowAskInput(false);
+                }
+              }}
+            >
+              提问
+            </button>
+            <button className="rf-ai-mini" onClick={() => setShowAskInput(false)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 锚点信息 */}
+      <details className="mt-4">
+        <summary className="text-[11px] font-bold uppercase tracking-wide text-ink-faint cursor-pointer">
+          上下文锚点
+        </summary>
+        <div className="space-y-1.5 mt-2">
+          <Row label="前文" value={anchor.prefix || "（段首）"} />
+          <Row label="后文" value={anchor.suffix || "（段尾）"} />
+          <Row label="位置" value={`第 ${paragraphIdx + 1} 段 · ${anchor.start}–${anchor.end}`} />
+        </div>
+      </details>
     </div>
   );
 }
@@ -806,16 +778,16 @@ function DictView({
   const showLemma = lemmaForm.toLowerCase() !== originalForm.toLowerCase();
 
   return (
-    <div className="rounded-xl p-4" style={{ background: "var(--duo-surface)" }}>
+    <div className="mt-3">
       {showLemma && (
-        <div className="flex items-center gap-1.5 mb-2">
+        <div className="flex items-center gap-1.5 mb-1.5">
           <span className="duo-badge duo-badge-green">{lemmaForm}</span>
           <span className="text-[12px] font-bold text-ink-faint">← 原形</span>
         </div>
       )}
 
       {entry.translation && (
-        <p className="text-[15px] font-medium leading-relaxed text-ink mb-2 whitespace-pre-line">
+        <p className="text-[15px] font-medium leading-relaxed text-ink whitespace-pre-line">
           {normalizeTranslation(entry.translation)}
         </p>
       )}
