@@ -42,10 +42,20 @@ export async function GET(req: Request) {
     .all();
 
   // 单词与句子/短语一视同仁：点词自动收的 context 也返回，
-  // 让「那次被查的出现」获得持久绿虚线标记（w-annotated），并进回看列表。
+  // 让「那次被查的出现」获得持久高亮标记（w-annotated），并进回看列表。
   // 只排除已移出词库的词条。
+  //
+  // 按词条去重，每个词只保留最近一条 context：
+  // 同一个词可能在多处被反复查过（删词再收、短语重划都会补 context），
+  // 但标记的语义是「这个词我是在哪里查的」——一处就够，不该全文开花。
+  const seen = new Set<string>();
   const annotations = rows
     .filter((r) => r.wordStatus !== "deleted")
+    .filter((r) => {
+      if (seen.has(r.wordId)) return false;
+      seen.add(r.wordId);
+      return true;
+    })
     .map(({ wordStatus: _status, ...r }) => r);
 
   return NextResponse.json({ annotations });

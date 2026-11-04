@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { userWords, contexts, LOCAL_USER } from "@/db/schema";
 
@@ -68,10 +68,14 @@ export async function DELETE(
   const { id } = await params;
   const url = new URL(req.url);
   const contextId = url.searchParams.get("contextId");
+  const textId = url.searchParams.get("textId");
 
-  if (contextId) {
-    // 只删一条 context。如果这条批注是句子/短语的占位词条（isPhrase），
-    // 且删完后它已经没有任何 context 了，就把词条一并删掉——
+  if (contextId || textId) {
+    // 删 context（?contextId= 一条；?textId= 该文本下这个词的全部——
+    // 批注按词去重后，× 的语义是「清掉这个词在本文的标记」，
+    // 只删最新一条会让更早的 context 重新浮出来）。
+    // 如果这个词是句子/短语的占位词条（isPhrase），且删完后它已经
+    // 没有任何 context 了，就把词条一并删掉——
     // 否则词库里会留下一具没有语境的句子尸体。
     const word = db
       .select()
@@ -86,7 +90,13 @@ export async function DELETE(
       return NextResponse.json({ error: "无权操作" }, { status: 403 });
     }
 
-    db.delete(contexts).where(eq(contexts.id, contextId)).run();
+    if (textId) {
+      db.delete(contexts)
+        .where(and(eq(contexts.userWordId, id), eq(contexts.textId, textId)))
+        .run();
+    } else {
+      db.delete(contexts).where(eq(contexts.id, contextId!)).run();
+    }
 
     const remaining = db
       .select({ id: contexts.id })
