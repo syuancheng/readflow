@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
+import { aiContextOf } from "@/lib/sentence";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
@@ -569,14 +570,11 @@ export default function Reader({
             saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
             onClose={close}
             initialGloss={pick.initialGloss}
-            /* AI 用段落级完整前后文（锚点的 40 字符窗口只够定位，会截掉句子主语） */
+            /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境 */
             aiContext={(() => {
               const para = paragraphs.find((p) => p.id === pick.paragraphId);
               return para
-                ? {
-                    prefix: para.content.slice(0, pick.anchor.start),
-                    suffix: para.content.slice(pick.anchor.end),
-                  }
+                ? aiContextOf(para.content, pick.anchor.start, pick.anchor.end)
                 : { prefix: pick.anchor.prefix, suffix: pick.anchor.suffix };
             })()}
             onAIGloss={(text) => void persistGloss(pick, text)}
