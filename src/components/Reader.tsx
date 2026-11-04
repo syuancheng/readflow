@@ -570,11 +570,16 @@ export default function Reader({
             saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
             onClose={close}
             initialGloss={pick.initialGloss}
-            /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境 */
+            /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境；
+               「没看懂整句」信号（覆盖 ≥75% 词汇或句内生词密度 ≥75%）→ 前文额外带上一句 */
             aiContext={(() => {
-              const para = paragraphs.find((p) => p.id === pick.paragraphId);
+              const idx = paragraphs.findIndex((p) => p.id === pick.paragraphId);
+              const para = idx >= 0 ? paragraphs[idx] : undefined;
               return para
-                ? aiContextOf(para.content, pick.anchor.start, pick.anchor.end)
+                ? aiContextOf(para.content, pick.anchor.start, pick.anchor.end, {
+                    savedSet: new Set(savedMap.keys()),
+                    prevParagraph: idx > 0 ? paragraphs[idx - 1].content : undefined,
+                  })
                 : { prefix: pick.anchor.prefix, suffix: pick.anchor.suffix };
             })()}
             onAIGloss={(text) => void persistGloss(pick, text)}
@@ -705,8 +710,8 @@ function PickCard({
   initialGloss?: string;
   /** AI 释义生成完成后回调，用于把结果写回该批注 */
   onAIGloss?: (text: string) => void;
-  /** AI 用的段落级完整前后文（锚点的 40 字符窗口只够定位，会切碎句子） */
-  aiContext: { prefix: string; suffix: string };
+  /** AI 用的上下文（句子边界 + 按需带上一句；锚点的 40 字符窗口只够定位，会切碎句子） */
+  aiContext: { prefix: string; suffix: string; withPrevSentence?: boolean };
 }) {
   const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
@@ -756,6 +761,7 @@ function PickCard({
       word: anchor.quote,
       prefix: aiContext.prefix,
       suffix: aiContext.suffix,
+      ...(aiContext.withPrevSentence ? { withPrevSentence: true } : {}),
       language: "en",
       monolingual: false,
       ...(prompt ? { prompt } : {}),

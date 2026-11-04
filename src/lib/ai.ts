@@ -30,6 +30,7 @@ export type ExplainParams = {
   language?: string;     // 目标语言（正在学的语言），默认 en
   monolingual?: boolean; // true = 用目标语言解释，false = 用中文解释
   prompt?: string;       // 用户的自定义追问（对应 Readlang 的 askAI）
+  withPrevSentence?: boolean; // 前文已包含上一句（「没看懂整句」信号触发），给模型加衔接提示
 };
 
 /** 选区是单词还是句子/短语（含空格即视为后者，与前端 PickCard 一致） */
@@ -116,13 +117,16 @@ Question: ${prompt}`;
 
 /** 组装「选中/前文/后文」的分段上下文块 */
 function contextBlock(params: ExplainParams): string {
-  const { word, context, prefix, suffix } = params;
+  const { word, context, prefix, suffix, withPrevSentence } = params;
   if (typeof prefix === "string" || typeof suffix === "string") {
     const pre = (prefix ?? "").trim();
     const suf = (suffix ?? "").trim();
+    const hint = withPrevSentence
+      ? "\n（提示：前文开头是选区所在句的上一句，可用于理解指代、承接等句间衔接。）"
+      : "";
     return `用户选中: "${word}"
 前文: ${pre ? `"${pre}"` : "（无）"}
-后文: ${suf ? `"${suf}"` : "（无）"}`;
+后文: ${suf ? `"${suf}"` : "（无）"}${hint}`;
   }
   return `用户选中: "${word}"
 所在句子: "${context}"`;

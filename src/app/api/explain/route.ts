@@ -83,5 +83,6 @@ export async function POST(req: NextRequest) {
     language: str(body.language) ?? "en",
     monolingual: body.monolingual === true,
     prompt: str(body.prompt)?.trim() || undefined,
+    withPrevSentence: body.withPrevSentence === true,
   });
 }

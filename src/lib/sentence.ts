@@ -4,6 +4,9 @@
  * - 单词 / 短语（未覆盖整句）：前文、后文都截到所在句子的边界
  *   —— 即 Readlang 的「整句上下文」，保证句子主语完整，不被锚点窗口截断
  * - 划了完整一句（或多句）：选区本身已是完整句子，前文/后文各给相邻一句，补语境
+ * - 「没看懂整句」信号（李笑来式阅读法的落地）：选区覆盖了句子的 ≥75% 词汇，
+ *   或该句 ≥8 词且其中 ≥75% 是用户已收进词库的生词 —— 说明用户卡的是整句，
+ *   前文额外带上上一句（跨段时取前一段最后一句），用于理解指代与句间衔接
  *
  * 句子切分用 Intl.Segmenter（正确处理 Mr. / e.g. / 引号等，替代手写正则）。
  * 仅在浏览器事件回调中调用（点词/划选时），不参与 SSR 渲染，无 hydration 风险。
@@ -42,12 +45,31 @@ export function splitSentences(text: string): Span[] {
   return out.length ? out : [{ start: 0, end: text.length }];
 }
 
+/** 提取一段文本里的英文单词（小写），用于词数/生词密度统计 */
+function wordsOf(text: string): string[] {
+  return [...text.matchAll(/[A-Za-z]+(?:['’-][A-Za-z]+)*/g)].map((m) => m[0].toLowerCase());
+}
+
+export type AIContext = {
+  prefix: string;
+  suffix: string;
+  /** 前文包含了上一句（触发「没看懂整句」信号时为 true，前端据此给模型加提示语） */
+  withPrevSentence?: boolean;
+};
+
 /**
  * 计算发给 AI 的前文/后文。
  * @param paragraph  选区所在段落的完整文本
  * @param start/end  选区在段落内的字符区间
+ * @param opts.savedSet      用户已收词集合（小写词形/词元），用于生词密度判定
+ * @param opts.prevParagraph 上一段全文（选区在段首时，上一句要从前一段取）
  */
-export function aiContextOf(paragraph: string, start: number, end: number): { prefix: string; suffix: string } {
+export function aiContextOf(
+  paragraph: string,
+  start: number,
+  end: number,
+  opts?: { savedSet?: Set<string>; prevParagraph?: string }
+): AIContext {
   const s = Math.max(0, Math.min(start, paragraph.length));
   const e = Math.max(s, Math.min(end, paragraph.length));
 
@@ -68,22 +90,61 @@ export function aiContextOf(paragraph: string, start: number, end: number): { pr
 
   const coreStart = sentences[s0].start;
   const coreEnd = sentences[s1].end;
+  const core = paragraph.slice(coreStart, coreEnd);
+  const coreWords = wordsOf(core);
+  const selWords = wordsOf(paragraph.slice(s, e));
+  const coverage = coreWords.length > 0 ? selWords.length / coreWords.length : 1;
 
-  // 选区基本覆盖所在句（≥80%）：视为「划了整句」→ 前后取相邻句补语境
-  const selLen = e - s;
-  const coreLen = coreEnd - coreStart;
-  if (selLen >= coreLen * 0.8 && coreLen > 0) {
-    const prevStart = s0 > 0 ? sentences[s0 - 1].start : coreStart;
+  // 「没看懂整句」信号之一：句中生词密度（仅 ≥8 词的长句判定，避免短句误触发）
+  const savedSet = opts?.savedSet;
+  const density =
+    savedSet && coreWords.length >= 8
+      ? coreWords.filter((w) => savedSet.has(w)).length / coreWords.length
+      : 0;
+
+  // 上一句文本（段内取前一句；段首则取前一段最后一句），取不到为空串
+  const prevSentence = s0 > 0
+    ? paragraph.slice(sentences[s0 - 1].start, sentences[s0 - 1].end)
+    : opts?.prevParagraph
+      ? lastSentenceOf(opts.prevParagraph)
+      : "";
+
+  // 选区覆盖了所在句 ≥75% 词汇：视为「划了整句/大半句」→ 前后取相邻句补语境
+  if (coverage >= 0.75 && coreWords.length > 0) {
     const nextEnd = s1 + 1 < sentences.length ? sentences[s1 + 1].end : coreEnd;
+    const pre = prevSentence.trim();
     return {
-      prefix: paragraph.slice(prevStart, s),
+      prefix: pre ? `${pre} ${paragraph.slice(coreStart, s)}`.trim() : paragraph.slice(coreStart, s),
       suffix: paragraph.slice(e, nextEnd),
+      withPrevSentence: Boolean(pre),
     };
   }
 
   // 单词/短语：前后文截到句子边界（整句上下文，对齐 Readlang）
-  return {
+  const base: AIContext = {
     prefix: paragraph.slice(coreStart, s),
     suffix: paragraph.slice(e, coreEnd),
   };
+
+  // 未盖满整句，但生词密度 ≥75%：用户卡的是整句 → 前文额外带上上一句
+  if (density >= 0.75) {
+    const pre = prevSentence.trim();
+    if (pre) {
+      return {
+        prefix: `${pre} ${base.prefix}`.trim(),
+        suffix: base.suffix,
+        withPrevSentence: true,
+      };
+    }
+  }
+
+  return base;
+}
+
+/** 取一段文本的最后一个句子（用于跨段取「上一句」） */
+function lastSentenceOf(text: string): string {
+  const spans = splitSentences(text);
+  if (spans.length === 0) return "";
+  const last = spans[spans.length - 1];
+  return text.slice(last.start, last.end);
 }
