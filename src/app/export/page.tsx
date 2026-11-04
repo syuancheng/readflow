@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, ne, sql } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import { exports, settings, userWords, LOCAL_USER } from "@/db/schema";
@@ -14,10 +14,11 @@ export default async function ExportPage() {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
+  // 词库词数只算还在词库里的（已移出的不导出，也不该出现在计数里）
   const wordCount = db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")))
     .get();
 
   const exportedByType = db

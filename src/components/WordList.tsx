@@ -44,11 +44,14 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
   const [query, setQuery] = useState("");
 
   const counts = useMemo(() => {
-    const c = { all: words.length, active: 0, learning: 0, learned: 0, deleted: 0, starred: 0 };
+    // 「全部」不含已移出——已移出的词是回收站，不进主列表、不导出，
+    // 只在「已移出」tab 里躺着重回/恢复
+    const c = { all: 0, active: 0, learning: 0, learned: 0, deleted: 0, starred: 0 };
     for (const w of words) {
       c[w.status as keyof typeof c] = (c[w.status as keyof typeof c] ?? 0) + 1;
       if (w.status !== "deleted") {
         c.active += 1;
+        c.all += 1;
         if (w.starred) c.starred += 1;
       }
     }
@@ -58,7 +61,8 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return words.filter((w) => {
-      if (tab === "active" && w.status === "deleted") return false;
+      // 已移出的词只出现在「已移出」tab
+      if (w.status === "deleted" && tab !== "deleted") return false;
       if (tab !== "active" && tab !== "all" && w.status !== tab) return false;
       if (starredOnly && !w.starred) return false;
       if (type === "word" && w.isPhrase) return false;

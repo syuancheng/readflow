@@ -53,10 +53,11 @@ export async function GET() {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
+  // 词库词数只算还在词库里的（已移出的不导出）
   const wordCount = db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")))
     .get();
 
   const byType = db
