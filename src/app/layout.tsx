@@ -1,11 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
-import LogoMark from "@/components/LogoMark";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
-import NavTabs from "@/components/NavTabs";
-import ProfileMenu from "@/components/ProfileMenu";
+import SiteHeader from "@/components/SiteHeader";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -22,18 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <header className="duo-nav sticky top-0 z-30">
-          <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-2 font-extrabold text-[18px] tracking-tight">
-              <LogoMark size={32} />
-              <span className="duo-hide-mobile">ReadFlow</span>
-            </Link>
-            <NavTabs />
-            <div className="ml-auto">
-              <ProfileMenu />
-            </div>
-          </div>
-        </header>
+        <SiteHeader />
         <main className="flex-1">{children}</main>
         <BottomNav />
       </body>

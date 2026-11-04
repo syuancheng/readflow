@@ -142,10 +142,9 @@ try {
   // E 步骤（自动收词仍开着）会顺带收词，清掉，保证 D 阶段起点干净
   await cleanup(keepIds);
 
-  // ---------- D：关掉自动收词（开关已挪到右上角用户菜单） ----------
+  // ---------- D：关掉自动收词（开关在用户菜单；阅读页无顶栏 → 去首页验证再回来） ----------
   await page.evaluate(() => localStorage.setItem("readflow.autoSave", "0"));
-  await page.reload({ waitUntil: "load" });
-  await page.waitForTimeout(600);
+  await page.goto(`${BASE}/`, { waitUntil: "load" });
   await page.click(".pm-trigger");
   await page.waitForSelector(".pm-dropdown", { timeout: 5000 });
   const switchOn = await page
@@ -153,6 +152,8 @@ try {
     .first()
     .evaluate((e) => e.classList.contains("on"));
   check("D0 开关显示关闭态", !switchOn, switchOn ? "on" : "off");
+  await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
+  await page.waitForTimeout(600);
 
   const beforeOff = await wordCount();
   const t2 = await page.evaluate(([TARGET, knownArr]) => {

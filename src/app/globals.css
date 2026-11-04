@@ -686,8 +686,8 @@ body {
 /* 批注栏：滚动文章时吸附在顶栏下方，内容超高时栏内自滚 */
 .reader-aside {
   position: sticky;
-  top: 84px; /* 顶栏 h-16 = 64px + 20px 间距 */
-  max-height: calc(100vh - 100px);
+  top: 16px; /* 阅读页无顶栏，吸附在视口顶部附近 */
+  max-height: calc(100vh - 32px);
   overflow-y: auto;
   min-width: 0;
   scrollbar-width: thin;
