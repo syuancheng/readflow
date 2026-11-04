@@ -93,16 +93,6 @@ function snapRangeToWords(range: Range): Range {
   return r;
 }
 
-/** 从 anchor 重建整句话作为 context */
-function sentenceOf(anchor: Anchor): string {
-  const prefix = anchor.prefix || "";
-  const suffix = anchor.suffix || "";
-  // prefix 是段内前文，取最后一个句子边界后的部分
-  const prefixSent = prefix.replace(/^.*[.!?]\s*/, "");
-  const suffixSent = suffix.replace(/\s*[.!?].*$/, "");
-  return `${prefixSent}${anchor.quote}${suffixSent}`.trim() || anchor.quote;
-}
-
 const Para = memo(function Para({
   p,
   savedLemmas,
@@ -750,17 +740,22 @@ function PickCard({
     setAiStatus("loading");
     setAiText("");
 
-    const context = sentenceOf(anchor);
-    const params = new URLSearchParams({
+    // 段落级上下文：选区 + 段内前文/后文分开标注（对话更全面，能结合后半句解读）
+    const body = {
       word: anchor.quote,
-      context,
+      prefix: anchor.prefix,
+      suffix: anchor.suffix,
       language: "en",
-      monolingual: "false",
-    });
-    if (prompt) params.set("prompt", prompt);
+      monolingual: false,
+      ...(prompt ? { prompt } : {}),
+    };
 
     try {
-      const res = await fetch(`/api/explain?${params}`);
+      const res = await fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!res.ok) throw new Error("请求失败");
 
       const reader = res.body?.getReader();
