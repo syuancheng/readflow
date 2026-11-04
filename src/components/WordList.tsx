@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
-import { speak, canSpeak } from "@/lib/speak";
+import { speak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
 
 export type WordContextRow = {
@@ -162,7 +162,9 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
                       /{normalizePhonetic(w.phonetic)}/
                     </button>
                   )}
-                  {canSpeak && !w.phonetic && (
+                  {/* 无音标的词（如句子/短语）给独立发音按钮；不做 canSpeak 条件渲染——
+                      那是模块加载时判断 window 的，SSR 与客户端不一致会引发 hydration 报错 */}
+                  {!w.phonetic && (
                     <button
                       className="duo-speak-btn"
                       onClick={() => speak(w.displayForm)}

@@ -48,11 +48,13 @@ const PHONETIC_FIXES: [RegExp, string][] = [
 /**
  * 统一音标写法。
  *
- * ECDICT 的音标是混着来的：绝大多数条目用 `'glisn` 这种 ASCII 重音记号，
- * 少数条目（多为变形词）用真正的 IPA `ˈglɪsənd`。直接塞进 `/.../` 里，
- * 前者会显示成 `/'glisn/`，看起来像坏了。
+ * ECDICT 的音标是老式记法，直接塞进 `/.../` 里看起来像坏了：
+ *   - 绝大多数条目用 `'glisn` 这种 ASCII 重音记号（' 为主重音、, 为次重音）
+ *   - `.` 也是次重音/音节分隔记号（如 `.endʒi'niәriŋ`）
+ *   - 长音符用的是普通冒号 `:`（如 `kɒ:`），应为 IPA 的 `ː`
+ *   - 一条里可能塞了两个变体（如 `'pri:.print. pri:'print`），只取第一个
  *
- * 这里只做符号替换，不猜音值：' -> ˈ、, -> ˌ（ECDICT 用逗号表示次重音）。
+ * 这里只做符号替换，不猜音值：' → ˈ、, . → ˌ、: → ː。
  * 已经带 IPA 重音符号的不会被改到。
  */
 export function normalizePhonetic(raw: string | null | undefined): string {
@@ -62,8 +64,11 @@ export function normalizePhonetic(raw: string | null | undefined): string {
   for (const [from, to] of PHONETIC_FIXES) out = out.replace(from, to);
 
   return out
+    .split(/\s+/)[0] // 只取第一个变体（空格分隔的是英美/多音变体）
     .replace(/'/g, "ˈ")
-    .replace(/,/g, "ˌ")
-    .replace(/\s+/g, " ")
+    .replace(/[,._]/g, "ˌ") // ECDICT 用 , 和 . 表示次重音/音节分隔
+    .replace(/:/g, "ː") // ASCII 冒号 → IPA 长音符
+    .replace(/^[ˌ]+/, (m) => (m.length > 1 ? "ˌ" : m)) // 不会出现，防御
+    .replace(/[ˌ.]+$/, "") // 去掉结尾悬挂的次重音符号
     .trim();
 }

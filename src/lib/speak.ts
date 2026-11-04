@@ -3,13 +3,14 @@
 /**
  * 浏览器自带 TTS（零成本、离线可用）。
  *
- * 坑：直接 new SpeechSynthesisUtterance 不指定 voice 时，
- * 系统会用默认音色（macOS 上常命中一个低沉的老男声），很难听。
- * 这里按优先级挑一个自然的女声/高质量音色：
- *   1. Google 英语（Chrome 内置，最自然）
- *   2. 系统标记 Enhanced / Premium 的音色
- *   3. Samantha（macOS 自带，自然女声）
- *   4. 其他 en-US 音色里排除明显的老男声
+ * 坑 1：不指定 voice 时系统用默认音色（macOS 上常命中低沉老男声 Albert/Aaron）。
+ *       按优先级挑自然音色：Google 英语 → Enhanced/Premium → 常见自然女声。
+ *
+ * 坑 2：Chrome 的 speechSynthesis 有几个经典 bug，都会导致「点了没声音」：
+ *   a) cancel() 之后同步 speak() 有概率被吞掉 —— 延迟一拍再 speak；
+ *   b) voices 列表是异步加载的，模块加载时拿到的音色对象可能已失效，
+ *      用失效对象赋值 u.voice 会静默失败 —— 每次发音前按名字重新解析；
+ *   c) synth 意外进入 paused 状态后 speak() 无声 —— resume 兜底。
  */
 
 const PREFERRED = [
@@ -18,17 +19,15 @@ const PREFERRED = [
   (v: SpeechSynthesisVoice) => /samantha|ava|allison|serena|karen|moira|tessa/i.test(v.name),
 ];
 
-/** 经验上听感差的老男声（macOS 默认常命中 Albert/Aaron/Fred 一类） */
+/** 经验上听感差的老男声/怪声（macOS 默认常命中 Albert/Aaron/Fred 一类） */
 const AVOID = /albert|aaron|fred|ralph|jr\b|good news|bad news|organ|whisper|bells|bubbles|cello|zarvox|trinoids|boing|deranged|hysterical|pipe/i;
 
-let cached: SpeechSynthesisVoice | null = null;
+/** 只记名字不存对象：音色对象可能随 voices 列表刷新而失效 */
+let cachedName: string | null = null;
 
-function pickVoice(): SpeechSynthesisVoice | null {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
+function pickFrom(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   const en = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
   if (en.length === 0) return null;
-
   for (const match of PREFERRED) {
     const hit = en.find(match);
     if (hit) return hit;
@@ -39,29 +38,53 @@ function pickVoice(): SpeechSynthesisVoice | null {
   return plain[0] ?? en[0];
 }
 
-/** voices 列表是异步加载的，首次可能为空；监听变化后重挑并缓存 */
+/** 每次发音前解析：缓存的音色还在列表里就直接用，不在了重新挑 */
+function resolveVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+  if (cachedName) {
+    const still = voices.find((v) => v.name === cachedName);
+    if (still) return still;
+  }
+  const picked = pickFrom(voices);
+  cachedName = picked?.name ?? null;
+  return picked;
+}
+
+/** 预热：触发 voices 异步加载；加载完成后更新缓存的名字 */
 if (typeof window !== "undefined" && "speechSynthesis" in window) {
-  cached = pickVoice();
+  window.speechSynthesis.getVoices();
   window.speechSynthesis.addEventListener?.("voiceschanged", () => {
-    cached = pickVoice();
+    const picked = pickFrom(window.speechSynthesis.getVoices());
+    cachedName = picked?.name ?? null;
   });
 }
 
 export function speak(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  if (!text.trim()) return;
   const synth = window.speechSynthesis;
-  if (!cached) cached = pickVoice();
 
   const u = new SpeechSynthesisUtterance(text);
-  if (cached) {
-    u.voice = cached;
-    u.lang = cached.lang;
+  const v = resolveVoice();
+  if (v) {
+    u.voice = v;
+    u.lang = v.lang;
   } else {
     u.lang = "en-US";
   }
   u.rate = 0.95;
+
   synth.cancel();
-  synth.speak(u);
+  if (synth.paused) synth.resume();
+  // cancel() 后同步 speak() 会被 Chrome 吞掉，延迟一拍（仍在用户手势激活窗口内）
+  setTimeout(
+    () => {
+      if (synth.paused) synth.resume();
+      synth.speak(u);
+    },
+    30,
+  );
 }
 
 export const canSpeak =
