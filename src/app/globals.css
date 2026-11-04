@@ -820,9 +820,15 @@ body {
 
 /* ====== 已存句子/短语批注：正文标记 + 右栏回看列表 ====== */
 
-/* 正文里「这句有批注」的持久标记：绿色虚线下划线，区别于单词的绿色渐变 */
+/* 正文里「这句有批注」的持久标记：浅绿高亮整词。
+   与「当前选中锚点」(.w-anchor = 同底色 + 绿下划) 区分：纯底色即已存批注 */
 .w-annotated {
-  border-bottom: 3px dotted var(--duo-green-dark);
+  background: var(--duo-green-soft);
+}
+
+.w-annotated:hover {
+  background: var(--duo-green-soft);
+  box-shadow: inset 0 -2px 0 var(--duo-green);
 }
 
 .rf-annots {
