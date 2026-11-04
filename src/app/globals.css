@@ -822,7 +822,7 @@ body {
 
 /* 正文里「这句有批注」的持久标记：绿色虚线下划线，区别于单词的绿色渐变 */
 .w-annotated {
-  border-bottom: 2px dotted var(--duo-green);
+  border-bottom: 3px dotted var(--duo-green-dark);
 }
 
 .rf-annots {
