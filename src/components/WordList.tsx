@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
+import { speak, canSpeak } from "@/lib/speak";
+import MarkdownText from "@/components/MarkdownText";
 
 export type WordContextRow = {
   id: string;
@@ -152,9 +154,26 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
                 <div className="flex items-baseline gap-2 min-w-0">
                   <h3 className="text-[17px] font-extrabold">{w.displayForm}</h3>
                   {w.phonetic && (
-                    <span className="text-[13px] font-medium text-ink-faint font-mono">
+                    <button
+                      className="text-[13px] font-medium text-ink-faint font-mono hover:text-ink cursor-pointer leading-none"
+                      onClick={() => speak(w.displayForm)}
+                      title="点击朗读"
+                    >
                       /{normalizePhonetic(w.phonetic)}/
-                    </span>
+                    </button>
+                  )}
+                  {canSpeak && !w.phonetic && (
+                    <button
+                      className="duo-speak-btn"
+                      onClick={() => speak(w.displayForm)}
+                      aria-label="发音"
+                      title="发音"
+                    >
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
+                        <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                      </svg>
+                    </button>
                   )}
                   {w.isPhrase ? (
                     <span className="duo-badge duo-badge-blue shrink-0">短语</span>
@@ -213,9 +232,10 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
                 <span className="duo-badge duo-badge-purple mb-1.5 inline-block">{w.pos}</span>
               )}
 
-              <p className="text-[14px] text-ink-soft font-medium mb-2 whitespace-pre-line">
-                {normalizeTranslation(w.translation)}
-              </p>
+              {/* 释义：AI 释义是 Markdown（标题/加粗/列表），与阅读页批注卡同一套渲染 */}
+              <div className="text-[14px] text-ink-soft font-medium mb-2">
+                <MarkdownText text={normalizeTranslation(w.translation)} />
+              </div>
 
               {/* 上下文原句 + 跳回原文 */}
               {w.contexts.length > 0 && (

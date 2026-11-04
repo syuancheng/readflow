@@ -37,12 +37,16 @@ export async function PATCH(
   const gloss = body.aiGloss;
   db.update(contexts).set({ aiGloss: gloss }).where(eq(contexts.id, id)).run();
 
+  // 回填词条释义，让词库页也能看到：
+  // - 短语/句子：词典本来就查不到，AI 释义就是它的释义，直接全量覆盖（不再截 500 字）
+  // - 单词：词典释义更规整，只在还是占位符时补上
   const word = db.select().from(userWords).where(eq(userWords.id, row.userWordId)).get();
-  if (word && (word.translation === "(待补充释义)" || !word.translation)) {
-    db.update(userWords)
-      .set({ translation: gloss.slice(0, 500) })
-      .where(eq(userWords.id, word.id))
-      .run();
+  if (word) {
+    if (word.isPhrase === 1) {
+      db.update(userWords).set({ translation: gloss }).where(eq(userWords.id, word.id)).run();
+    } else if (word.translation === "(待补充释义)" || !word.translation) {
+      db.update(userWords).set({ translation: gloss }).where(eq(userWords.id, word.id)).run();
+    }
   }
 
   return NextResponse.json({ ok: true });

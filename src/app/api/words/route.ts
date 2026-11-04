@@ -113,7 +113,7 @@ export async function POST(req: Request) {
   const lemmaForm = dictResult.lemmaForm || word.trim();
   const displayForm = word.trim();
   const phonetic = dictResult.entry?.phonetic ?? null;
-  const translation = dictResult.entry?.translation ?? aiGloss?.slice(0, 500) ?? "(待补充释义)";
+  const translation = dictResult.entry?.translation ?? aiGloss ?? "(待补充释义)";
   const pos = dictResult.entry?.pos ?? null;
 
   const now = Date.now();
