@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/annotations?textId=xxx
  *
- * 列出某篇文章里「拖选保存的句子/短语批注」，按时间倒序。
+ * 列出某篇文章里保存过的批注（单词点查 + 句子/短语拖选都算），按时间倒序。
  * 数据来自 contexts（本来就有段落偏移 + 前后文 + AI 释义），不新增表。
- * 只保留选区含空格的条目（点词自动收的单词不算批注），并排除已移出词库的词条。
+ * 排除已移出词库的词条。
  */
 export async function GET(req: Request) {
   const textId = new URL(req.url).searchParams.get("textId");
@@ -41,8 +41,11 @@ export async function GET(req: Request) {
     .orderBy(desc(contexts.createdAt))
     .all();
 
+  // 单词与句子/短语一视同仁：点词自动收的 context 也返回，
+  // 让「那次被查的出现」获得持久绿虚线标记（w-annotated），并进回看列表。
+  // 只排除已移出词库的词条。
   const annotations = rows
-    .filter((r) => /\s/.test(r.quote.trim()) && r.wordStatus !== "deleted")
+    .filter((r) => r.wordStatus !== "deleted")
     .map(({ wordStatus: _status, ...r }) => r);
 
   return NextResponse.json({ annotations });

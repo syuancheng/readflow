@@ -297,13 +297,15 @@ export default function Reader({
     if (saved && saved.status !== "deleted") return;
     if (!autoSave) return;
 
-    // 自动收词：落库后回填 justSaved（收起批注时可撤销）
+    // 自动收词：落库后回填 justSaved（收起批注时可撤销）；
+    // 并刷新批注列表——单词那次出现的持久绿虚线（w-annotated）由此而来
     void saveWord(pickData).then((info) => {
       setPick((cur) =>
         cur && cur.source === "word" && cur.anchor.quote.toLowerCase() === key
           ? { ...cur, justSaved: info?.created === true }
           : cur,
       );
+      if (info) void loadAnnotations();
     });
   }
 
@@ -613,7 +615,7 @@ export default function Reader({
           {showAnnotations && (
             <div className="rf-annots-list">
               {annotations.length === 0 ? (
-                <p className="rf-annots-empty">拖选一句话，它会自动存到这里，随时可以翻回去看</p>
+                <p className="rf-annots-empty">点过的词、划过的句子都会存到这里，随时翻回去看</p>
               ) : (
                 annotations.map((a) => (
                   <div
