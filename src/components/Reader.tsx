@@ -483,15 +483,32 @@ export default function Reader({
     setPick(pd);
   }
 
-  /** 移除一条已存批注（只删该 context，不动词条本身） */
+  /**
+   * 移除一条已存批注。
+   * 服务端删掉该 context；若占位词条（句子/短语）已无其他批注，会连带删掉词条。
+   * 前端同步：批注列表、正文虚线标记、savedMap 三处一起清。
+   */
   async function removeAnnotation(a: Annotation) {
+    let prunedWord = false;
     try {
       const res = await fetch(`/api/words/${a.wordId}?contextId=${a.id}`, { method: "DELETE" });
       if (!res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      prunedWord = data.prunedWord === true;
     } catch {
       return;
     }
     setAnnotations((prev) => prev.filter((x) => x.id !== a.id));
+    if (prunedWord) {
+      // 占位词条已被服务端删除：从 savedMap 移除，保持 ✓/+ 状态一致
+      setSavedMap((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of next) {
+          if (v.id === a.wordId) next.delete(k);
+        }
+        return next;
+      });
+    }
     if (pick?.contextId === a.id) close();
   }
 

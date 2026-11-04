@@ -70,9 +70,36 @@ export async function DELETE(
   const contextId = url.searchParams.get("contextId");
 
   if (contextId) {
-    // 只删一条 context
+    // 只删一条 context。如果这条批注是句子/短语的占位词条（isPhrase），
+    // 且删完后它已经没有任何 context 了，就把词条一并删掉——
+    // 否则词库里会留下一具没有语境的句子尸体。
+    const word = db
+      .select()
+      .from(userWords)
+      .where(eq(userWords.id, id))
+      .get() as typeof userWords.$inferSelect | undefined;
+
+    if (!word) {
+      return NextResponse.json({ error: "词条不存在" }, { status: 404 });
+    }
+    if (word.userId !== LOCAL_USER) {
+      return NextResponse.json({ error: "无权操作" }, { status: 403 });
+    }
+
     db.delete(contexts).where(eq(contexts.id, contextId)).run();
-    return NextResponse.json({ ok: true });
+
+    const remaining = db
+      .select({ id: contexts.id })
+      .from(contexts)
+      .where(eq(contexts.userWordId, id))
+      .all();
+
+    if (word.isPhrase === 1 && remaining.length === 0) {
+      db.delete(userWords).where(eq(userWords.id, id)).run();
+      return NextResponse.json({ ok: true, prunedWord: true });
+    }
+
+    return NextResponse.json({ ok: true, prunedWord: false });
   }
 
   // 验证归属
