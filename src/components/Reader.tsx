@@ -17,6 +17,25 @@ type Pick = {
   source: "word" | "select";
   /** 点词自动入库时，本次是新建词条 —— 收起批注时撤销（delete-on-deselect） */
   justSaved?: boolean;
+  /** 拖选自动入库后对应的 context id，用于回填 AI 释义 / 回看 */
+  contextId?: string;
+  /** 从已存批注回看时，直接展示当时保存的 AI 释义，不重新请求 */
+  initialGloss?: string;
+};
+
+/** 一篇文本里已保存的句子/短语批注（来自 contexts 表） */
+type Annotation = {
+  id: string;
+  wordId: string;
+  paragraphId: string;
+  paragraphIdx: number;
+  start: number;
+  end: number;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  aiGloss: string | null;
+  createdAt: number;
 };
 
 /** 把 DOM 里的 (node, offset) 换算成段落内的字符偏移 */
@@ -82,24 +101,44 @@ function sentenceOf(anchor: Anchor): string {
   return `${prefixSent}${anchor.quote}${suffixSent}`.trim() || anchor.quote;
 }
 
-const Para = memo(function Para({ p, savedLemmas }: { p: Para; savedLemmas: Set<string> }) {
+const Para = memo(function Para({
+  p,
+  savedLemmas,
+  rangeKey,
+}: {
+  p: Para;
+  savedLemmas: Set<string>;
+  /** 该段已存批注的字符范围，逗号分隔的 "start-end"；用字符串保证 memo 稳定 */
+  rangeKey: string;
+}) {
   const tokens = useMemo(() => tokenize(p.content), [p.content]);
+  const ranges = useMemo(
+    () =>
+      rangeKey
+        .split(",")
+        .filter(Boolean)
+        .map((s) => {
+          const [a, b] = s.split("-").map(Number);
+          return { start: a, end: b };
+        }),
+    [rangeKey],
+  );
   return (
     <p data-pid={p.id} data-idx={p.idx}>
-      {tokens.map((t, i) =>
-        t.word ? (
+      {tokens.map((t, i) => {
+        if (!t.word) return <span key={i}>{t.text}</span>;
+        const annotated = ranges.some((r) => t.end > r.start && t.start < r.end);
+        return (
           <span
             key={i}
-            className={`w${savedLemmas.has(t.text.toLowerCase()) ? " w-saved" : ""}`}
+            className={`w${savedLemmas.has(t.text.toLowerCase()) ? " w-saved" : ""}${annotated ? " w-annotated" : ""}`}
             data-s={t.start}
             data-e={t.end}
           >
             {t.text}
           </span>
-        ) : (
-          <span key={i}>{t.text}</span>
-        ),
-      )}
+        );
+      })}
     </p>
   );
 });
@@ -113,6 +152,8 @@ export type SavedWordInfo = {
   starred: number;
   /** 本次点击新建的词条；用于「收起即撤销」 */
   created?: boolean;
+  /** 本次落库产生的 context id（拖选批注用） */
+  contextId?: string;
 };
 
 function buildSavedMap(words: SavedWordInfo[]): Map<string, SavedWordInfo> {
@@ -145,12 +186,30 @@ export default function Reader({
   const [pick, setPick] = useState<Pick | null>(null);
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
   const [autoSave, setAutoSave] = useState(true);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [showAnnotations, setShowAnnotations] = useState(true);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 已收词表（含状态），键为小写 displayForm / lemma
   const [savedMap, setSavedMap] = useState<Map<string, SavedWordInfo>>(() =>
     buildSavedMap(savedWords),
   );
+
+  /** 拉取本文已保存的句子/短语批注（回看列表） */
+  const loadAnnotations = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/annotations?textId=${encodeURIComponent(textId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setAnnotations(data.annotations ?? []);
+    } catch {
+      /* 静默失败：批注列表是增强功能，不影响正文阅读 */
+    }
+  }, [textId]);
+
+  useEffect(() => {
+    void loadAnnotations();
+  }, [loadAnnotations]);
 
   useEffect(() => {
     setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
@@ -200,6 +259,15 @@ export default function Reader({
     }
     return s;
   }, [savedMap]);
+
+  // 每段已存批注的字符范围，序列化成字符串传给 memo 化的 Para（避免长文全量重渲染）
+  const rangeKeyByPara = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of annotations) {
+      m.set(a.paragraphId, (m.get(a.paragraphId) ?? "") + `${a.start}-${a.end},`);
+    }
+    return m;
+  }, [annotations]);
 
   function onClick(e: React.MouseEvent) {
     const sel = window.getSelection();
@@ -285,14 +353,21 @@ export default function Reader({
       return en > start && s < end;
     });
     markActiveAnchor(anchors);
-    setPick({
+    const pickData: Pick = {
       paragraphId: pid,
       paragraphIdx: p.idx,
       anchor: buildAnchor(p.content, start, end),
       x: e.clientX,
       y: e.clientY,
       source: "select",
-    });
+    };
+    setPick(pickData);
+
+    // 与点词一致：自动收词开时，拖选的句子/短语也自动入库。
+    // 关掉批注后仍能从「已存批注」翻回去看，不用重新选中。
+    if (autoSave && /\s/.test(pickData.anchor.quote.trim())) {
+      void autoSaveSelection(pickData);
+    }
   }
 
   function celebrate(x: number, y: number, label: string) {
@@ -330,6 +405,7 @@ export default function Reader({
         status: data.status ?? "learning",
         starred: data.starred ?? 0,
         created: data.created === true,
+        contextId: data.contextId,
       };
       setSavedMap((prev) => {
         const next = new Map(prev);
@@ -337,11 +413,86 @@ export default function Reader({
         if (info.lemma) next.set(info.lemma.toLowerCase(), info);
         return next;
       });
-      celebrate(pickData.x, pickData.y - 20, "+1 词");
+      celebrate(pickData.x, pickData.y - 20, /\s/.test(anchor.quote.trim()) ? "+1 批注" : "+1 词");
       return info;
     } catch {
       return null;
     }
+  }
+
+  /** 拖选自动入库：落库后把 contextId 挂到当前 pick，并刷新回看列表 */
+  async function autoSaveSelection(pickData: Pick) {
+    const info = await saveWord(pickData);
+    if (!info?.contextId) return;
+    setPick((cur) =>
+      cur &&
+      cur.source === "select" &&
+      cur.paragraphId === pickData.paragraphId &&
+      cur.anchor.start === pickData.anchor.start &&
+      cur.anchor.end === pickData.anchor.end
+        ? { ...cur, contextId: info.contextId, justSaved: info.created === true }
+        : cur,
+    );
+    await loadAnnotations();
+  }
+
+  /** AI 释义生成完成后回填到批注，翻回去看时不用重新请求 AI */
+  async function persistGloss(pickData: Pick, gloss: string) {
+    if (!pickData.contextId) return;
+    try {
+      const res = await fetch(`/api/contexts/${pickData.contextId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiGloss: gloss }),
+      });
+      if (!res.ok) return;
+      setAnnotations((prev) =>
+        prev.map((a) => (a.id === pickData.contextId ? { ...a, aiGloss: gloss } : a)),
+      );
+    } catch {
+      /* 静默失败 */
+    }
+  }
+
+  /** 从「已存批注」列表回看：重建批注卡 + 滚动到原文 + 显示已存释义 */
+  function openAnnotation(a: Annotation) {
+    const pd: Pick = {
+      paragraphId: a.paragraphId,
+      paragraphIdx: a.paragraphIdx,
+      anchor: {
+        start: a.start,
+        end: a.end,
+        quote: a.quote,
+        prefix: a.prefix,
+        suffix: a.suffix,
+      },
+      x: 0,
+      y: 0,
+      source: "select",
+      contextId: a.id,
+      initialGloss: a.aiGloss ?? undefined,
+    };
+    const pEl = document.querySelector<HTMLElement>(`[data-pid="${a.paragraphId}"]`);
+    if (pEl) {
+      const els = [...pEl.querySelectorAll<HTMLElement>(".w")].filter(
+        (el) => Number(el.dataset.e) > a.start && Number(el.dataset.s) < a.end,
+      );
+      markActiveAnchor(els);
+      pEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    setPick(pd);
+  }
+
+  /** 移除一条已存批注（只删该 context，不动词条本身） */
+  async function removeAnnotation(a: Annotation) {
+    try {
+      const res = await fetch(`/api/words/${a.wordId}?contextId=${a.id}`, { method: "DELETE" });
+      if (!res.ok) return;
+    } catch {
+      return;
+    }
+    setAnnotations((prev) => prev.filter((x) => x.id !== a.id));
+    if (pick?.contextId === a.id) close();
   }
 
   /**
@@ -391,7 +542,7 @@ export default function Reader({
         <div className="duo-card reader-article-card">
           <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
             {paragraphs.map((p) => (
-              <Para key={p.id} p={p} savedLemmas={savedSet} />
+              <Para key={p.id} p={p} savedLemmas={savedSet} rangeKey={rangeKeyByPara.get(p.id) ?? ""} />
             ))}
           </div>
         </div>
@@ -420,15 +571,35 @@ export default function Reader({
             pick={pick}
             saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
             onClose={close}
-            onSave={(aiGloss?: string) => void saveWord(pick, aiGloss)}
+            initialGloss={pick.initialGloss}
+            onAIGloss={(text) => void persistGloss(pick, text)}
+            onSave={(aiGloss?: string) => {
+              if (pick.contextId) {
+                // 拖选已自动入库：只补 AI 释义，避免重复插一条 context
+                if (aiGloss) void persistGloss(pick, aiGloss);
+                return;
+              }
+              void saveWord(pick, aiGloss).then(async (info) => {
+                if (!info?.contextId) return;
+                setPick((cur) =>
+                  cur &&
+                  cur.paragraphId === pick.paragraphId &&
+                  cur.anchor.start === pick.anchor.start &&
+                  cur.anchor.end === pick.anchor.end
+                    ? { ...cur, contextId: info.contextId }
+                    : cur,
+                );
+                await loadAnnotations();
+              });
+            }}
             onDelete={() => {
               const info = savedMap.get(pick.anchor.quote.toLowerCase());
-              if (info) void removeWord(info.id);
+              if (info) void removeWord(info.id).then(() => loadAnnotations());
             }}
             onUndo={() => {
               const info = savedMap.get(pick.anchor.quote.toLowerCase());
               close();
-              if (info) void unsaveWord(info, pick.anchor.quote.toLowerCase());
+              if (info) void unsaveWord(info, pick.anchor.quote.toLowerCase()).then(() => loadAnnotations());
             }}
           />
         ) : (
@@ -442,6 +613,45 @@ export default function Reader({
             </p>
           </div>
         )}
+
+        {/* 已存批注：拖选过的句子/短语自动入库，点一条即可翻回去看 */}
+        <div className="rf-annots">
+          <button className="rf-annots-head" onClick={() => setShowAnnotations((v) => !v)}>
+            <span>
+              已存批注 <b>{annotations.length}</b>
+            </span>
+            <span className="rf-annots-toggle">{showAnnotations ? "收起" : "展开"}</span>
+          </button>
+          {showAnnotations && (
+            <div className="rf-annots-list">
+              {annotations.length === 0 ? (
+                <p className="rf-annots-empty">拖选一句话，它会自动存到这里，随时可以翻回去看</p>
+              ) : (
+                annotations.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`rf-annot-item${pick?.contextId === a.id ? " is-active" : ""}`}
+                  >
+                    <button className="rf-annot-open" onClick={() => openAnnotation(a)} title={a.quote}>
+                      <span className="rf-annot-quote">{a.quote.trim()}</span>
+                      <span className="rf-annot-meta">
+                        第 {a.paragraphIdx + 1} 段{a.aiGloss ? " · 已存 AI 释义" : ""}
+                      </span>
+                    </button>
+                    <button
+                      className="rf-annot-del"
+                      onClick={() => void removeAnnotation(a)}
+                      aria-label="移除这条批注"
+                      title="移除这条批注"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </aside>
 
       {floats.map((f) => (
@@ -487,6 +697,8 @@ function PickCard({
   onSave,
   onDelete,
   onUndo,
+  initialGloss,
+  onAIGloss,
 }: {
   pick: Pick;
   saved: SavedWordInfo | null;
@@ -495,6 +707,10 @@ function PickCard({
   onDelete: () => void;
   /** 撤销本次自动收词（仅本次新建的词条会出现） */
   onUndo: () => void;
+  /** 回看已存批注时，直接展示当时保存的 AI 释义 */
+  initialGloss?: string;
+  /** AI 释义生成完成后回调，用于把结果写回该批注 */
+  onAIGloss?: (text: string) => void;
 }) {
   const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
@@ -506,8 +722,10 @@ function PickCard({
   const [dictLoading, setDictLoading] = useState(true);
 
   // AI 释义
-  const [aiText, setAiText] = useState("");
-  const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
+  const [aiText, setAiText] = useState(initialGloss ?? "");
+  const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">(
+    initialGloss ? "done" : "idle",
+  );
   const [showAskInput, setShowAskInput] = useState(false);
   const [askPrompt, setAskPrompt] = useState("");
 
@@ -518,8 +736,8 @@ function PickCard({
   useEffect(() => {
     setDict(null);
     setDictLoading(true);
-    setAiText("");
-    setAiStatus("idle");
+    setAiText(initialGloss ?? "");
+    setAiStatus(initialGloss ? "done" : "idle");
     setShowAskInput(false);
     setAskPrompt("");
 
@@ -530,7 +748,7 @@ function PickCard({
         setDictLoading(false);
       })
       .catch(() => setDictLoading(false));
-  }, [anchor.quote]);
+  }, [anchor.quote, initialGloss]);
 
   /** 触发 AI 释义（流式） */
   async function triggerAI(prompt?: string) {
@@ -565,6 +783,8 @@ function PickCard({
       }
 
       setAiStatus("done");
+      // 生成完成即写回该批注，翻回去看时不用重新请求 AI
+      onAIGloss?.(text);
     } catch (err) {
       setAiText(`[Error: ${err instanceof Error ? err.message : "AI 释义失败"}]`);
       setAiStatus("error");
