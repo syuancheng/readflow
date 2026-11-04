@@ -569,6 +569,16 @@ export default function Reader({
             saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
             onClose={close}
             initialGloss={pick.initialGloss}
+            /* AI 用段落级完整前后文（锚点的 40 字符窗口只够定位，会截掉句子主语） */
+            aiContext={(() => {
+              const para = paragraphs.find((p) => p.id === pick.paragraphId);
+              return para
+                ? {
+                    prefix: para.content.slice(0, pick.anchor.start),
+                    suffix: para.content.slice(pick.anchor.end),
+                  }
+                : { prefix: pick.anchor.prefix, suffix: pick.anchor.suffix };
+            })()}
             onAIGloss={(text) => void persistGloss(pick, text)}
             onSave={(aiGloss?: string) => {
               if (pick.contextId) {
@@ -684,6 +694,7 @@ function PickCard({
   onUndo,
   initialGloss,
   onAIGloss,
+  aiContext,
 }: {
   pick: Pick;
   saved: SavedWordInfo | null;
@@ -696,6 +707,8 @@ function PickCard({
   initialGloss?: string;
   /** AI 释义生成完成后回调，用于把结果写回该批注 */
   onAIGloss?: (text: string) => void;
+  /** AI 用的段落级完整前后文（锚点的 40 字符窗口只够定位，会切碎句子） */
+  aiContext: { prefix: string; suffix: string };
 }) {
   const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
@@ -740,11 +753,11 @@ function PickCard({
     setAiStatus("loading");
     setAiText("");
 
-    // 段落级上下文：选区 + 段内前文/后文分开标注（对话更全面，能结合后半句解读）
+    // 段落级上下文：选区 + 段内完整前文/后文（保证句子完整，不被锚点窗口截断）
     const body = {
       word: anchor.quote,
-      prefix: anchor.prefix,
-      suffix: anchor.suffix,
+      prefix: aiContext.prefix,
+      suffix: aiContext.suffix,
       language: "en",
       monolingual: false,
       ...(prompt ? { prompt } : {}),
