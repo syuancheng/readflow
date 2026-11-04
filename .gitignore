@@ -52,3 +52,6 @@ next-env.d.ts
 
 # strays
 nohup.out
+
+# db backups
+/data/*.bak*
