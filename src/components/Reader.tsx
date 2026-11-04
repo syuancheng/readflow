@@ -557,12 +557,8 @@ export default function Reader({
         </div>
       </div>
 
-      {/* 右栏（38.2%）：飞书/腾讯文档式批注栏，滚动时吸附在顶栏下方 */}
+      {/* 右栏（38.2%）：查词卡在顶，已存批注随之下移；滚动时吸附在顶栏下方 */}
       <aside className="reader-aside">
-        <div className="reader-aside-head">
-          <p className="reader-aside-title">批注</p>
-        </div>
-
         {pick ? (
           <PickCard
             key={`${pick.paragraphId}:${pick.anchor.start}:${pick.anchor.end}:${pick.source}`}
@@ -613,15 +609,7 @@ export default function Reader({
             }}
           />
         ) : (
-          <div className="reader-aside-empty">
-            <p className="text-[16px] mb-1.5">📝</p>
-            <p className="text-[14px] font-bold text-ink-soft">还没有批注</p>
-            <p className="text-[13px] text-ink-faint mt-1 leading-relaxed">
-              点击文章中的单词，或拖选一句话，
-              <br />
-              释义和 AI 解释会显示在这里
-            </p>
-          </div>
+          <p className="reader-hint">点击文中单词，或拖住一句话 —— 释义会显示在这里</p>
         )}
 
         {/* 已存批注：拖选过的句子/短语自动入库，点一条即可翻回去看 */}

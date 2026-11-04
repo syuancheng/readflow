@@ -703,20 +703,6 @@ body {
   border-radius: 999px;
 }
 
-.reader-aside-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.reader-aside-title {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--duo-ink);
-}
-
 /* 批注卡：右栏内无框平铺，直接展示词/音标/释义 */
 .reader-note {
   width: 100%;
@@ -961,13 +947,12 @@ body {
   border-radius: 3px;
 }
 
-/* 右栏空状态 */
-.reader-aside-empty {
-  border: 2px dashed var(--duo-border);
-  border-radius: 16px;
-  background: var(--duo-bg);
-  padding: 44px 24px;
-  text-align: center;
+/* 右栏轻提示：无框一句话，替代原空态框 */
+.reader-hint {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--duo-ink-faint);
+  padding: 10px 2px 0;
 }
 
 /* 窄屏回退：单栏，批注栏跟在文章下方 */

@@ -4,6 +4,7 @@ import Link from "next/link";
 import LogoMark from "@/components/LogoMark";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
+import NavTabs from "@/components/NavTabs";
 import ProfileMenu from "@/components/ProfileMenu";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -27,20 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <LogoMark size={32} />
               <span className="duo-hide-mobile">ReadFlow</span>
             </Link>
-            <nav className="flex items-center gap-2 text-ink-soft ml-2 duo-hide-mobile">
-              <Link href="/" className="duo-nav-link">
-                我的文本
-              </Link>
-              <Link href="/words" className="duo-nav-link">
-                我的词库
-              </Link>
-              <Link href="/export" className="duo-nav-link">
-                导出墨墨
-              </Link>
-              <Link href="/stats" className="duo-nav-link">
-                战绩
-              </Link>
-            </nav>
+            <NavTabs />
             <div className="ml-auto">
               <ProfileMenu />
             </div>
