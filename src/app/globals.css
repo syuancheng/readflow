@@ -256,15 +256,6 @@ body {
   background: var(--duo-blue-soft);
 }
 
-/* 已收进词库的词 — 多邻国式绿色下划 */
-.w-saved {
-  background: linear-gradient(transparent 60%, var(--duo-green-soft) 60%);
-}
-
-.w-saved:hover {
-  background: var(--duo-green-soft);
-}
-
 /* 拖选中的短语 */
 .w-sel {
   background: var(--duo-blue-soft);

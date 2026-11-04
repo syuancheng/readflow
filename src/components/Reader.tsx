@@ -96,11 +96,9 @@ function snapRangeToWords(range: Range): Range {
 
 const Para = memo(function Para({
   p,
-  savedLemmas,
   rangeKey,
 }: {
   p: Para;
-  savedLemmas: Set<string>;
   /** 该段已存批注的字符范围，逗号分隔的 "start-end"；用字符串保证 memo 稳定 */
   rangeKey: string;
 }) {
@@ -124,7 +122,10 @@ const Para = memo(function Para({
         return (
           <span
             key={i}
-            className={`w${savedLemmas.has(t.text.toLowerCase()) ? " w-saved" : ""}${annotated ? " w-annotated" : ""}`}
+            /* 标记只反映「这次批注」：划选存档的那一次出现（w-annotated）。
+               不做词库级全局标记——同一个词在别的句子里可能你是懂的，
+               全文铺绿既误导又破坏「单词放在句子语境里解释」的原则 */
+            className={`w${annotated ? " w-annotated" : ""}`}
             data-s={t.start}
             data-e={t.end}
           >
@@ -240,17 +241,6 @@ export default function Reader({
     const t = setTimeout(() => el.classList.remove("para-flash"), 2600);
     return () => clearTimeout(t);
   }, [focusParaId]);
-
-  // 用于高亮的已收词集合
-  const savedSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const w of savedMap.values()) {
-      if (w.status === "deleted") continue;
-      s.add(w.displayForm.toLowerCase());
-      s.add(w.lemma.toLowerCase());
-    }
-    return s;
-  }, [savedMap]);
 
   // 每段已存批注的字符范围，序列化成字符串传给 memo 化的 Para（避免长文全量重渲染）
   const rangeKeyByPara = useMemo(() => {
@@ -551,7 +541,7 @@ export default function Reader({
         <div className="duo-card reader-article-card">
           <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
             {paragraphs.map((p) => (
-              <Para key={p.id} p={p} savedLemmas={savedSet} rangeKey={rangeKeyByPara.get(p.id) ?? ""} />
+              <Para key={p.id} p={p} rangeKey={rangeKeyByPara.get(p.id) ?? ""} />
             ))}
           </div>
         </div>
