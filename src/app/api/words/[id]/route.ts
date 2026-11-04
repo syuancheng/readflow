@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { userWords, contexts, LOCAL_USER } from "@/db/schema";
+import { userWords, contexts, exports, LOCAL_USER } from "@/db/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 /**
  * PATCH /api/words/[id]
  * 更新词条状态（对齐 Readlang 的词表操作）：
- *   { status: "learning" | "learned" | "deleted" }   —— 移出词库 = 软删除，可恢复
- *   { starred: 0 | 1 }                               —— 星标
+ *   { status: "learning" | "learned" }   —— 标记学习状态
+ *   { starred: 0 | 1 }                   —— 星标
  */
 export async function PATCH(
   req: Request,
@@ -39,7 +39,7 @@ export async function PATCH(
   }
 
   const updates: Partial<typeof userWords.$inferInsert> = {};
-  if (body.status && ["learning", "learned", "deleted"].includes(body.status)) {
+  if (body.status && ["learning", "learned"].includes(body.status)) {
     updates.status = body.status;
   }
   if (typeof body.starred === "number") {
@@ -55,11 +55,11 @@ export async function PATCH(
 
 /**
  * DELETE /api/words/[id]
- * 删除一个词：同时删 user_words 和它关联的 contexts。
+ * 删除一个词：同时删 user_words、它关联的 contexts 和 exports 记录。
  * 如果带 ?contextId=xxx，只删那一条 context，不删词本身。
  *
- * 注意：词库 UI 里的"移出词库"走 PATCH status=deleted（软删除），
- * 保留 exports 记录保证墨墨导出幂等；这个硬删除只用于彻底清掉错词。
+ * 删除一律彻底删除——删除即代表用户已掌握这个词，不留「已移出」的中间态；
+ * 下次再查到这个词就当新词重新收。
  */
 export async function DELETE(
   req: Request,
@@ -128,9 +128,10 @@ export async function DELETE(
   }
 
   db.transaction((tx) => {
-    // contexts 设了 onDelete: cascade，但 better-sqlite3 可能不触发
-    // 所以显式删
+    // contexts 设了 onDelete: cascade，但 better-sqlite3 可能不触发，
+    // 所以显式删；exports 一并清掉——词条都没了，导出去重记录没有意义
     tx.delete(contexts).where(eq(contexts.userWordId, id)).run();
+    tx.delete(exports).where(eq(exports.userWordId, id)).run();
     tx.delete(userWords).where(eq(userWords.id, id)).run();
   });
 

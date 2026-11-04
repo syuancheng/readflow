@@ -142,7 +142,7 @@ export type SavedWordInfo = {
   lemma: string;
   displayForm: string;
   translation: string;
-  status: string; // learning | learned | deleted
+  status: string; // learning | learned
   starred: number;
   /** 本次点击新建的词条；用于「收起即撤销」 */
   created?: boolean;
@@ -294,7 +294,7 @@ export default function Reader({
 
     // 已收过的词：右栏直接展示已存释义，不再请求
     const saved = savedMap.get(key) ?? null;
-    if (saved && saved.status !== "deleted") return;
+    if (saved) return;
     if (!autoSave) return;
 
     // 自动收词：落库后回填 justSaved（收起批注时可撤销）；
@@ -518,24 +518,21 @@ export default function Reader({
     });
   }
 
-  /** 移出词库（软删除，可恢复；保留 exports 记录保证墨墨幂等） */
+  /** 从词库删除（彻底删除）：删词 = 已掌握，不留「已移出」的中间态 */
   async function removeWord(id: string) {
     try {
-      await fetch(`/api/words/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "deleted" }),
-      });
-      setSavedMap((prev) => {
-        const next = new Map(prev);
-        for (const [k, v] of next) {
-          if (v.id === id) next.set(k, { ...v, status: "deleted" });
-        }
-        return next;
-      });
+      const res = await fetch(`/api/words/${id}`, { method: "DELETE" });
+      if (!res.ok) return;
     } catch {
       /* 静默失败 */
     }
+    setSavedMap((prev) => {
+      const next = new Map(prev);
+      for (const [k, v] of next) {
+        if (v.id === id) next.delete(k);
+      }
+      return next;
+    });
   }
 
   return (
@@ -838,13 +835,13 @@ function PickCard({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {/* 收词按钮：已收显示 ✓（点击移出词库），未收显示 + */}
-          {saved && saved.status !== "deleted" ? (
+          {/* 收词按钮：已收显示 ✓（点击彻底删除），未收显示 + */}
+          {saved ? (
             <button
               className="duo-icon-btn duo-icon-btn-sm duo-icon-btn-saved"
               onClick={onDelete}
-              title="已在词库 · 点击移出"
-              aria-label="已在词库，点击移出"
+              title="已在词库 · 点击删除"
+              aria-label="已在词库，点击删除"
             >
               ✓
             </button>

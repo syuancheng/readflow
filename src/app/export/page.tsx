@@ -14,11 +14,11 @@ export default async function ExportPage() {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  // 词库词数只算还在词库里的（已移出的不导出，也不该出现在计数里）
+  // 词库词数
   const wordCount = db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")))
+    .where(eq(userWords.userId, LOCAL_USER))
     .get();
 
   const exportedByType = db

@@ -21,19 +21,18 @@ export type WordRow = {
   phonetic: string | null;
   pos: string | null;
   translation: string;
-  status: string; // learning | learned | deleted
+  status: string; // learning | learned
   starred: number;
   isPhrase: number;
   contexts: WordContextRow[];
 };
 
-type StatusTab = "active" | "learning" | "learned" | "deleted" | "all";
+type StatusTab = "active" | "learning" | "learned" | "all";
 type TypeFilter = "all" | "word" | "phrase";
 
 const STATUS_LABEL: Record<string, string> = {
   learning: "学习中",
   learned: "已掌握",
-  deleted: "已移出",
 };
 
 export default function WordList({ words: initial }: { words: WordRow[] }) {
@@ -44,16 +43,12 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
   const [query, setQuery] = useState("");
 
   const counts = useMemo(() => {
-    // 「全部」不含已移出——已移出的词是回收站，不进主列表、不导出，
-    // 只在「已移出」tab 里躺着重回/恢复
-    const c = { all: 0, active: 0, learning: 0, learned: 0, deleted: 0, starred: 0 };
+    const c = { all: 0, active: 0, learning: 0, learned: 0, starred: 0 };
     for (const w of words) {
       c[w.status as keyof typeof c] = (c[w.status as keyof typeof c] ?? 0) + 1;
-      if (w.status !== "deleted") {
-        c.active += 1;
-        c.all += 1;
-        if (w.starred) c.starred += 1;
-      }
+      c.active += 1;
+      c.all += 1;
+      if (w.starred) c.starred += 1;
     }
     return c;
   }, [words]);
@@ -61,8 +56,6 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return words.filter((w) => {
-      // 已移出的词只出现在「已移出」tab
-      if (w.status === "deleted" && tab !== "deleted") return false;
       if (tab !== "active" && tab !== "all" && w.status !== tab) return false;
       if (starredOnly && !w.starred) return false;
       if (type === "word" && w.isPhrase) return false;
@@ -90,6 +83,18 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
     }
   }
 
+  /** 彻底删除：删词 = 已掌握，连同语境一起清掉，想再学就再查一遍 */
+  async function hardDelete(id: string) {
+    // 乐观移除
+    setWords((prev) => prev.filter((w) => w.id !== id));
+    try {
+      const res = await fetch(`/api/words/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+    } catch {
+      // 回滚由刷新页面兜底，这里不阻塞 UI
+    }
+  }
+
   return (
     <div>
       {/* 筛选区 */}
@@ -99,7 +104,6 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
             ["active", `词库 ${counts.active}`],
             ["learning", `学习中 ${counts.learning}`],
             ["learned", `已掌握 ${counts.learned}`],
-            ["deleted", `已移出 ${counts.deleted}`],
             ["all", `全部 ${counts.all}`],
           ] as [StatusTab, string][]
         ).map(([k, label]) => (
@@ -153,7 +157,7 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
       ) : (
         <ul className="space-y-3">
           {shown.map((w) => (
-            <li key={w.id} className="duo-text-item" style={w.status === "deleted" ? { opacity: 0.55 } : undefined}>
+            <li key={w.id} className="duo-text-item">
               <div className="flex items-baseline justify-between gap-4 mb-1">
                 <div className="flex items-baseline gap-2 min-w-0">
                   <h3 className="text-[17px] font-extrabold">{w.displayForm}</h3>
@@ -214,23 +218,13 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
                   >
                     {w.status === "learned" ? "↩" : "✓"}
                   </button>
-                  {w.status === "deleted" ? (
-                    <button
-                      className="word-action-btn"
-                      onClick={() => patch(w.id, { status: "learning" })}
-                      title="恢复到词库"
-                    >
-                      ⟲
-                    </button>
-                  ) : (
-                    <button
-                      className="word-action-btn"
-                      onClick={() => patch(w.id, { status: "deleted" })}
-                      title="移出词库（可在「已移出」里恢复）"
-                    >
-                      🗑
-                    </button>
-                  )}
+                  <button
+                    className="word-action-btn"
+                    onClick={() => hardDelete(w.id)}
+                    title="彻底删除（删词 = 已掌握）"
+                  >
+                    🗑
+                  </button>
                 </div>
               </div>
 

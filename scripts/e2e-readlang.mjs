@@ -59,7 +59,7 @@ try {
   const before = await wordCount();
   const keepIds = new Set(before.words.map((w) => w.id));
   const known = before.words.flatMap((w) => [w.displayForm.toLowerCase(), w.lemma.toLowerCase()]);
-  console.log(`\n-- 起始词库 ${before.total} 词 --`);
+  console.log(`\n-- 起始词库 ${before.total} 词: ${before.words.map((w) => w.lemma).join(", ")} --`);
 
   // 找一个正经英文单词（长度 >= 5 且纯字母，且词库里还没有）来点
   const target = await page.evaluate((knownArr) => {
@@ -130,7 +130,7 @@ try {
   await page.waitForTimeout(900);
   const aiBtn = await page.locator('.reader-note button:has-text("AI")').count();
   const saveBtnEarly = await page
-    .locator('[aria-label="收进词库"], [aria-label="已在词库，点击移出"]')
+    .locator('[aria-label="收进词库"], [aria-label="已在词库，点击删除"]')
     .count();
   check(
     "E 批注卡内含 AI 释义入口与收词按钮",

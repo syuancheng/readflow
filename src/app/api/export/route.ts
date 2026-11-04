@@ -53,11 +53,11 @@ export async function GET() {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  // 词库词数只算还在词库里的（已移出的不导出）
+  // 词库词数
   const wordCount = db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")))
+    .where(eq(userWords.userId, LOCAL_USER))
     .get();
 
   const byType = db
@@ -131,11 +131,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // 1. 选出要导的词（已移出词库的不导——避免把删掉的词再推进墨墨）
+  // 1. 选出要导的词
   let wordRows = db
     .select()
     .from(userWords)
-    .where(and(eq(userWords.userId, LOCAL_USER), ne(userWords.status, "deleted")))
+    .where(eq(userWords.userId, LOCAL_USER))
     .orderBy(desc(userWords.createdAt))
     .all();
 

@@ -44,9 +44,9 @@ export const userWords = sqliteTable(
     createdAt: integer("created_at").notNull(),
     /**
      * 收词状态（对齐 Readlang 的词表状态机）：
-     * learning = 学习中（默认） | learned = 已掌握（手动标记） | deleted = 已移出（软删除）
-     * 软删除而不是物理删：已导出到墨墨的记录（exports）必须保留，
-     * 否则幂等去重会失效，同一个词会被再推一次。
+     * learning = 学习中（默认） | learned = 已掌握（手动标记）
+     * 没有软删除——删除一律物理删（连同 contexts / exports）。
+     * 用户删词 = 已掌握，想再学就再查一遍，重新收。
      */
     status: text("status").notNull().default("learning"),
     /** 星标：手动挑出的重点词 */

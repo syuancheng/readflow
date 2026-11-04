@@ -28,7 +28,6 @@ export default async function TextPage({
     .orderBy(asc(paragraphs.idx));
 
   // 已收词（全量，不只本文——对齐 Readlang：任何文本里收过的词都高亮）。
-  // 软删除的（status=deleted）不高亮、不自动弹出旧释义。
   const savedWords: SavedWordInfo[] = db
     .select({
       id: userWords.id,
@@ -40,8 +39,7 @@ export default async function TextPage({
     })
     .from(userWords)
     .where(eq(userWords.userId, LOCAL_USER))
-    .all()
-    .filter((w) => w.status !== "deleted");
+    .all();
 
   // 每日目标进度条已按用户要求移除
 

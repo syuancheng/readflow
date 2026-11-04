@@ -142,8 +142,8 @@ export async function POST(req: Request) {
     if (existing) {
       resolvedWordId = existing.id;
       // 更新：如果新词典查到了更好的数据，覆盖。
-      // 之前被移出词库（deleted）的词再次被点查 = 重新收下。
-      const nextStatus = existing.status === "deleted" ? "learning" : existing.status;
+      // 删除一律是彻底删除，能走到这里的 existing 一定还在词库里，
+      // 保留它原有的学习状态（可能已被手动标记已掌握）。
       tx.update(userWords)
         .set({
           displayForm,
@@ -151,11 +151,11 @@ export async function POST(req: Request) {
           translation: translation !== "(待补充释义)" ? translation : existing.translation,
           pos: pos ?? existing.pos,
           isPhrase,
-          status: nextStatus,
+          status: existing.status,
         })
         .where(eq(userWords.id, existing.id))
         .run();
-      finalStatus = nextStatus;
+      finalStatus = existing.status;
       finalStarred = existing.starred;
       created = false;
     } else {
