@@ -993,7 +993,7 @@ body {
   100% { background: transparent; }
 }
 
-/* 自动收词开关（阅读页顶栏小药丸） */
+/* 自动收词开关（阅读页顶栏小药丸，已由右上角菜单的开关取代） */
 .autosave-pill {
   display: inline-flex;
   align-items: center;
@@ -1013,6 +1013,162 @@ body {
 .autosave-pill:hover {
   border-color: var(--duo-green);
   color: var(--duo-ink);
+}
+
+/* 右上角用户菜单（仿 Readlang：头像 + 下拉设置面板） */
+.profile-menu {
+  position: relative;
+}
+
+.pm-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.pm-trigger:hover {
+  background: var(--duo-surface);
+}
+
+.pm-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--duo-green), var(--duo-green-dark));
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  border: 2px solid var(--duo-border);
+  user-select: none;
+}
+
+.pm-caret {
+  font-size: 10px;
+  color: var(--duo-ink-soft);
+  line-height: 1;
+}
+
+.pm-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: 264px;
+  background: #fff;
+  border: 2px solid var(--duo-border);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  z-index: 50;
+}
+
+.pm-head {
+  padding: 10px 12px 12px;
+  border-bottom: 1.5px solid var(--duo-border);
+  margin-bottom: 6px;
+}
+
+.pm-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--duo-ink);
+}
+
+.pm-sub {
+  font-size: 12px;
+  color: var(--duo-ink-faint);
+  margin-top: 2px;
+}
+
+.pm-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--duo-ink-faint);
+  padding: 6px 12px 4px;
+  text-transform: uppercase;
+}
+
+.pm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+
+.pm-row:hover {
+  background: var(--duo-green-soft);
+}
+
+.pm-row-static {
+  cursor: default;
+}
+
+.pm-row-static:hover {
+  background: transparent;
+}
+
+.pm-row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--duo-ink);
+}
+
+.pm-row-hint {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--duo-ink-faint);
+}
+
+.pm-switch {
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--duo-ink-faint);
+  position: relative;
+  flex-shrink: 0;
+  transition: background-color 140ms ease;
+}
+
+.pm-switch.on {
+  background: var(--duo-green);
+}
+
+.pm-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 140ms ease;
+}
+
+.pm-switch.on .pm-switch-knob {
+  transform: translateX(18px);
+}
+
+/* 菜单里的音色选择器：放宽一点，选项名较长 */
+.pm-dropdown .voice-picker {
+  max-width: 132px;
+  font-size: 12px;
 }
 
 /* 音色选择器：低调的小下拉，别抢批注栏主视觉 */

@@ -5,7 +5,6 @@ import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
-import VoicePicker from "@/components/VoicePicker";
 
 type Para = { id: string; idx: number; content: string };
 export type ReaderPara = Para;
@@ -216,15 +215,14 @@ export default function Reader({
 
   useEffect(() => {
     setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
+    // 自动收词开关已挪到右上角用户菜单；菜单变更时广播事件，这里同步状态
+    function onAutoSaveChange(e: Event) {
+      const next = (e as CustomEvent<boolean>).detail;
+      if (typeof next === "boolean") setAutoSave(next);
+    }
+    window.addEventListener("readflow.autosave", onAutoSaveChange);
+    return () => window.removeEventListener("readflow.autosave", onAutoSaveChange);
   }, []);
-
-  function toggleAutoSave() {
-    setAutoSave((v) => {
-      const next = !v;
-      localStorage.setItem("readflow.autoSave", next ? "1" : "0");
-      return next;
-    });
-  }
 
   /** 关闭右侧批注：清空选区 + 去掉正文锚点高亮 */
   const close = useCallback(() => {
@@ -572,18 +570,6 @@ export default function Reader({
       <aside className="reader-aside">
         <div className="reader-aside-head">
           <p className="reader-aside-title">批注</p>
-          <VoicePicker />
-          <button
-            className="autosave-pill"
-            onClick={toggleAutoSave}
-            title="开启后，点词会自动收进词库；关闭则只看释义，手动点 + 收词"
-          >
-            <span
-              className="autosave-dot"
-              style={{ background: autoSave ? "var(--duo-green)" : "var(--duo-ink-faint)" }}
-            />
-            自动收词 {autoSave ? "开" : "关"}
-          </button>
         </div>
 
         {pick ? (

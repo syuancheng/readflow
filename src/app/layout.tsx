@@ -4,6 +4,7 @@ import Link from "next/link";
 import LogoMark from "@/components/LogoMark";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
+import ProfileMenu from "@/components/ProfileMenu";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -40,6 +41,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 战绩
               </Link>
             </nav>
+            <div className="ml-auto">
+              <ProfileMenu />
+            </div>
           </div>
         </header>
         <main className="flex-1">{children}</main>

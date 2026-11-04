@@ -142,12 +142,17 @@ try {
   // E 步骤（自动收词仍开着）会顺带收词，清掉，保证 D 阶段起点干净
   await cleanup(keepIds);
 
-  // ---------- D：关掉自动收词 ----------
+  // ---------- D：关掉自动收词（开关已挪到右上角用户菜单） ----------
   await page.evaluate(() => localStorage.setItem("readflow.autoSave", "0"));
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(600);
-  const pillText = await page.locator(".autosave-pill").innerText();
-  check("D0 开关显示关闭态", pillText.includes("关"), pillText.replace(/\n/g, " "));
+  await page.click(".pm-trigger");
+  await page.waitForSelector(".pm-dropdown", { timeout: 5000 });
+  const switchOn = await page
+    .locator(".pm-dropdown .pm-switch")
+    .first()
+    .evaluate((e) => e.classList.contains("on"));
+  check("D0 开关显示关闭态", !switchOn, switchOn ? "on" : "off");
 
   const beforeOff = await wordCount();
   const t2 = await page.evaluate(([TARGET, knownArr]) => {
