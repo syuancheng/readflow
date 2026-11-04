@@ -1015,6 +1015,25 @@ body {
   color: var(--duo-ink);
 }
 
+/* 音色选择器：低调的小下拉，别抢批注栏主视觉 */
+.voice-picker {
+  max-width: 128px;
+  padding: 5px 6px;
+  border-radius: 9px;
+  border: 1.5px solid var(--duo-border);
+  background: var(--duo-bg);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--duo-ink-soft);
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+.voice-picker:hover {
+  border-color: var(--duo-green);
+  color: var(--duo-ink);
+}
+
 .autosave-dot {
   width: 10px;
   height: 10px;

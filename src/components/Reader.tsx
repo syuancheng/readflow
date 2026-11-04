@@ -5,6 +5,7 @@ import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
+import VoicePicker from "@/components/VoicePicker";
 
 type Para = { id: string; idx: number; content: string };
 export type ReaderPara = Para;
@@ -571,6 +572,7 @@ export default function Reader({
       <aside className="reader-aside">
         <div className="reader-aside-head">
           <p className="reader-aside-title">批注</p>
+          <VoicePicker />
           <button
             className="autosave-pill"
             onClick={toggleAutoSave}
