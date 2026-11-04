@@ -5,6 +5,7 @@ import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
 import { aiContextOf } from "@/lib/sentence";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
+import { STREAM_RESET } from "@/lib/config";
 import MarkdownText from "@/components/MarkdownText";
 
 type Para = { id: string; idx: number; content: string };
@@ -765,6 +766,11 @@ function PickCard({
         const { done, value } = await reader.read();
         if (done) break;
         text += decoder.decode(value, { stream: true });
+        // 服务端遇到限流/繁忙会自动重试，重开前吐一个重置标记：
+        // 丢掉上一次的半成品，避免两段释义拼接显示
+        if (text.includes(STREAM_RESET)) {
+          text = text.split(STREAM_RESET).pop() ?? "";
+        }
         setAiText(text);
       }
 

@@ -16,7 +16,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: "未配置 MARKJI_TOKEN。请在 .env 里填入墨墨开放 API 令牌后重启服务。",
+        error: "未配置墨墨 Token。请在右上角头像 → 设置 → 墨墨记单词里填入你的开放 API Token。",
       },
       { status: 200 },
     );

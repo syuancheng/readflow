@@ -55,3 +55,9 @@ nohup.out
 
 # db backups
 /data/*.bak*
+
+# unit test build output
+/.unit/
+
+# unit test build output
+/.unit/

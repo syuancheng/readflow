@@ -139,9 +139,7 @@ export default function ExportPanel({
         >
           <p className="text-[15px] font-extrabold mb-1">还没配置墨墨令牌</p>
           <p className="text-[13.5px] font-medium text-ink-soft leading-relaxed">
-            在项目根目录的 <code className="font-mono">.env</code> 里加一行
-            <code className="font-mono"> MARKJI_TOKEN=你的令牌</code>，重启
-            <code className="font-mono"> npm run dev</code> 后回到这页。
+            点右上角头像 → <b>设置</b> → 墨墨记单词，填入你的开放 API Token，保存即可生效（不用重启）。
             令牌获取：墨墨 App → 我的 → 更多设置 → 实验功能 → 开放 API。
           </p>
         </div>

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "ReadFlow · 网页阅读助手",
+  "version": "0.1.0",
+  "description": "在任意网页高亮你存过的单词/短语并显示中文释义，划词即可查词、收进 ReadFlow 词库。",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/matcher.js", "src/content.js"],
+      "css": ["src/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "ReadFlow 设置"
+  }
+}

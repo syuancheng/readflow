@@ -126,7 +126,7 @@ export async function POST(req: Request) {
   }
   if (!dryRun && !hasMarkjiToken()) {
     return NextResponse.json(
-      { error: "未配置 MARKJI_TOKEN 环境变量，无法写入墨墨" },
+      { error: "未配置墨墨 Token，请在右上角头像 → 设置里填写后再导出" },
       { status: 400 },
     );
   }

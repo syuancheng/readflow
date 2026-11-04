@@ -20,6 +20,7 @@
     "scripts/verify-markji.ts",
     "scripts/verify-stats.ts",
     "src/lib/**/*.ts",
+    "src/db/sqlite.ts",
     "scripts/push-one.ts",
     "scripts/backfill-lemma.ts"
   ]

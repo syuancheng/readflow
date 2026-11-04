@@ -8,13 +8,19 @@
  *      而开放 API 从不暴露 ObjectId，传了必报 `not a valid ObjectId`。
  *   3. 内容是不可逆的写入 —— 调用方必须先给用户看预览。
  *
- * 频控：10 秒 20 次 / 60 秒 40 次。这里用串行 + 最小间隔 600ms 兜住。
+ * Token 由「设置」页每个用户自己填，落本地 settings 表；
+ * 环境变量 MARKJI_TOKEN / MAIMEMO_TOKEN 仅作为没配置时的兜底。
+ *
+ * 频控：10 秒 20 次 / 60 秒 40 次。写操作串行 + 最小间隔 600ms 兜住。
  */
+import { resolveMarkjiToken } from "./config";
+import { allSettings } from "./settings-store";
+import { withRetry } from "./retry";
 
 const BASE = process.env.MARKJI_BASE_URL ?? "https://open.maimemo.com/open/api/v1/markji";
 
 export function markjiToken(): string | null {
-  return process.env.MARKJI_TOKEN || process.env.MAIMEMO_TOKEN || null;
+  return resolveMarkjiToken(allSettings(), process.env);
 }
 
 export function hasMarkjiToken(): boolean {
@@ -74,8 +80,16 @@ function serialize<T>(fn: () => Promise<T>, minGap = 600): Promise<T> {
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const token = markjiToken();
-  if (!token) throw new MarkjiError("未配置 MARKJI_TOKEN 环境变量", 401);
+  if (!token) throw new MarkjiError("未配置墨墨 Token。请在右上角头像 → 设置里填入", 401);
 
+  // 读操作遇到限流/网络抖动/服务端繁忙自动重试；写操作不重试，
+  // 因为「写卡成功但响应丢失」重放会生成重复卡片。
+  const isRead = !init?.method || init.method.toUpperCase() === "GET";
+  const run = () => request<T>(path, token, init);
+  return isRead ? withRetry(run, { attempts: 3, baseDelayMs: 700 }) : run();
+}
+
+async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {

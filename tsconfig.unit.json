@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": false,
+    "outDir": ".unit",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "types": ["node"]
+  },
+  "include": [
+    "src/lib/config.ts",
+    "src/lib/retry.ts",
+    "src/lib/providers.ts",
+    "src/lib/gloss.ts",
+    "src/lib/settings-store.ts",
+    "src/db/sqlite.ts",
+    "tests/unit/**/*.ts"
+  ]
+}

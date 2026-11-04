@@ -1,25 +1,23 @@
-import { OpenAI } from "openai";
+import { resolveProvider, STREAM_RESET, type SettingsMap } from "./config";
+import { allSettings } from "./settings-store";
+import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
+import { streamChat, type ChatTurn } from "./providers";
 
 /**
- * AI 释义：用 DeepSeek（OpenAI 兼容接口）做上下文感知解释。
+ * AI 释义：模型与 Key 由「配置中心」决定（设置页可配 DeepSeek / OpenAI /
+ * Claude / 千问 / 任意 OpenAI 兼容端点，勾选哪个用哪个）。
  *
  * 对齐 Readlang 的 Explain 设计：
  * - 带段落级上下文（选区 + 前文 + 后文分开标注），而不是只有一句话
  * - 流式输出（SSE），逐块返回
  * - 分层输出模板：单词与句子两套，句子场景「意思」置顶、语法殿后
  * - 支持 askAI：用户自由追问
- *
- * DeepSeek 需要环境变量 DEEPSEEK_API_KEY
- * 如果没配 key，降级返回提示信息而不是崩溃。
+ * - 网络错误 / 限流 / 模型繁忙统一重试，重试用 STREAM_RESET 通知前端清屏
  */
 
-function getClient(): OpenAI | null {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return null;
-  return new OpenAI({
-    baseURL: "https://api.deepseek.com/v1",
-    apiKey,
-  });
+/** 当前生效的配置（服务端读本地 DB + 环境变量兜底） */
+export function currentSettings(): SettingsMap {
+  return allSettings();
 }
 
 export type ExplainParams = {
@@ -143,30 +141,40 @@ function contextBlock(params: ExplainParams): string {
 export async function* streamExplain(
   params: ExplainParams
 ): AsyncGenerator<string, void, unknown> {
-  const client = getClient();
-  if (!client) {
-    yield "⚠️ 未配置 DEEPSEEK_API_KEY 环境变量，AI 释义不可用。\n\n请设置环境变量后重启服务：\n```\nexport DEEPSEEK_API_KEY=sk-...\n```";
+  const provider = resolveProvider(currentSettings(), process.env);
+  if (!provider) {
+    yield "⚠️ 还没有配置 AI 模型。\n\n点击右上角头像 → **设置** → 勾选一个模型并填入 API Key；也可以继续用环境变量 `DEEPSEEK_API_KEY` 等作为兜底。";
     return;
   }
 
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
+  const turns: ChatTurn[] = [
+    { role: "system", content: buildSystemPrompt(language, monolingual, params.word) },
+    { role: "user", content: buildUserMessage(params) },
+  ];
 
-  const stream = await client.chat.completions.create({
-    model: "deepseek-chat",
-    messages: [
-      { role: "system", content: buildSystemPrompt(language, monolingual, params.word) },
-      { role: "user", content: buildUserMessage(params) },
-    ],
-    stream: true,
-    temperature: 0.3, // 释义要准确，不要发散
-    max_tokens: 1200, // 分层模板在句子场景下需要更长输出
-  });
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const attempts = DEFAULT_RETRY.attempts;
+  let lastError: unknown;
 
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
-    if (delta) yield delta;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) yield STREAM_RESET; // 让前端丢掉上一次的半成品
+    try {
+      for await (const chunk of streamChat(provider, turns, {
+        temperature: 0.3, // 释义要准确，不要发散
+        maxTokens: 1200,  // 分层模板在句子场景下需要更长输出
+      })) {
+        yield chunk;
+      }
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt === attempts - 1 || !isRetryableError(err)) throw err;
+      await sleep(backoffDelayMs(attempt));
+    }
   }
+  throw lastError;
 }
 
 /**

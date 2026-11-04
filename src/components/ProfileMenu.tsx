@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import VoicePicker from "./VoicePicker";
+import SettingsDialog from "./SettingsDialog";
 
 /**
  * 右上角用户菜单（仿 Readlang）：头像按钮 + 下拉面板。
@@ -12,6 +13,7 @@ import VoicePicker from "./VoicePicker";
 export default function ProfileMenu() {
   const [open, setOpen] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -87,8 +89,26 @@ export default function ProfileMenu() {
             </span>
             <VoicePicker />
           </div>
+
+          <p className="pm-section-title">账户</p>
+          <button
+            className="pm-row"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setSettingsOpen(true);
+            }}
+          >
+            <span className="pm-row-label">
+              ⚙ 设置
+              <span className="pm-row-hint">AI 模型 · 墨墨 · 浏览器插件</span>
+            </span>
+            <span className="pm-row-arrow" aria-hidden>›</span>
+          </button>
         </div>
       )}
+
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

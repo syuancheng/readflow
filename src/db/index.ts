@@ -1,47 +1,6 @@
-import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
 import * as schema from "./schema";
-
-const dbPath = process.env.DB_PATH ?? path.join(process.cwd(), "data", "readflow.db");
-
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-/**
- * Next.js dev 的热重载会反复重新求值模块，若每次都 new 一个连接，
- * 旧连接不释放会在 WAL 模式下撞上 "disk I/O error"。
- * 挂到 globalThis 上保证整个进程只有一个连接。
- */
-const globalRef = globalThis as unknown as {
-  __readflowSqlite?: Database.Database;
-};
-
-function openDatabase(): Database.Database {
-  const sqlite = new Database(dbPath);
-
-  // busy_timeout：遇到锁时等待而不是立刻报错
-  sqlite.pragma("busy_timeout = 10000");
-  // WAL：读写并发，读者不阻塞写者
-  sqlite.pragma("journal_mode = WAL");
-  // NORMAL 同步级别：WAL 下安全且比 FULL 快很多
-  sqlite.pragma("synchronous = NORMAL");
-  sqlite.pragma("foreign_keys = ON");
-
-  return sqlite;
-}
-
-const sqlite: Database.Database = globalRef.__readflowSqlite ?? openDatabase();
-if (!globalRef.__readflowSqlite) {
-  globalRef.__readflowSqlite = sqlite;
-  process.on("exit", () => {
-    try {
-      sqlite.close();
-    } catch {
-      /* 关闭失败无所谓，进程即将退出 */
-    }
-  });
-}
+import { sqlite, dbPath } from "./sqlite";
 
 /**
  * 建表语句直接内联：本地单机应用，启动即可用，不依赖 migration 流程。

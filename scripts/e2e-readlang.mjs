@@ -152,6 +152,19 @@ try {
     .first()
     .evaluate((e) => e.classList.contains("on"));
   check("D0 开关显示关闭态", !switchOn, switchOn ? "on" : "off");
+
+  // ---------- H：Profile 里的设置页（模型配置 / 墨墨 / 插件 Token） ----------
+  await page.locator('.pm-row:has-text("设置")').click();
+  await page.waitForSelector(".st-modal", { timeout: 5000 });
+  await page.waitForSelector(".st-provider", { timeout: 5000 });
+  const providerCards = await page.locator(".st-provider").count();
+  check("H1 Profile 设置页列出可选模型", providerCards >= 5, `${providerCards} 个 provider`);
+  const markjiSection = await page.locator('.st-section:has-text("墨墨记单词")').count();
+  const extSection = await page.locator('.st-section:has-text("浏览器插件")').count();
+  check("H2 设置页含墨墨 Token 与插件 Token", markjiSection > 0 && extSection > 0);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
   await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
   await page.waitForTimeout(600);
 
