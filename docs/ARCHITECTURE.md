@@ -3,8 +3,8 @@
 > 面向要改这个仓库的人（包括三个月后的自己）。
 > 产品定位与背景见 [`../README.md`](../README.md)。
 
-**版本**：MVP（P0–P4 完成，全链路可用）
-**代码规模**：`src/` + `scripts/` 约 4.5k 行（TypeScript / TSX / CSS）
+**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入已完成）
+**代码规模**：`src/` + `scripts/` 约 6k 行（TypeScript / TSX / CSS）
 **最后核对的运行环境**：Node 24.x，Next.js 16.4.3，React 19.3.0
 
 ---
@@ -83,8 +83,8 @@ user_words ──1:N──> contexts ──> (text_id, paragraph_id, 位置, quo
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `texts` | `id`(uuid), `user_id`, `title`, `source_type`(paste/file/url), `source_url`, `language`, `word_count`, `created_at`(ms) | 一篇文章 |
-| `paragraphs` | `id`(uuid), `text_id`, `idx`, `content` | **锚定基准**。索引 `(text_id, idx)` |
+| `texts` | `id`(uuid), `user_id`, `title`, `source_type`(paste/file/url), `source_url`, `language`, `word_count`, `created_at`(ms), `cefr_level`, `cefr_score`, `cefr_detail`(JSON), `cefr_method`, `cefr_overridden`, `source_format`(plain/markdown/html), `source_raw` | 一篇文章；难度字段可空（3.4）；`source_raw` 存原始源，供换解析器时无损重跑（3.5，>2MB 不落库） |
+| `paragraphs` | `id`(uuid), `text_id`, `idx`, `content`, `block_type`, `block_meta`(JSON), `inline_ranges`(JSON) | **锚定基准**。`content` 只存可见纯文本，是 `contexts.start/end` 唯一坐标基准；后三列只描述排版，不参与定位。索引 `(text_id, idx)` |
 | `user_words` | `id`(uuid), `user_id`, `lemma`, `display_form`, `pos`, `phonetic`, `translation`, `note`, `created_at` | 唯一索引 `(user_id, lemma)` —— 一个词只存一行 |
 | `contexts` | `id`, `user_word_id`, `text_id`, `paragraph_id`, `start`, `end`, `quote`, `prefix`, `suffix`, `ai_gloss`, `created_at` | 每次收词一条，**刻意不去重** |
 | `exports` | `id`, `user_word_id`, `deck_id`, `chapter_id`, `card_id`, `card_type`, `status`, `error`, `pushed_at` | 唯一索引 `(user_word_id, deck_id, card_type)`，导出幂等的物理保证（11.5） |
@@ -156,26 +156,43 @@ better        →  "0:good/1:r"      比较级
 
 ```
 ImportForm（客户端）
-  ├ 粘贴：textarea
-  ├ 上传：<input type=file> → File.text()
-  └ 网页：只传 URL，服务端抓
+  ├ 粘贴：textarea         ┐
+  ├ 上传：File.text()      ├ format: auto | plain | markdown（前端只做提示）
+  └ 网页：只传 URL         ┘
         │
-        ▼  POST /api/texts { title?, text?, url? }
+        ▼  POST /api/texts { title?, text?, url?, format?, sourceType? }
 src/app/api/texts/route.ts
-  1. 有 url → extractFromUrl()
-  2. splitParagraphs(content)
-  3. 空 → 400；无标题 → 取首段前 40 字
-  4. db.transaction：插 texts + 批量插 paragraphs
-  5. 返回 { id, title, paragraphCount, wordCount }
+  1. 有 url → extractFromUrl()：优先站点官方 .md，否则 Readability 正文 HTML（3.1）
+              ├ markdown → parseMarkdown()
+              └ html     → parseHtmlBlocks()
+     无 url → parsePasted(raw, format)：服务端独立探测 → parseMarkdown() / parsePlain()
+  2. 得到 Block[]（统一 IR，3.5）；空 → 400；无标题 → 取首段可见文本前 40 字
+  3. parts = proseTexts(blocks)  ← 只留自然语言正文，代码/hr/figure 不进统计
+  4. countWords(parts) + estimateCefrForParts(parts)  ← 事务外，失败不影响导入（3.4）
+  5. db.transaction：插 texts（cefr_* + source_format/source_raw）
+                    + 批量插 paragraphs（content + block_type/block_meta/inline_ranges）
+  6. 返回 { id, title, paragraphCount, wordCount, sourceFormat, blockKinds, cefr* }
         │
         ▼  前端 router.push(`/texts/${id}`)
 ```
 
 ### 3.1 URL 提取（`lib/readability.ts`）
 
-`fetch`（带桌面 UA，20s 超时）→ `new JSDOM(html)` → `Readability.parse()` → 拿到内容 HTML。
+**先问站点要结构化源，再考虑自己刮。** Mintlify / Docusaurus 一类文档站会在 HTML 里放：
 
-关键一步：**不能直接 `textContent`**，否则段落边界全丢。`htmlToParagraphs()` 按块级元素（`h1-6, p, li, blockquote, pre, figcaption`）逐个取文本，用 `\n\n` 拼回去，并跳过相邻重复（嵌套块级元素会把同一段文字取两次）。
+```html
+<link rel="alternate" type="text/markdown" href="/docs/en/best-practices.md">
+```
+
+同时页面上有「Copy page」按钮——它复制出来的就是这份官方 Markdown。所以 `extractFromUrl()` 的顺序是：
+
+1. `fetch`（桌面 UA，20s 超时）→ `new JSDOM(html)`；
+2. 找 `link[rel~="alternate"][type="text/markdown"]`，解析成绝对 URL 后再 `fetch` 一次；
+3. **双保险校验**：`content-type` 含 `text/markdown` 且正文有 Markdown 特征，才认它是 Markdown。否则 HTML 404 页会被误当正文；
+4. 拿到官方 `.md` → `{ markdown, html: null }`，交给 `parseMarkdown()`；
+5. 没有官方源 → `Readability.parse()` 拿 `article.content` 的**内容 HTML**，交给 `parseHtmlBlocks()`（3.5）。
+
+返回类型从旧的 `{ title, text }` 改成 `{ title, markdown, html, sourceUrl }`。**旧版 `htmlToParagraphs()` 已删除**：它按块级元素取 `textContent` 再用 `\n\n` 拼回纯文本，这一步会永久丢掉表格的行列关系、`<pre>` 里的换行和链接的 href。现在 HTML 交给 `jsdom` 直接遍历 DOM 生成 Block[]，不经过 Turndown 这类二次有损转换。
 
 失败信息是给人看的：「没能从这个页面提取出正文（可能是登录墙或纯前端渲染）」。
 
@@ -190,11 +207,141 @@ src/app/api/texts/route.ts
 
 每段再归一化：多空格压成一个、内部换行变空格、trim。
 
+**这条路现在只服务纯文本输入**（`parsePlain()`，见 3.5）。Markdown / HTML 走 AST 或 DOM，不再经过切段与归一化——正是「内部换行变空格」这一步，以前把表格和代码块压成了不可恢复的一行。
+
 `splitParagraphs` 是**所有位置语义的起点**：切段规则一改，历史 `contexts` 的段内偏移全部失效（`paragraph_id` 还在，但同一个 id 对应的 content 可能变了）。所以**不要动切段逻辑，除非接受旧锚点失效**——真要改，用 `resolveAnchor()` 的降级路径兜住。
 
 ### 3.3 词数统计
 
 英文按空白、CJK 按字。用于列表展示与每日目标计算（`goal = max(20, round(wordCount * 0.05))`）。
+
+结构化导入后，输入是 `proseTexts(blocks)` 而不是全部 Block：`code` / `hr` / `figure` 被 `isProse()` 过滤掉。`/api/summarize` 的分段小结和 `Reader.planSections()` 用同一套过滤规则，保证 `startIdx/endIdx` 仍能对上段落下标。这也解释了 3.4 里技术文档按 Markdown 导入时词数下降的原因。
+
+### 3.4 CEFR 难度粗估（导入时算一次）
+
+**问题定义。** CEFR 是描述「人」的能力框架，不是文本标准。分级读物是作者按词汇大纲 / 语法大纲**写**到某一级；我们要做的是反过来，拿任意文本**测**它大概需要什么水平才读得动。这是预测问题，不是认证，级别边界天然模糊。Readlang 的做法是服务端在导入时算好 metrics、前端只显示一句 *"Rough estimate of the CEFR level required based on the vocabulary and complexity of the text"*，我们照抄这个信息架构（也是用户确认的第一版方案）。学术界用 XGBoost + 200 多项特征约 70.9% 准确率、Top-2 95%；单用 Flesch 这类可读性公式只有 31–42%。所以：**词汇是主判据，句法只当修正项**。
+
+**代码分层。**
+
+```
+src/lib/cefr.ts         纯函数：不碰 DB、不依赖 Node 模块，可单测
+  ├ wordsOf / splitSentences     确定性切词切句
+  ├ analyzeFeatures(parts, rankOf)  ← 词典查询由调用方注入
+  └ scoreFeatures(features)      → level / score / confidence / adjacentLevel / detail
+src/lib/cefr-dict.ts    服务端适配：frequencyRank() 接 ECDICT + 按词形缓存 + try/catch
+src/db/ensure-cefr.ts   给老库 ALTER 补列（应用启动与回填脚本共用同一份定义）
+src/components/CefrBadge.tsx  纯 CSS hover 弹层，服务端组件
+```
+
+**词汇路（权重 0.7）。** ECDICT 的 `frq` 是 COCA 词频排名（1 最常用，最大 47062；77 万词条里只有 42231 个有排名）。一篇文本要读得动，绝大部分**词次**必须落在学习者已掌握的高频词里。按词次取平均 `log(rank)`，再叠加低频词（`rank > 8000`）占比：
+
+```
+logScore   = clamp((meanLogRank - 4.2) / 2.8) × 100     4.2≈rank 67，7.0≈rank 1100
+rareScore  = clamp(rareRatio / 0.35) × 100
+vocabScore = 0.75 × logScore + 0.25 × rareScore
+```
+
+取 `log` 是因为排名跨 4 个数量级，直接平均会被少数极生僻词拖飞。两个必须绕开的数据坑：
+
+1. **变形词本身没有 `frq`**（`was` / `are` / `said` 都是 null），不还原成原形会把最普通的功能词当生僻词，实测能把短篇的高频覆盖率拉低十几个点 → `frequencyRank()` 查不到时按 `lemma` 规则（`exchange` 的 `0:` 或中文指针）回查原形。
+2. **LaTeX / 公式 / 单字母变量不是词汇**：`Scaling Laws` 那篇有 685 个 `n / d / c / beta / frac`，过滤掉后平均句长才从 20.2 回到合理区间 → `wordsOf()` 丢掉所有单字母 token。
+
+**复杂度路（权重 0.3）。** `complexityScore = 0.5×lenScore + 0.35×longScore + 0.15×subScore`，分别由平均句长（8→0 分、28→100 分）、≥25 词长句占比（35% 饱和）、含从句/衔接标记的句子占比（50% 饱和）线性映射。切句用纯正则 + 学术缩写白名单（`et al.` / `e.g.` / `Dr.`），刻意不用 `Intl.Segmenter`：结果要落库，不同 ICU 版本必须给出同一个值。
+
+最终 `score = 0.7×vocabScore + 0.3×complexityScore`，6 级等分 0–100（每级约 16.67 分）。
+
+**落库而非只存级别。** `texts` 存 `cefr_level`、`cefr_score`（连续分，算法升级可离线重算）、`cefr_detail`（JSON：三档词汇占比、句法统计、置信度、caveats）、`cefr_method`（`heuristic-v1`）、`cefr_overridden`。相邻级别与置信度不单独占列：前者由 `adjacentOfScore(score)` 纯函数推出，后者写进 detail JSON。
+
+**置信度是工程判断，不是模型概率**：词数 <150 / 句数 <8 / 未收录词 >25% → `low`；词数 ≥500 且句数 ≥25 且未收录 ≤10% → `high`；其余 `medium`。未收录词多是专有名词、术语、公式符号的信号，会高估难度，所以弹层里直接把这条偏差写出来。
+
+**实测校准（本机 4 篇真实文本，`npm run backfill:cefr`）**：
+
+| 文本 | 词/句 | 平均 log(rank) | 低频词占比 | 平均句长 | 结果 |
+|---|---|---|---|---|---|
+| The Night Rain | 87 / 6 | 4.80 | 12.6% | 14.5 | **A2** 23.9 分，置信度低 |
+| Prompt Engineering — Lilian Weng | 3546 / 215 | 6.35 | 24.3% | 16.5 | **B2** 65.6 分（接近 C1） |
+| Best practices for Claude Code | 8223 / 356 | 5.98 | 22.3% | 23.1 | **B2** 66.7 分（接近 C1） |
+| Scaling Laws, Carefully | 4535 / 213 | 6.35 | 24.8% | 21.3 | **C1** 71.4 分 |
+
+词汇路把短篇故事与技术长文分开（4.80 vs 6.0–6.35），复杂度路把技术长文之间再分开（16.5 / 21.3 / 23.1 词/句）——这正是双路设计的预期效果。注意 Best practices 词汇更简单（5.98）但句子更长，两条路互相抵消后落在 B2 上沿：这正是我们保留连续分和明细、而不是只显示一个字母的原因。单测里用「控制变量」锁住这个性质：只改词汇难度时复杂度分必须完全不动，只改断句时词汇分必须完全不动。
+
+**展示。** 首页列表与阅读页标题下各一个低调徽章；悬停（或键盘聚焦）用纯 CSS 展开明细。不用 click 是因为列表整行是一个 `<Link>`，嵌套可点击元素会互相打架；组件也因此不需要 `"use client"`。文案明确写「粗略估计」「不是 CEFR 官方评级」。
+
+**回填与重算。** `npm run backfill:cefr` 默认 DRY-RUN；`node .verify/scripts/backfill-cefr.js --apply` 写入，加 `--force` 用当前算法重算全部（`cefr_overridden = 1` 的行永远跳过）。脚本加载 `src/db/ensure-cefr.ts` 自行补列，不依赖服务已重启。改完代码记得 `npm run build && bash scripts/service.sh restart` —— 本机跑的是 `next start` 生产构建。
+
+### 3.5 结构化导入：Block IR（P9）
+
+**问题定义。** 用户把 Claude Code 官方文档的「Copy page」粘进来，看到的是一张糊成一段的表格、一坨带围栏标记的 JSON 代码块和全部消失的标题层级。第一反应容易是「URL 抓取把 HTML 压平了」，但查库发现那篇是 `source_type = "paste"`、`source_url = null` —— 用户粘贴的本来就是**完整正确的官方 Markdown**。是我们把它当纯文本吞了：
+
+```
+官方 .md → splitParagraphs() → normalize() 把段内换行压成空格 → paragraphs.content 只剩纯文本
+         → Reader.tsx 对纯文本 tokenize() → 没有任何结构信息可渲染
+```
+
+根因不在 CSS，也不在渲染：**结构信息在入库那一刻被丢弃了**。旧 `content` 里 `| | Non-deterministic ... |` 已经无法反推原来的行列，所以旧文章不可逆，按约定不做迁移工具，只能重新导入。
+
+**为什么不是三套解析器。** 需求是同时兼容「新闻只有段落 / 论文有图表 / AI 博客有代码块」。如果按体裁写三套分支，等于把「格式」和「内容类型」耦合：一篇带表格的新闻会走错分支，MDX 里一个代码块又得再开特例。正确切法是按**输入格式**分层，与体裁无关：
+
+```
+                  ┌ 粘贴/上传 Markdown ─ remark-parse + remark-gfm ─┐
+  多种输入 ───────┼ URL 官方 .md ───────────────────────────────────┼→ Block[] ─→ 一套渲染后端
+                  ├ URL 普通网页 ─ Readability HTML → jsdom ────────┤   (Reader.tsx)
+                  └ 纯文本 ─────── splitParagraphs() ───────────────┘
+                        统一中间表示 IR
+```
+
+**IR 契约（`src/lib/import/types.ts`）。** 一个 Block 只有四个字段：
+
+```ts
+type Block = {
+  kind: "heading" | "paragraph" | "list_item" | "table_cell" | "quote" | "code" | "hr" | "figure";
+  text: string;          // 用户可见纯文本，不含任何 Markdown / HTML 标记
+  ranges: InlineRange[]; // 相对 text 的 [start, end) 样式/链接区间
+  meta: BlockMeta;       // depth / listId / tableId / row / col / lang / callout / skip
+};
+```
+
+三条不变量，破坏任何一条都会让锚点错位：
+
+1. **一个 Block = 一条 `paragraphs` 记录 = 一个 `data-pid` 容器。** 表格每个 cell、列表每个 item 各自独立成 Block，`idx` 连续。
+2. **`text` 是唯一坐标基准。** `contexts.start/end`、`tokenize()` 的 `data-s/data-e`、`Range.toString()` 的段落偏移全部相对它。样式和结构信息只能进 `ranges` / `meta`，绝不进 `text`。
+3. **`ranges` 只加 className，不插入字符。** 单测锁住控制变量：`A **bold** word.` 与 `A bold word.` 的 `text` 必须完全相同、只有 `ranges` 不同；`# Title` 与 `## Title` 的 `text` 必须完全相同、只有 `meta.depth` 不同。CSS 里的 callout 标签用 `::before` + `attr(data-label)`，因为**伪元素不进入 DOM 文本** —— 用真标签会被 `Range.toString()` 算进段落偏移。
+
+**适配器分工。**
+
+| 文件 | 职责 | 关键取舍 |
+|---|---|---|
+| `builder.ts` | `TextBuilder` 把 inline 节点摊平成 `text`，`range(fn)` 在追加前后记长度差 | 段间补空格必须在追加**之前**做，否则 `range.start/end` 与最终文本错位 |
+| `markdown.ts` | `unified().use(remarkParse).use(remarkGfm)` 直接读 mdast | 不走 Markdown→HTML→文本的有损往返；`cleanInfoString()` 把 MDX 的 info string（如 `text theme={null}`）处理成合法语言名；`[!NOTE]` 只进 `meta.callout` 不进可见文本；过滤 Mintlify 的 `Documentation Index ... llms.txt` 隐藏块 |
+| `html.ts` | `jsdom` 遍历 Readability 正文 HTML | 保住 `<table>` 行列与 `<pre>` 换行；忽略 `script/style/nav/svg/form/button` 与 `sr-only`；相对链接用 `JSDOM({url})` 的 `el.href` 解析成绝对地址 |
+| `plain.ts` | 复用 `splitParagraphs()` | 新闻 / 小说行为与改造前逐字一致，零回归 |
+| `detect.ts` | 保守探测 | **至少 1 个强特征（heading/fence/table/callout/link）+ 总共 ≥2 类特征**才判 Markdown。小说里一个 `#`、一段单列表都不能误判；前端用同一函数做提示，服务端独立再判一次，不信任前端 |
+| `group.ts` | `groupBlocks()` 纯函数把 cell/item 重组成 `<table>` / `<ul>` / `<ol>` | 不用随机 id、不依赖 ICU，服务端与客户端结果一致（8.1 的 hydration 约束延续到这里） |
+
+**落库与迁移。** `texts` 加 `source_format`（plain/markdown/html）与 `source_raw`（原始源，>2MB 不落库，供以后换解析器无损重跑）；`paragraphs` 加 `block_type`、`block_meta` JSON、`inline_ranges` JSON。`src/db/ensure-blocks.ts` 与 `ensure-cefr.ts` 一样是**共享轻量迁移模块**：应用启动和离线脚本必须补出完全相同的列，避免两处表结构漂移。它刻意不 import `src/db/index.ts` —— `schema.ts` 里的 `export const exports` 在 CommonJS 编译链会撞保留字（9 节同类坑）。
+
+旧库没有这三列，`ALTER TABLE ... DEFAULT 'paragraph'` 让老段落自动降级成普通段落，旧文章照常打开、`contexts` 锚点全部有效。
+
+**渲染（`Reader.tsx`）。** `renderTokens()` 仍以 `tokenize(p.content)` 为骨架，词 span 带 `data-s/data-e`，`ranges` 只叠加 `.rf-i-strong` / `.rf-i-em` / `.rf-i-code` 等 class；链接跨多个 token 时用单个 `<a class="rf-inline-link">` 包住它们，点击时 `e.preventDefault()`，保证**点词优先弹释义而不是跳走**。`SingleBlock` 按 `blockType` 渲染 `h2–h6` / `blockquote` / `pre` / `hr` / `figure` / `li` / `p`，`GroupView` 负责表格与列表重组。代码块**不生成 `.w` span**：`pnpm`、`__init__`、`settings.json` 不是要背的单词。
+
+**非正文过滤。** `NON_PROSE_KINDS = ["code","hr","figure"]`，`isProse()` 同时被三处使用：导入时的 `proseTexts()`（词数 / CEFR）、`/api/summarize` 的分段小结、`Reader.planSections()`。三处规则必须一致，否则 `startIdx/endIdx` 会指向错误的段。
+
+**控制变量实验：同一篇文档，只换解析器。** 拿 `https://code.claude.com/docs/en/best-practices.md`（52,515 bytes / 635 行）分别强制 `plain` 与 `markdown` 导入：
+
+| 指标 | 强制纯文本 | Markdown 结构化 | Δ |
+|---|---|---|---|
+| CEFR | **B2** / 66.65 | **B1** / 47.55 | −19.10 |
+| 词数 | 8223 | 6798 | −1425 |
+| 未登录词占比 | 16.36% | 9.52% | −6.84pp |
+| 生僻词占比 | 22.34% | 14.31% | −8.03pp |
+| COCA 前 1000 覆盖 | 59.76% | 68.18% | +8.42pp |
+| 平均句长 | 23.1 | 20.29 | −2.81 |
+
+强制纯文本精确复现了旧文章的 B2 / 66.65，说明估级算法本身没变。差掉的 1425 个「词」是代码标识符、URL、表格分隔语法 —— 旧路径把它们当成 ECDICT 查不到的生僻英文词，难度被虚高。所以 **B1 是去掉噪声后更真实的结果，不是回归**；`cefr_detail` 里那条「16% 的词不在 COCA 内，难度可能被高估」的 caveat 也随之消失。这个副作用必须写进文档，否则用户重新导入旧文章看到级别掉一级会以为是 bug。
+
+**验证结果。** `tests/unit/import.test.ts` 21 个单测（含上述两个控制变量、range 不越界、`tokenize()` 坐标严格对齐、`parsePlain()` 与 `splitParagraphs()` 逐字一致、JSON 解析失败降级）。官方 Markdown 离线解析出 306 个 Block（28 heading / 20 quote / 103 paragraph / 100 list_item / 40 table_cell / 15 code），range 越界 0、可见文本残留 Markdown 标记 0；真实 HTML 路径 355 个 Block，table_cell 40 / code 15 / list_item 100 与 Markdown 路径对齐。真实浏览器 DOM 检查：3 张 `<table>`（首表 6 行、3 表头 cell、15 表体 cell、可横向滚动）、15 个 `<pre>`（10 个多行、最长 13 行）、19 个 callout、28 个列表 / 100 个 item、79 个链接、306 个 `data-pid` 容器，代码块内 `.w` 为 0，可见文本里管道行与代码围栏均为 0。E2E 覆盖粘贴自动识别、详情 API、SSR 标签、表格 cell 内点词收词后 `content.slice(start,end) === quote`、导出 dryRun 卡片无 Markdown 残留、纯文本零回归、URL 官方 Markdown 优先、旧文章仍可打开。
+
+**已知边界（故意不做）。** `colspan`/`rowspan`、嵌套表格、脚注、LaTeX 数学、语法高亮配色、图片本身不还原（图片保留占位文字）；给 agent 看的隐藏 `llms.txt` 索引块会被过滤；旧文章不迁移。
 
 ---
 
@@ -204,15 +351,17 @@ src/app/api/texts/route.ts
 
 ### 4.1 渲染：段落 → span
 
-`Para`（`memo` 包裹）把每段文本 `tokenize()` 成 token 数组，词 token 渲染成 `<span class="w" data-s data-e>`，非词 token（空格、标点）用裸 `<span>`。
+`Tokens`（`memo` 包裹）把每段可见文本 `tokenize()` 成 token 数组，词 token 渲染成 `<span class="w" data-s data-e>`，非词 token（空格、标点）用裸 `<span>`；`inlineRanges` 只往词 span 上叠 `.rf-i-*` class，链接用 `<a class="rf-inline-link">` 跨多个词包一层。
 
 ```tsx
 tokenize("She sat on the river bank.")
 → [{text:"She",s:0,e:3,word:true}, {text:" ",s:3,e:4,word:false}, ...]
 ```
 
+外层 `GroupView` 先跑纯函数 `groupBlocks()`，把连续的同 `listId` / `tableId` Block 重组；`SingleBlock` 再按 `blockType` 选标签（`h2–h6` / `p` / `li` / `blockquote` / `pre` / `hr` / `figure`）。无论外面套 `<table><tr><td>` 还是 `<ul><li>`，**`data-pid` 仍在最内层那个装词的容器上**，`onClick` 的 `closest("[data-pid]")` 与 4.2 的锚点计算完全不用改（详见 3.5）。
+
 - 一段 100 词 ≈ 200 个 DOM 节点。视口内 10 段也就 2000 个，无压力。
-- `useMemo` 按 `content` 缓存分词结果，同段落不会重复切。
+- `Tokens` 用 `memo` + `useMemo` 按 `content` 缓存分词结果，同段落不会重复切；代码块不生成 `.w`。
 
 ### 4.2 单击
 
@@ -533,6 +682,25 @@ Next dev 热重载会让多个模块实例几乎同时求值 `db/index.ts`。`CR
 **现象**：两个 49px 高的大按钮吃掉 110px，弹层里 AI 长文本几乎没地方显示。
 **修法**：收词降级为标题栏 30×30 图标按钮；AI 按钮进固定底栏；新增 `.duo-btn-sm`（padding 7×12、字号 13、圆角 10）。总高 430 → 317px。
 
+### 9.7 `next dev` 页面没 hydrate，交互验证全是假阴性
+
+**现象**：结构化导入改造后，用 Playwright 在 `next dev`（3100）点词，右栏始终停在空态。给 `.reading-body` 挂原生 `click` 监听能收到事件（target 是 `.w`、`closest("[data-pid]")` 也有值），但 React 的 `onClick` 完全不执行。普通段落与表格 cell 表现一致，控制台没有 JS 报错——很容易误判成「表格渲染破坏了点词委托」。
+
+**排查（控制变量）**：在同一台机器上对比两个端口，检查元素上是否有 React 挂的 `__reactProps$*` / `__reactFiber$*` 键：
+
+| 端口 | 运行方式 | `__reactProps` |
+|---|---|---|
+| 3100 | `next dev` | `[]`（未 hydrate） |
+| 3000 | `next start`（生产构建） | 有 |
+
+dev 控制台同时刷 `ws://127.0.0.1:3100/_next/hmr` 握手失败 `ERR_INVALID_HTTP_RESPONSE`。给 Chromium 加 `--no-proxy-server` 仍不恢复，说明是这台机器上 dev HMR 通道的问题，**不是交互代码的回归**。
+
+**结论 / 验证纪律**：
+
+1. 判断 hydration 是否完成，看 `__reactProps$*` 键，不要靠「等固定 1–2 秒」。
+2. **SSR 结构、API、单元与离线解析可以在 dev 跑；交互级验证必须在 `npm run build && bash scripts/service.sh restart` 之后、对生产 3000 跑。**
+3. 任何「点击没反应」的结论，先拿普通段落做对照，再怀疑新代码。
+
 ---
 
 ## 10. Readlang 逆向结论
@@ -634,7 +802,7 @@ Markji 语法写错**不会报错**，只会静默渲染成一团乱码，而且
 
 - 有且只有一条 `---`（答案线）
 - 方括号配对（跳过 `\[` 转义）
-- 没有残留 `**` / ``` ``` ``` / HTML 标签
+- 没有残留 Markdown 强调标记、代码围栏或 HTML 标签
 - `[P#…]` / `[Choice#…]` / `[E##…]` 这类块级标签必须顶格
 
 **第二道：写库前人工看预览**
@@ -683,13 +851,16 @@ createCard() 内部串行闸门：writeChain.then(() => sleep(600ms) → fetch)
 
 ## 12. 验证方法
 
-没有测试框架，靠三层验证。改完代码至少跑前两层。
+现在有四层：单测与类型检查、离线验证、API/SSR 回归、真实浏览器交互。改完代码至少跑第一层。
 
-### 12.1 类型检查
+### 12.1 单测与类型检查
 
 ```bash
-npx tsc --noEmit          # 必须零错误
+npm run typecheck   # tsc --noEmit，必须零错误
+npm test            # tsc -p tsconfig.unit.json + node --test .unit/tests/unit/*.test.js
 ```
+
+单测覆盖 CEFR 与结构化导入，都用**控制变量**锁性质：`src/lib/cefr.ts` 里只改词汇难度时复杂度分必须不动；`tests/unit/import.test.ts` 里 `A **bold** word.` 与 `A bold word.` 的可见文本必须完全相同、`# Title` 与 `## Title` 亦然，且所有 inline range 不越界、`parsePlain()` 与 `splitParagraphs()` 逐字一致。
 
 ### 12.2 离线验证卡片（P4 之后新增）
 
@@ -738,9 +909,37 @@ for p in / /words /export /stats /texts/<id>; do curl -s -o /dev/null -w "$p %{h
 
 **注意**：Next 16 dev 启动时会清理 `.next/dev/logs`，如果进程被限制删除（沙箱、只读盘），dev server 会直接退出，报 `safe-delete broker denied delete`。这种情况下要换个终端/不受限的环境启动，而不是改代码。
 
+### 12.5 结构化导入专项（P9）
+
+改 `src/lib/import/**`、`Reader.tsx` 的渲染分组、或 `globals.css` 的 `.rf-*` 样式时，按这个顺序验：
+
+```bash
+npm test                       # 21 个 import 单测 + CEFR / 锚点 / 卡片单测
+npm run typecheck
+tsc -p tsconfig.verify.json    # 离线脚本的 CommonJS 编译链（别把 src/db/index.ts 拉进来）
+```
+
+再拿真实源做离线解析（`https://code.claude.com/docs/en/best-practices.md`，52KB / 635 行，含 GFM 表格、MDX info string、callout、空锚点链接、`llms.txt` 隐藏块），核对四个数：**306 个 Block**、**range 越界 0**、**可见文本残留 Markdown 标记 0**、**prose parts 290**。HTML 路径用抓下来的原始页面核对 table_cell / code / list_item 数量与 Markdown 路径对齐。
+
+API / SSR 回归（可在 dev 跑）与交互验证（**必须在生产 3000 跑，见 9.7**）清单：
+
+| 检查 | 期望 |
+|---|---|
+| `POST /api/texts` 粘贴官方 Markdown | `sourceFormat: "markdown"`，`blockKinds` 含 40 table_cell / 15 code / ≥100 list_item |
+| `GET /api/texts/{id}` | `inlineRanges` 全部 `0 ≤ start < end ≤ content.length`；非 code 段落不以标题、表格、引用或代码围栏标记开头 |
+| SSR HTML | 含 `rf-table` / `<thead` / `rf-pre` / `<pre` / `rf-h2` / `rf-callout` / `rf-list` / `rf-inline-link`，且不含 `\| :- \|` |
+| 浏览器 DOM | 3 张 `<table>`、15 个 `<pre>`（10 个多行）、19 个 callout、306 个 `data-pid`，`pre .w === 0` |
+| 表格 cell 内点词 → 收词 | `content.slice(start, end) === quote`，右栏出释义卡 |
+| `/api/export` dryRun | 卡片正文不含强调标记、代码围栏等 Markdown 残留 |
+| 纯文本导入 | `sourceFormat: "plain"`，全部 `blockType === "paragraph"` |
+| URL 导入 | `text.sourceFormat === "markdown"` 且 `sourceRaw` 含标题 —— 证明走了官方 `.md` |
+| 旧文章 | 仍能打开，`block_type` 默认 `paragraph`，原有锚点有效 |
+
+所有 E2E 脚本都在 `finally` 里删掉自己创建的文本与词，不污染用户库。
+
 ---
 
-### 12.4 真实写卡（不可逆，只在用户明确同意后跑）
+### 12.6 真实写卡（不可逆，只在用户明确同意后跑）
 
 ```bash
 npm run push:one -- list                                   # 列牌组/章节（只读）

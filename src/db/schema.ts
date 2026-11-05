@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * 本地单机版固定使用 "local"。
@@ -15,6 +15,25 @@ export const texts = sqliteTable("texts", {
   language: text("language").notNull().default("en"),
   wordCount: integer("word_count").notNull().default(0),
   createdAt: integer("created_at").notNull(),
+  /**
+   * 导入时算一次的 CEFR 粗估（见 src/lib/cefr.ts）。
+   * 全部可空：词典没装、非英文、文本太短时写 null，前端就不显示徽章。
+   * 分数存连续值而不是只存级别 —— 算法以后重新校准时可以不用重读原文就重算。
+   */
+  cefrLevel: text("cefr_level"),
+  cefrScore: real("cefr_score"),
+  /** CefrDetail 的 JSON 字符串，供徽章弹层展示各档词汇占比与判定明细 */
+  cefrDetail: text("cefr_detail"),
+  cefrMethod: text("cefr_method"),
+  /** 用户手改过级别后为 1，算法升级时不再覆盖 */
+  cefrOverridden: integer("cefr_overridden").notNull().default(0),
+  /**
+   * 导入源与原始内容。存 source_raw 是因为上一版只存了「压平后的纯文本」，
+   * 结果表格换行被 normalize() 吃掉后无法重解析，旧文章只能让用户重新导入。
+   * 有原始源，以后换解析器可以直接重跑，不必再麻烦用户。
+   */
+  sourceFormat: text("source_format").notNull().default("plain"),
+  sourceRaw: text("source_raw"),
 });
 
 export const paragraphs = sqliteTable(
@@ -25,7 +44,15 @@ export const paragraphs = sqliteTable(
       .notNull()
       .references(() => texts.id, { onDelete: "cascade" }),
     idx: integer("idx").notNull(),
+    /**
+     * 用户可见的纯文本，不含 Markdown / HTML 标记。
+     * 它是 contexts.start/end 唯一的坐标基准，也是 tokenize() 的输入。
+     */
     content: text("content").notNull(),
+    /** Block IR：块类型 + 组装元数据 + inline 样式区间（后两者是 JSON 字符串） */
+    blockType: text("block_type").notNull().default("paragraph"),
+    blockMeta: text("block_meta"),
+    inlineRanges: text("inline_ranges"),
   },
   (t) => [index("idx_paragraphs_text").on(t.textId, t.idx)],
 );

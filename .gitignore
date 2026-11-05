@@ -62,8 +62,8 @@ nohup.out
 # unit test build output
 /.unit/
 
-# unit test build output
-/.unit/
+# 离线解析验证的临时 CommonJS 编译产物
+/.tmp-import/
 
 # 插件打包产物
 /dist/

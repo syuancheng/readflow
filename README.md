@@ -81,8 +81,9 @@ ReadFlow 把这个流程压成一条链，只做三个动作：
 
 | 模块 | 能力 | 状态 |
 |---|---|---|
-| **导入** | 粘贴文本、上传 `.txt`/`.md`、贴 URL（Readability 提取正文） | ✅ |
-| **阅读器** | 段落渲染、确定性分词、点词命中、拖选短语、Esc 关闭、已收词绿色高亮 | ✅ |
+| **导入** | 粘贴文本 / 上传 `.txt`·`.md` / 贴 URL；URL 优先抓站点官方 Markdown，否则 Readability 正文 HTML | ✅ |
+| **结构化排版** | Markdown / HTML → Block IR：标题、有序/无序列表、GFM 表格、代码块、引用与 callout、行内链接与强调都按原结构渲染；格式自动识别，可手动覆盖 | ✅ |
+| **阅读器** | 按 Block 渲染 + 确定性分词、点词命中、拖选短语、Esc 关闭、已收词绿色高亮 | ✅ |
 | **词典层** | ECDICT 77 万词条本地查询（<5ms）、`exchange` 字段反查词形还原（went → go） | ✅ |
 | **AI 层** | DeepSeek 流式释义，带整句 context；支持「追问」自定义问题；无 key 时优雅降级 | ✅ |
 | **收词** | 落库（`user_words` 按 lemma 去重 + `contexts` 每次一条）、收词动效、进度条 +1 | ✅ |
@@ -90,6 +91,45 @@ ReadFlow 把这个流程压成一条链，只做三个动作：
 | **战绩页** | 收集总数 / 连续天数 / 文本数、14 天柱状图、最近收的词、书架 | ✅ |
 | **游戏化 UI** | 多邻国风格：粗底边实体按钮、大圆角、进度条 + 终点旗标、`+1 词` 飘字、底部导航 | ✅ |
 | **导出墨墨** | 三种卡片（看词猜义 / 挖空 / 选择）、牌组章节选择器、语法预览、幂等去重、限速与日配额 | ✅ |
+| **文章难度** | 导入时服务端算一次的 CEFR 粗估（A1–C2）：词汇 + 句法双路打分，列表 / 阅读页徽章，悬停看词汇分档与置信度 | ✅ |
+
+### 3.1 关于 CEFR 难度
+
+CEFR 原本是描述**人**的能力框架，不是文本标准。「分级读物」是作者按词汇大纲**写**到某一级；我们要做的是反过来，拿任意文本**测**它大概需要什么水平才读得动——这是预测，不是认证。所以：
+
+- **导入时算一次并落库**（对齐 Readlang：`POST /api/texts` → `estimateCefrForParts()` → 写进 `texts.cefr_*`），前端只展示，不重复计算，也不调用任何外部 API。
+- **两路特征**：词汇路占 0.7（ECDICT 的 COCA 词频排名 `frq`，按词次取平均 `log(rank)` + 低频词占比），复杂度路占 0.3（平均句长、≥25 词长句比例、从句/衔接标记比例）。纯可读性公式单独预测 CEFR 准确率只有 31–42%，所以只当修正项。
+- **输出不只有一个字母**：`cefr_score` 是 0–100 连续分，`cefr_detail` 存各档词汇占比、句法统计、置信度和已知偏差；贴近级别边界时徽章会写「也可能是相邻一级」。
+- **措辞承认粗估**：徽章悬停明确写「不是 CEFR 官方评级」。专有名词、术语、公式符号不在 COCA 前 47,062 词内，会被当成生僻词，这类文本置信度自动降级。
+- 老文章用 `npm run backfill:cefr` 试算、`node .verify/scripts/backfill-cefr.js --apply` 回填；算法升级后加 `--force` 重算（手动改过级别的行会跳过）。
+
+实现见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 3.4 节。
+
+### 3.2 关于结构化导入（Markdown / HTML）
+
+**起因**：文档站、技术博客、论文页面普遍提供「Copy page」或 `.md` 源。粘贴进来的是 Markdown 源码，而早期版本把所有输入都当纯文本 `splitParagraphs()` —— 段内换行被压成空格，表格变成一行 `| | Non-deterministic ... |`，代码块变成一坨「围栏 + json + 代码」连在一起，标题和列表全糊在一起。阅读器再怎么改 CSS 也救不回来，因为**结构信息在入库那一刻就没了**。
+
+**现在的做法**是「多种输入 → 统一中间表示 IR → 一套渲染后端」，不是给新闻 / 论文 / 博客各写一套解析器：
+
+| 输入 | 适配器 | 说明 |
+|---|---|---|
+| 粘贴 / 上传的 Markdown | `remark-parse` + `remark-gfm` | 直接读 mdast，不经 Markdown→HTML→文本的有损往返 |
+| 没有官方 `.md` 的网页 | `jsdom` 遍历 Readability 正文 HTML | 保住表格行列与 `<pre>` 换行，不用 Turndown 二次转换 |
+| 纯文本新闻 / 小说 | 原 `splitParagraphs()` | 行为与改造前逐字一致，零回归 |
+| URL | 优先读 `<link rel="alternate" type="text/markdown">` | 站点主动递结构化源时直接接住，拿不到才降级 HTML |
+
+导入框提供「自动识别 / 纯文本 / Markdown」三档；自动识别要求**至少 1 个强特征（标题、围栏、表格、callout、链接）且命中 ≥2 类特征**，避免小说里一个 `#` 或一段单列表被误判。服务端独立再判一次，不信任前端。
+
+**必须守住的不变量**：一个 Block = 一条 `paragraphs` 记录 = 一个 `data-pid` 容器。`content` 只存用户可见纯文本（无 Markdown / HTML 标记），是 `contexts.start/end` 的**唯一坐标基准**；`inline_ranges` 只描述相对这段文本的样式/链接区间，`block_meta` 只描述结构（深度、列表/表格 id、行列号、语言）。表格每个 cell、列表每个 item 各自成为一个 Block，渲染时用纯函数 `groupBlocks()` 重新组装成 `<table>` / `<ul>` / `<ol>`。所以标题变大、单元格变成 `<td>`，点词、拖选、收词、跳回原文的位置全部不动。
+
+**两个刻意的行为**：
+
+- 代码块、分隔线、图片不是 prose：不计入词数、不参与 CEFR 估级、不进分段小结，也不生成可点词 span（`pnpm` / `json` 不是要背的单词）。链接用 `<a>` 包住词 span，点击时 `preventDefault()`，点词优先弹释义而不是跳走。
+- 同一篇技术文档，**按 Markdown 导入可能比按纯文本导入判低一级**。实测 Claude Code 官方最佳实践：强制纯文本 B2 / 66.65 分，Markdown B1 / 47.55 分。差的那 1425 个「词」是代码标识符、URL 和表格语法——旧路径把它们当成 ECDICT 查不到的生僻英文词（未登录词 16.4% → 9.5%，生僻词 22.3% → 14.3%），难度被虚高。新值更真实，不是回归。
+
+**旧文章不做迁移工具**：改造前 `content` 里的表格换行已经被压平，无法从压平结果反推原来的行列，只能重新粘贴官方 Markdown 重新导入。新导入的文本会把 `source_format` 和 `source_raw` 一并存下，以后换解析器可以无损重跑。
+
+实现见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 3.5 节。
 
 ---
 
@@ -160,7 +200,7 @@ readflow/
 │   │   ├── export/page.tsx       导出页：选牌组/章节、选卡片类型、预览、写入
 │   │   ├── stats/page.tsx        战绩页
 │   │   └── api/
-│   │       ├── texts/route.ts        GET 列表 / POST 导入（粘贴·文件·URL）
+│   │       ├── texts/route.ts        GET 列表 / POST 导入（格式探测 + Block IR + 算 CEFR）
 │   │       ├── texts/[id]/route.ts   GET 详情 / DELETE
 │   │       ├── words/route.ts        GET 列表 / POST 收词
 │   │       ├── words/[id]/route.ts   DELETE 删词或删单条 context
@@ -169,19 +209,33 @@ readflow/
 │   │       ├── export/route.ts       GET 导出状态 / POST 生成并写入卡片
 │   │       └── markji/decks/route.ts GET 牌组 / 章节列表（服务端代理，token 不出后端）
 │   ├── components/
-│   │   ├── Reader.tsx            核心：分词渲染 + 命中 + 三层释义弹层（575 行）
+│   │   ├── Reader.tsx            核心：Block 分组渲染 + 确定性分词 + 命中 + 三层释义
 │   │   ├── ReaderShell.tsx       进度条 + 阅读卡片外壳
 │   │   ├── ExportPanel.tsx       导出交互：牌组章节选择、类型勾选、预览与结果
 │   │   ├── DuoProgress.tsx       多邻国式进度条
 │   │   ├── BottomNav.tsx         底部四 tab 导航
-│   │   └── ImportForm.tsx        三种导入方式
+│   │   ├── CefrBadge.tsx         CEFR 徽章 + hover 判定明细（纯 CSS，服务端组件）
+│   │   └── ImportForm.tsx        三种导入方式 + 格式自动识别/手动覆盖
 │   ├── db/
 │   │   ├── schema.ts             Drizzle 表定义
-│   │   └── index.ts              连接单例 + WAL + 建表 + 轻量迁移（带退避重试）
+│   │   ├── index.ts              连接单例 + WAL + 建表 + 轻量迁移（带退避重试）
+│   │   ├── ensure-cefr.ts        texts 表补 CEFR 列（应用启动与回填脚本共用）
+│   │   └── ensure-blocks.ts      texts/paragraphs 补结构化列（同上，共用定义）
 │   └── lib/
+│       ├── import/               Block IR 契约层与适配器
+│       │   ├── types.ts          Block / InlineRange / BlockMeta + JSON 安全解析
+│       │   ├── builder.ts        inline 节点摊平成可见文本，记录 [start,end) 区间
+│       │   ├── detect.ts         保守格式探测（强特征 + 多类命中）
+│       │   ├── markdown.ts       remark mdast → Block[]
+│       │   ├── html.ts           jsdom DOM → Block[]
+│       │   ├── plain.ts          复用 splitParagraphs()，纯文本零回归
+│       │   ├── group.ts          渲染前把 cell/item 纯函数重组成表格/列表
+│       │   └── index.ts          统一出口 + proseTexts() 过滤非正文
+│       ├── cefr.ts               纯函数：词汇/句法两路特征 → 级别 + 分数 + 明细
+│       ├── cefr-dict.ts          服务端适配：接 ECDICT 词频、加缓存、失败不影响导入
 │       ├── tokenize.ts           确定性分词 + W3C 式锚点（build/resolve）
 │       ├── split.ts              切段、词数统计、按句截取
-│       ├── readability.ts        URL → 正文段落
+│       ├── readability.ts        URL → 官方 Markdown（优先）或 Readability 正文 HTML
 │       ├── dict.ts               ECDICT 查询 + lemma 反查 + 选择题干扰项
 │       ├── ai.ts                 DeepSeek prompt 与流式生成
 │       ├── cardgen.ts            Markji 卡片模板（三种）+ 发送前语法自检
@@ -191,7 +245,11 @@ readflow/
 ├── scripts/
 │   ├── import-ecdict.mjs         CSV → SQLite 批量导入
 │   ├── verify-export.ts          离线验证：收词 → 生成卡片 → 语法自检
-│   └── verify-markji.ts          只读联调：用自研客户端列牌组/章节
+│   ├── verify-markji.ts          只读联调：用自研客户端列牌组/章节
+│   ├── backfill-cefr.ts          给老文本补 CEFR（默认 DRY-RUN，--apply 写入）
+│   ├── service.sh                launchd 常驻服务（install / restart / status / logs）
+│   └── ...                        另有 E2E、性能基准、扩展打包等脚本
+├── tests/unit/                     node:test 单测（npm test）
 ├── docs/ARCHITECTURE.md          技术实现文档
 └── data/                         本地数据（已 gitignore）
     ├── readflow.db              用户数据
@@ -239,8 +297,8 @@ readflow/
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/api/texts` | 文本列表 |
-| `POST` | `/api/texts` | 导入文本，body `{title?, text?, url?}`；带 `url` 时走 Readability |
-| `GET` | `/api/texts/{id}` | 文本 + 全部段落 |
+| `POST` | `/api/texts` | 导入文本，body `{title?, text?, url?, format?: "auto"\|"plain"\|"markdown", sourceType?: "paste"\|"file"}`。带 `url` 时优先抓站点官方 `.md`，拿不到才降级 Readability HTML；粘贴/上传走格式探测 → Block IR。导入时同步算 CEFR，返回 `sourceFormat / blockKinds / cefrLevel / cefrScore / cefrConfidence` |
+| `GET` | `/api/texts/{id}` | 文本（含 `sourceFormat` / `sourceRaw`）+ 全部段落（含 `blockType` / `blockMeta` / `inlineRanges`） |
 | `DELETE` | `/api/texts/{id}` | 删文本（段落级联） |
 | `GET` | `/api/dict?word=went` | 词典查询，返回 `{entry, originalForm, lemmaForm}` |
 | `GET` | `/api/explain?word=&context=&language=&monolingual=&prompt=` | AI 流式释义，纯文本分块 |
@@ -273,6 +331,8 @@ readflow/
 | **P4** | **导出墨墨记忆卡**：三种卡片、预览、幂等、限速、日配额 | ✅ |
 | P6 | 学习日历热力图 + 真实连续天数（streak / 最长连续 / 活跃天数） | ✅ |
 | P6b | 阅读进度：记住读到哪一段，下次打开自动定位 | 待定 |
+| P8 | 文章 CEFR 粗估：导入时算一次、双路打分、徽章与判定明细、老文本回填 | ✅ |
+| **P9** | **结构化导入**：Markdown / HTML → Block IR，标题·列表·表格·代码块·callout 原样渲染，URL 优先官方 `.md`，锚点契约不变 | ✅ |
 | **P5** | **长文性能：实测基准，决定不做虚拟滚动**（见 [`docs/PERF.md`](docs/PERF.md)） | ✅ |
 | P7 | 多用户 + 云端同步（表结构已预留） | 待定 |
 
@@ -292,7 +352,10 @@ P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节�
 - **AI 层无缓存**：同一个词重复点会重复计费。Readlang 用内存 + 服务端缓存规避，我们还没做。
 - **中文按字切**：分词器对 CJK 只做单字切分，中文阅读需替换分词实现。
 - **移动端未适配**：弹层宽度固定 360px，小屏靠 `max-height` 兜底，没有专门的移动布局。
-- **无自动化测试**：目前靠 `tsc --noEmit` + 两个验证脚本（`npm run verify:cards` / `npm run verify:markji`）手工回归。
+- **CEFR 是启发式估算，不是标注模型**：没有用带 CEFR 标签的语料训练，阈值是拿 ECDICT 词频在真实文本上校准出来的。专有名词 / 术语 / 公式会被当成生僻词而高估难度（置信度会自动降级）；短文本（<150 词）的句法统计波动很大。将来可以用 `user_words` / `contexts` 里的个人收词行为做个性化校准。
+- **旧文章的结构补不回来**：P9 之前入库的文本，表格换行已被压成空格，无法从压平结果反推行列。按约定不做迁移工具，需要重新粘贴原始 Markdown 重新导入；旧文章的锚点、词库、CEFR 都不受影响，仍可正常阅读。
+- **结构化导入不是全保真**：支持 GFM 表格、多级列表、代码块、引用/callout、行内链接与强调；`colspan`/`rowspan`、嵌套表格、脚注、LaTeX 公式、语法高亮配色、图片本身不还原（图片保留占位文字）。MDX 的 info string（如 `text theme={null}`）只取合法语言名。链接里的词可以点（不会跳走），代码块里的词刻意不可点。
+- **端到端靠脚本回归**：`npm test` 跑 `node:test` 单测（含 CEFR 的控制变量测试），`npm run typecheck` 查类型；E2E 与导出验证另有 `npm run test:e2e` / `npm run verify:cards` / `npm run verify:markji`。
 - **词形还原受 ECDICT 数据限制**：`leaves` 的 exchange 指向 `leave`（离开），但阅读中更常见的意思是「树叶」。我们优先展示变形词自己的释义（树叶），lemma 仍按 exchange 落库，所以 `leaves` 和 `leaf` 在词库里可能是两条。`was → be`、`went → go` 这类规则变形还原正常。
 - **音标是 ECDICT 原文的近似写法**：多数条目用 `'`/`,` 表示主/次重音（`'glisn`），我们统一显示成 `ˈ`/`ˌ`，但音值本身仍是 ECDICT 的记音，不保证是标准 IPA。
 - **导出不可逆**：墨墨没有删除接口，推错的卡片只能在 App 里手删。幂等只保证「不重复推」，不保证「推对了」——所以写入前必须先看预览。

@@ -1,6 +1,8 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import { sqlite, dbPath } from "./sqlite";
+import { ensureCefrColumns } from "./ensure-cefr";
+import { ensureBlockColumns } from "./ensure-blocks";
 
 /**
  * 建表语句直接内联：本地单机应用，启动即可用，不依赖 migration 流程。
@@ -18,14 +20,24 @@ CREATE TABLE IF NOT EXISTS texts (
   source_url TEXT,
   language TEXT NOT NULL DEFAULT 'en',
   word_count INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  cefr_level TEXT,
+  cefr_score REAL,
+  cefr_detail TEXT,
+  cefr_method TEXT,
+  cefr_overridden INTEGER NOT NULL DEFAULT 0,
+  source_format TEXT NOT NULL DEFAULT 'plain',
+  source_raw TEXT
 );
 
 CREATE TABLE IF NOT EXISTS paragraphs (
   id TEXT PRIMARY KEY,
   text_id TEXT NOT NULL REFERENCES texts(id) ON DELETE CASCADE,
   idx INTEGER NOT NULL,
-  content TEXT NOT NULL
+  content TEXT NOT NULL,
+  block_type TEXT NOT NULL DEFAULT 'paragraph',
+  block_meta TEXT,
+  inline_ranges TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_paragraphs_text ON paragraphs(text_id, idx);
 
@@ -128,6 +140,11 @@ function migrate(): void {
   if (!wordCols.some((c) => c.name === "is_phrase")) {
     sqlite.exec("ALTER TABLE user_words ADD COLUMN is_phrase INTEGER NOT NULL DEFAULT 0");
   }
+
+  // texts：2026-11 新增的 CEFR 粗估字段（与回填脚本共用定义）
+  ensureCefrColumns(sqlite);
+  // 结构化导入：texts.source_* + paragraphs.block_*（与离线脚本共用定义）
+  ensureBlockColumns(sqlite);
 
   const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "card_type")) {

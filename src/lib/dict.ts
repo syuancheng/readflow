@@ -28,13 +28,11 @@ function getDictDb(): Database.Database {
  *   2. 有些变形词的 exchange 是**空的**，只在中文释义里留了指针：`was` 的释义是
  *      "be的过去式"，exchange 为 null。这时只能解析中文。
  */
-export function lemma(word: string): string {
-  const db = getDictDb();
-  const row = db
-    .prepare("SELECT exchange, translation FROM ecdict WHERE word = ? COLLATE NOCASE")
-    .get(word) as { exchange: string | null; translation: string | null } | undefined;
+type LemmaRow = { exchange: string | null; translation: string | null };
 
-  if (!row) return word;
+/** 从一条已有的词典记录里推原形，避免为了拿词频再查一次库 */
+function lemmaFromRow(row: LemmaRow | undefined, fallback: string): string {
+  if (!row) return fallback;
 
   // 形状 1：exchange 里的 0:xxx（允许出现在任意位置）
   const fromExchange = row.exchange?.match(/(?:^|\/)0:([^/]+)/)?.[1];
@@ -47,7 +45,44 @@ export function lemma(word: string): string {
   );
   if (pointer) return pointer[1];
 
-  return word;
+  return fallback;
+}
+
+export function lemma(word: string): string {
+  const db = getDictDb();
+  const row = db
+    .prepare("SELECT exchange, translation FROM ecdict WHERE word = ? COLLATE NOCASE")
+    .get(word) as LemmaRow | undefined;
+  return lemmaFromRow(row, word);
+}
+
+/**
+ * COCA 词频排名（1…47062，越小越常用），供 CEFR 词汇难度估算使用。
+ *
+ * 坑：ECDICT 里变形词本身常常没有 frq（`was` / `are` / `said` 都是 null），
+ * 直接用会把最普通的功能词当成生僻词，实测能把短篇故事的高频占比拉低十几个点。
+ * 所以查不到时先按 lemma 规则还原原形再查一次。
+ *
+ * 返回 null 表示这个词不在 COCA 前 47062 名内：可能是专有名词、术语、
+ * 缩写或真正的生僻词 —— 调用方（cefr.ts）把它按「最生僻」处理并降低置信度。
+ */
+export function frequencyRank(word: string): number | null {
+  const db = getDictDb();
+  const row = db
+    .prepare("SELECT frq, exchange, translation FROM ecdict WHERE word = ? COLLATE NOCASE")
+    .get(word) as (LemmaRow & { frq: number | null }) | undefined;
+
+  if (row?.frq && row.frq > 0) return row.frq;
+
+  const base = lemmaFromRow(row, word).toLowerCase();
+  if (base !== word.toLowerCase()) {
+    const baseRow = db
+      .prepare("SELECT frq FROM ecdict WHERE word = ? COLLATE NOCASE")
+      .get(base) as { frq: number | null } | undefined;
+    if (baseRow?.frq && baseRow.frq > 0) return baseRow.frq;
+  }
+
+  return null;
 }
 
 export type DictEntry = {

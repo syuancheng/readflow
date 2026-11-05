@@ -245,6 +245,170 @@ body {
   margin-bottom: 1.35em;
 }
 
+/* ====== 结构化正文（Block IR） ======
+   约束：标签一律用 CSS 伪元素生成，绝不在 data-pid 容器里插入真实文字节点，
+   否则 Range.toString() 会把它算进段落偏移，点词锚点就会错位。 */
+
+.rf-h {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--duo-ink);
+  margin: 1.6em 0 0.6em;
+  line-height: 1.35;
+  scroll-margin-top: 76px;
+}
+.rf-h2 { font-size: 1.42em; padding-bottom: 0.35em; border-bottom: 2px solid var(--duo-border); }
+.rf-h3 { font-size: 1.22em; }
+.rf-h4, .rf-h5, .rf-h6 { font-size: 1.06em; color: var(--duo-ink-soft); }
+.rf-h:first-child { margin-top: 0; }
+
+.rf-quote {
+  margin: 0 0 1.35em;
+  padding: 0.75em 1.1em;
+  border-left: 4px solid var(--duo-blue);
+  border-radius: 0 12px 12px 0;
+  background: var(--duo-blue-soft);
+  color: var(--duo-ink);
+}
+.rf-callout { border-left-width: 5px; padding: 0.9em 1.1em; }
+.rf-callout::before {
+  content: attr(data-label);
+  display: block;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35em;
+  opacity: 0.85;
+}
+.rf-callout-note { background: var(--duo-blue-soft); border-left-color: var(--duo-blue); }
+.rf-callout-tip { background: var(--duo-green-soft); border-left-color: var(--duo-green-dark); }
+.rf-callout-warning,
+.rf-callout-caution { background: var(--duo-orange-soft); border-left-color: var(--duo-orange); }
+.rf-callout-important { background: var(--duo-red-soft); border-left-color: var(--duo-red); }
+
+.rf-pre {
+  position: relative;
+  margin: 0 0 1.35em;
+  padding: 2.2em 1.1em 1.1em;
+  background: var(--duo-surface);
+  border: 2px solid var(--duo-border);
+  border-radius: 12px;
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre;
+  tab-size: 2;
+}
+.rf-pre::before {
+  content: attr(data-label);
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--duo-ink-faint);
+  text-transform: uppercase;
+}
+
+.rf-hr {
+  border: none;
+  border-top: 2px dashed var(--duo-border);
+  margin: 1.8em 0;
+}
+
+.rf-figure { margin: 0 0 1.35em; }
+.rf-figure figcaption {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 13px;
+  color: var(--duo-ink-faint);
+  text-align: center;
+}
+
+.rf-list { margin: 0 0 1.35em; padding-left: 1.5em; }
+.rf-li { margin-bottom: 0.45em; padding-left: 0.2em; }
+.rf-li::marker { color: var(--duo-blue-dark); font-weight: 800; }
+.rf-li-nested { margin-left: 1.3em; list-style-type: circle; }
+
+.rf-table-scroll {
+  margin: 0 0 1.5em;
+  overflow-x: auto;
+  border: 2px solid var(--duo-border);
+  border-radius: 12px;
+}
+.rf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.rf-cell {
+  padding: 0.65em 0.85em;
+  border-bottom: 1px solid var(--duo-border);
+  border-right: 1px solid var(--duo-border);
+  vertical-align: top;
+}
+.rf-cell:last-child { border-right: none; }
+.rf-table tbody tr:last-child .rf-cell { border-bottom: none; }
+.rf-table thead .rf-cell {
+  background: var(--duo-surface);
+  font-weight: 800;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 13px;
+}
+.rf-cell-inline { display: inline; }
+
+.rf-inline-link {
+  color: var(--duo-blue-dark);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+.rf-inline-link:hover { text-decoration-style: solid; }
+.rf-i-strong { font-weight: 800; }
+.rf-i-em { font-style: italic; }
+.rf-i-delete { text-decoration: line-through; opacity: 0.75; }
+.rf-i-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.84em;
+  background: var(--duo-surface);
+  border: 1px solid var(--duo-border);
+  border-radius: 5px;
+  padding: 0.08em 0.3em;
+}
+.rf-i-image {
+  color: var(--duo-purple-dark);
+  border-bottom: 1px dashed var(--duo-purple);
+}
+
+.rf-format-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rf-format-chip {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 12px;
+  border-radius: 9px;
+  border: 2px solid var(--duo-border);
+  background: var(--duo-bg);
+  color: var(--duo-ink-soft);
+  cursor: pointer;
+  transition: border-color 90ms ease, background-color 90ms ease;
+}
+.rf-format-chip:hover { border-color: var(--duo-blue); }
+.rf-format-chip-active {
+  border-color: var(--duo-blue);
+  background: var(--duo-blue-soft);
+  color: var(--duo-blue-dark);
+}
+
 /* 每个可点击的词 */
 .w {
   cursor: pointer;
@@ -2043,4 +2207,159 @@ body {
 /* .reading-body p 的段落下边距会命中提示行，这里显式收掉 */
 .reading-body .rf-sec-hint {
   margin: 0;
+}
+
+/* ====== CEFR 难度徽章 + hover 判定明细 ====== */
+.cefr-wrap {
+  position: relative;
+  display: inline-flex;
+  outline: none;
+}
+
+.cefr-badge {
+  cursor: help;
+  white-space: nowrap;
+}
+
+.cefr-pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  width: 300px;
+  padding: 14px 16px;
+  background: var(--duo-bg);
+  border: 2px solid var(--duo-border);
+  border-radius: 14px;
+  box-shadow: 0 10px 26px rgba(60, 60, 60, 0.14);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: var(--duo-ink);
+  text-align: left;
+  cursor: default;
+  white-space: normal;
+}
+
+/* 透明桥：鼠标从徽章移到弹层时不会经过「悬停真空」导致弹层闪退 */
+.cefr-pop::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  left: 0;
+  right: 0;
+  height: 12px;
+}
+
+.cefr-wrap:hover .cefr-pop,
+.cefr-wrap:focus-within .cefr-pop {
+  display: block;
+}
+
+.cefr-pop-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.cefr-pop-head > span {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--duo-ink-faint);
+  white-space: nowrap;
+}
+
+.cefr-pop-note,
+.cefr-pop-line,
+.cefr-pop-caveat {
+  display: block;
+}
+
+.cefr-pop-note {
+  color: var(--duo-ink-soft);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.cefr-pop-line {
+  color: var(--duo-ink-soft);
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.cefr-pop-caveat {
+  color: var(--duo-orange-dark);
+  font-weight: 500;
+  font-size: 11.5px;
+  margin-top: 3px;
+}
+
+.cefr-bands {
+  display: block;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 2px solid var(--duo-border);
+}
+
+.cefr-bands-title {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--duo-ink-faint);
+  margin-bottom: 7px;
+}
+
+.cefr-band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cefr-band-label {
+  width: 112px;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.cefr-band-label em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--duo-ink-faint);
+}
+
+.cefr-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 6px;
+  background: var(--duo-surface);
+  overflow: hidden;
+}
+
+.cefr-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.cefr-band-num {
+  width: 32px;
+  text-align: right;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--duo-ink-soft);
+}
+
+@media (max-width: 720px) {
+  .cefr-pop { width: 260px; }
 }

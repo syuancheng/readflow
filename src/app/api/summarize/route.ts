@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { paragraphs, sectionSummaries } from "@/db/schema";
 import { hasModelConfigured, NO_MODEL_NOTICE, streamSectionSummary } from "@/lib/ai";
 import { STREAM_RESET } from "@/lib/config";
+import { isProse, type BlockKind } from "@/lib/import/types";
 
 export const dynamic = "force-dynamic";
 
@@ -86,11 +87,14 @@ export async function POST(req: NextRequest) {
   }
 
   const rows = db
-    .select({ idx: paragraphs.idx, content: paragraphs.content })
+    .select({ idx: paragraphs.idx, content: paragraphs.content, blockType: paragraphs.blockType })
     .from(paragraphs)
     .where(eq(paragraphs.textId, textId))
     .orderBy(asc(paragraphs.idx))
-    .all();
+    .all()
+    // 代码块 / 分隔线 / 图片不是散文，发给模型只会污染小结。
+    // 阅读器算区间时也用同一套过滤，所以 startIdx/endIdx 一定还落在这里。
+    .filter((r) => isProse({ kind: (r.blockType ?? "paragraph") as BlockKind }));
 
   if (rows.length === 0) {
     return Response.json({ error: "text not found or empty" }, { status: 404 });

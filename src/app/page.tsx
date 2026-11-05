@@ -3,7 +3,9 @@ import Link from "next/link";
 import { db } from "@/db";
 import { texts, LOCAL_USER } from "@/db/schema";
 import { getStats } from "@/lib/stats";
+import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
 import ImportForm from "@/components/ImportForm";
+import CefrBadge from "@/components/CefrBadge";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +71,7 @@ export default async function Home() {
             <ul className="space-y-3">
               {rows.map((t, i) => {
                 const style = SOURCE_STYLE[t.sourceType] ?? SOURCE_STYLE.paste;
+                const cefrDetail = parseCefrDetail(t.cefrDetail);
                 return (
                   <li key={t.id}>
                     <Link href={`/texts/${t.id}`} className="duo-text-item block">
@@ -93,6 +96,11 @@ export default async function Home() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className={style.cls}>{style.label}</span>
+                            <CefrBadge
+                              level={asCefrLevel(t.cefrLevel)}
+                              score={t.cefrScore ?? null}
+                              detail={cefrDetail}
+                            />
                             <span className="text-[12.5px] font-medium text-ink-faint">
                               {new Date(t.createdAt).toLocaleDateString("zh-CN")}
                             </span>

@@ -1,7 +1,9 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
+import { buildAnchor, tokenize, type Anchor, type Token } from "@/lib/tokenize";
+import { groupBlocks, isSkipped, type Group } from "@/lib/import/group";
+import { isProse, type BlockKind, type BlockMeta, type InlineRange } from "@/lib/import/types";
 import { aiContextOf } from "@/lib/sentence";
 import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
@@ -9,8 +11,28 @@ import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
 import MarkdownText from "@/components/MarkdownText";
 
-type Para = { id: string; idx: number; content: string };
+/**
+ * 一个 Block IR 落库后的一行。content 仍是「用户可见的纯文本」，
+ * 所以 data-s/data-e、contexts.start/end 的坐标语义和纯文本时代完全一致。
+ * 新增的三个字段只负责「怎么排版」，不参与任何坐标计算。
+ */
+type Para = {
+  id: string;
+  idx: number;
+  content: string;
+  blockType?: string | null;
+  blockMeta?: BlockMeta;
+  inlineRanges?: InlineRange[];
+};
 export type ReaderPara = Para;
+
+const CALLOUT_LABEL: Record<string, string> = {
+  NOTE: "提示",
+  TIP: "技巧",
+  WARNING: "注意",
+  IMPORTANT: "重要",
+  CAUTION: "小心",
+};
 
 type Pick = {
   paragraphId: string;
@@ -96,47 +118,214 @@ function snapRangeToWords(range: Range): Range {
   return r;
 }
 
-const Para = memo(function Para({
-  p,
-  rangeKey,
-}: {
-  p: Para;
-  /** 该段已存批注的字符范围，逗号分隔的 "start-end"；用字符串保证 memo 稳定 */
-  rangeKey: string;
-}) {
-  const tokens = useMemo(() => tokenize(p.content), [p.content]);
-  const ranges = useMemo(
-    () =>
-      rangeKey
-        .split(",")
+function pidProps(p: Para) {
+  return { "data-pid": p.id, "data-idx": p.idx } as const;
+}
+
+/** inline 样式只影响 className，绝不影响 data-s/data-e 的字符坐标。 */
+function styleClassesFor(t: { start: number; end: number }, ranges: InlineRange[]): string {
+  const out: string[] = [];
+  for (const r of ranges) {
+    if (t.start >= r.start && t.end <= r.end) out.push(`rf-i-${r.kind}`);
+  }
+  return out.join(" ");
+}
+
+function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
+  const tokens = tokenize(p.content);
+  const ranges = p.inlineRanges ?? [];
+  const links = ranges.filter((r) => r.kind === "link" && r.href);
+  const annotatedRanges = rangeKey
+    .split(",")
+    .filter(Boolean)
+    .map((s) => {
+      const [a, b] = s.split("-").map(Number);
+      return { start: a, end: b };
+    });
+
+  const one = (t: Token): React.ReactNode => {
+    if (!t.word) return <span key={`t${t.start}`}>{t.text}</span>;
+    /* 标记只反映「这次批注」：划选存档的那一次出现（w-annotated）。
+       不做词库级全局标记——同一个词在别的句子里可能你是懂的，
+       全文铺绿既误导又破坏「单词放在句子语境里解释」的原则 */
+    const annotated = annotatedRanges.some((r) => t.end > r.start && t.start < r.end);
+    const cls = ["w", annotated ? "w-annotated" : "", styleClassesFor(t, ranges)]
+      .filter(Boolean)
+      .join(" ");
+    return (
+      <span key={`t${t.start}`} className={cls} data-s={t.start} data-e={t.end}>
+        {t.text}
+      </span>
+    );
+  };
+
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    const lk = links.find((l) => t.start >= l.start && t.end <= l.end);
+    if (!lk) {
+      out.push(one(t));
+      i++;
+      continue;
+    }
+    // 同一个链接跨多个 token 时，把它们一起包进 <a>；
+    // <a> 是 data-pid 容器的后代，closest(".w") / closest("[data-pid]") 仍然成立
+    const group: Token[] = [];
+    let j = i;
+    while (j < tokens.length && tokens[j].start >= lk.start && tokens[j].end <= lk.end) {
+      group.push(tokens[j]);
+      j++;
+    }
+    out.push(
+      <a key={`a${lk.start}`} href={lk.href} target="_blank" rel="noreferrer" className="rf-inline-link">
+        {group.map(one)}
+      </a>,
+    );
+    i = j;
+  }
+  return out;
+}
+
+const Tokens = memo(function Tokens({ p, rangeKey }: { p: Para; rangeKey: string }) {
+  const nodes = useMemo(
+    () => renderTokens(p, rangeKey),
+    [p.content, p.inlineRanges, rangeKey],
+  );
+  return <>{nodes}</>;
+});
+
+/** 单个块：容器标签随 kind 变，但 data-pid 永远挂在最外层可见容器上。 */
+const SingleBlock = memo(function SingleBlock({ p, rangeKey }: { p: Para; rangeKey: string }) {
+  const kind = (p.blockType ?? "paragraph") as BlockKind;
+  const meta = p.blockMeta ?? {};
+  const pid = pidProps(p);
+
+  switch (kind) {
+    case "heading": {
+      // 正文里的 h1 降级成 h2：阅读页标题已经是 h1，别出现两个
+      const level = Math.min(6, Math.max(2, (meta.depth ?? 2) + 1));
+      const Tag = `h${level}` as React.ElementType;
+      return (
+        <Tag {...pid} className={`rf-h rf-h${level}`}>
+          <Tokens p={p} rangeKey={rangeKey} />
+        </Tag>
+      );
+    }
+    case "quote": {
+      const callout = meta.callout;
+      const cls = [
+        "rf-quote",
+        callout ? `rf-callout rf-callout-${callout.toLowerCase()}` : "",
+      ]
         .filter(Boolean)
-        .map((s) => {
-          const [a, b] = s.split("-").map(Number);
-          return { start: a, end: b };
-        }),
-    [rangeKey],
-  );
-  return (
-    <p data-pid={p.id} data-idx={p.idx}>
-      {tokens.map((t, i) => {
-        if (!t.word) return <span key={i}>{t.text}</span>;
-        const annotated = ranges.some((r) => t.end > r.start && t.start < r.end);
-        return (
-          <span
-            key={i}
-            /* 标记只反映「这次批注」：划选存档的那一次出现（w-annotated）。
-               不做词库级全局标记——同一个词在别的句子里可能你是懂的，
-               全文铺绿既误导又破坏「单词放在句子语境里解释」的原则 */
-            className={`w${annotated ? " w-annotated" : ""}`}
-            data-s={t.start}
-            data-e={t.end}
+        .join(" ");
+      // 提示框标签用 CSS ::before + data-label：伪元素不进入 DOM 文本，
+      // 否则 Range.toString() 会把它算进段落偏移，锚点就全错了
+      return (
+        <blockquote {...pid} className={cls} data-label={callout ? CALLOUT_LABEL[callout] ?? callout : undefined}>
+          <Tokens p={p} rangeKey={rangeKey} />
+        </blockquote>
+      );
+    }
+    case "code":
+      // 代码块不生成 .w 可点词 span：pnpm / json / __init__ 不是要背的单词
+      return (
+        <pre {...pid} className="rf-pre" data-label={meta.lang || "代码"}>
+          <code>{p.content}</code>
+        </pre>
+      );
+    case "hr":
+      return <hr {...pid} className="rf-hr" />;
+    case "figure":
+      return (
+        <figure {...pid} className="rf-figure">
+          <figcaption>{p.content}</figcaption>
+        </figure>
+      );
+    case "list_item":
+      return (
+        <li {...pid} className="rf-li">
+          <Tokens p={p} rangeKey={rangeKey} />
+        </li>
+      );
+    case "table_cell":
+      return (
+        <span {...pid} className="rf-cell-inline">
+          <Tokens p={p} rangeKey={rangeKey} />
+        </span>
+      );
+    default:
+      return (
+        <p {...pid}>
+          <Tokens p={p} rangeKey={rangeKey} />
+        </p>
+      );
+  }
+});
+
+/** 表格 cell / 列表 item 在库里各占一行，渲染时才重新组装回一个结构。 */
+const GroupView = memo(function GroupView({
+  group,
+  rangeKeyByPara,
+}: {
+  group: Group<Para>;
+  rangeKeyByPara: Map<string, string>;
+}) {
+  const keyOf = (p: Para) => rangeKeyByPara.get(p.id) ?? "";
+
+  if (group.type === "table") {
+    const [head, ...body] = group.rows;
+    const Cell = (p: Para, isHead: boolean) => {
+      const Tag = (isHead ? "th" : "td") as React.ElementType;
+      return (
+        <Tag
+          key={p.id}
+          {...pidProps(p)}
+          className="rf-cell"
+          style={{ textAlign: p.blockMeta?.align ?? undefined }}
+        >
+          <Tokens p={p} rangeKey={keyOf(p)} />
+        </Tag>
+      );
+    };
+    return (
+      <div className="rf-table-scroll">
+        <table className="rf-table">
+          {head && (
+            <thead>
+              <tr>{head.map((p) => Cell(p, true))}</tr>
+            </thead>
+          )}
+          <tbody>
+            {body.map((row, i) => (
+              <tr key={`r${i}`}>{row.map((p) => Cell(p, false))}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  if (group.type === "list") {
+    const Tag = (group.ordered ? "ol" : "ul") as React.ElementType;
+    return (
+      <Tag className="rf-list">
+        {group.items.map((p) => (
+          <li
+            key={p.id}
+            {...pidProps(p)}
+            className={`rf-li${(p.blockMeta?.listDepth ?? 0) > 0 ? " rf-li-nested" : ""}`}
+            data-list-depth={p.blockMeta?.listDepth ?? 0}
           >
-            {t.text}
-          </span>
-        );
-      })}
-    </p>
-  );
+            <Tokens p={p} rangeKey={keyOf(p)} />
+          </li>
+        ))}
+      </Tag>
+    );
+  }
+
+  return <SingleBlock p={group.items[0]} rangeKey={keyOf(group.items[0])} />;
 });
 
 /** 一个小结区间的加载状态 */
@@ -284,7 +473,14 @@ export default function Reader({
   // ===== 分段小结 =====
   // 按累计词数分区（约 300 词一段区间），只在自然段末尾落标记，绝不拆段
   const sections = useMemo(
-    () => planSections(paragraphs.map((p) => ({ idx: p.idx, content: p.content }))),
+    () =>
+      planSections(
+        paragraphs
+          // 代码块 / 分隔线 / 图片不是散文，不该参与区间词数累计，
+          // 服务端 /api/summarize 用完全相同的过滤规则
+          .filter((p) => isProse({ kind: (p.blockType ?? "paragraph") as BlockKind }))
+          .map((p) => ({ idx: p.idx, content: p.content })),
+      ),
     [paragraphs],
   );
   const sectionByEnd = useMemo(
@@ -434,7 +630,7 @@ export default function Reader({
     return () => clearTimeout(t);
   }, [focusParaId]);
 
-  // 每段已存批注的字符范围，序列化成字符串传给 memo 化的 Para（避免长文全量重渲染）
+  // 每段已存批注的字符范围，序列化成字符串传给 memo 化的块（避免长文全量重渲染）
   const rangeKeyByPara = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of annotations) {
@@ -442,6 +638,12 @@ export default function Reader({
     }
     return m;
   }, [annotations]);
+
+  // 分组是纯函数（服务端/客户端结果一致），不会引入 hydration 差异
+  const groups = useMemo(
+    () => groupBlocks(paragraphs.filter((p) => !isSkipped(p))),
+    [paragraphs],
+  );
 
   function onClick(e: React.MouseEvent) {
     const sel = window.getSelection();
@@ -452,6 +654,8 @@ export default function Reader({
       close();
       return;
     }
+    // 链接里的词：点词优先弹释义，别直接跳走（冒泡阶段阻止默认行为仍生效）
+    if ((e.target as HTMLElement).closest("a.rf-inline-link")) e.preventDefault();
     const pEl = wordEl.closest<HTMLElement>("[data-pid]");
     if (!pEl) return;
 
@@ -733,11 +937,18 @@ export default function Reader({
       <div className="reader-main">
         <div className="duo-card reader-article-card">
           <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
-            {paragraphs.map((p) => {
-              const sec = sectionByEnd.get(p.idx);
+            {groups.map((g, gi) => {
+              // 小结标记按自然段 idx 落点；一个分组可能含多个 idx（表格/列表），
+              // 取组内最后一个命中，保证标记不会因为分组被吞掉
+              let hitSec: Section | undefined;
+              for (const p of g.items) {
+                const hit = sectionByEnd.get(p.idx);
+                if (hit) hitSec = hit;
+              }
+              const sec = hitSec;
               return (
-                <Fragment key={p.id}>
-                  <Para p={p} rangeKey={rangeKeyByPara.get(p.id) ?? ""} />
+                <Fragment key={`g${gi}`}>
+                  <GroupView group={g} rangeKeyByPara={rangeKeyByPara} />
                   {sec && (
                     <SectionMark
                       section={sec}

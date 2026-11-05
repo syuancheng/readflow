@@ -4,6 +4,9 @@ import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { paragraphs, texts, userWords, LOCAL_USER } from "@/db/schema";
 import ReaderShell from "@/components/ReaderShell";
+import CefrBadge from "@/components/CefrBadge";
+import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
+import { parseBlockMeta, parseInlineRanges } from "@/lib/import/types";
 import type { SavedWordInfo } from "@/components/Reader";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +55,12 @@ export default async function TextPage({
         <h1 className="text-[28px] font-extrabold tracking-tight mt-3 mb-2">{text.title}</h1>
         <p className="text-[14px] font-medium text-ink-faint flex items-center gap-2 flex-wrap">
           <span className="duo-badge duo-badge-green">{text.wordCount.toLocaleString()} 词</span>
-          <span className="duo-badge duo-badge-blue">{rows.length} 段</span>
+          <span className="duo-badge duo-badge-blue">{rows.length} 块</span>
+          <CefrBadge
+            level={asCefrLevel(text.cefrLevel)}
+            score={text.cefrScore ?? null}
+            detail={parseCefrDetail(text.cefrDetail)}
+          />
           {text.sourceUrl && (
             <a
               href={text.sourceUrl}
@@ -68,7 +76,14 @@ export default async function TextPage({
 
       <ReaderShell
         textId={id}
-        paragraphs={rows.map((r) => ({ id: r.id, idx: r.idx, content: r.content }))}
+        paragraphs={rows.map((r) => ({
+          id: r.id,
+          idx: r.idx,
+          content: r.content,
+          blockType: r.blockType,
+          blockMeta: parseBlockMeta(r.blockMeta),
+          inlineRanges: parseInlineRanges(r.inlineRanges),
+        }))}
         savedWords={savedWords}
         focusParaId={p}
       />
