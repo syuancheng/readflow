@@ -430,6 +430,83 @@ try {
     check("G1 跳到原文链接存在", false, "词库里没有带 context 的词");
   }
 
+  // ---------- J：分段小结（按累计词数分区，标记只落在自然段末尾） ----------
+  await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
+  await page.waitForTimeout(700);
+
+  const secCount = await page.locator(".rf-sec").count();
+  check("J1 文章按词数插入分段小结标记", secCount >= 1, `${secCount} 个标记`);
+
+  // 硬约束：标记必须是某个 <p data-pid> 的下一个兄弟节点 → 段落绝不被切开
+  const boundaryOk = await page.evaluate(() => {
+    const marks = [...document.querySelectorAll(".rf-sec")];
+    return marks.length > 0 && marks.every((m) => {
+      const prev = m.previousElementSibling;
+      return !!prev && prev.tagName === "P" && prev.hasAttribute("data-pid");
+    });
+  });
+  check("J2 标记只落在自然段边界上，不拆分自然段", boundaryOk);
+
+  const markTitle = await page.locator(".rf-sec-btn").first().getAttribute("title");
+  check(
+    "J3 标记提示含区间与词数",
+    /第 \d+–\d+ 段 · \d+ 词/.test(markTitle || ""),
+    markTitle || "(无)",
+  );
+
+  await page.locator(".rf-sec-btn").first().click();
+  await page.waitForSelector(".rf-sec-panel", { timeout: 5000 });
+  check("J4 点击标记在标记下方展开小结面板", await page.locator(".rf-sec-panel").first().isVisible());
+
+  // 等流式输出落地（命中缓存则几乎立即出结果；未配置模型则出现配置提示）
+  await page
+    .waitForFunction(
+      () => {
+        const el = document.querySelector(".rf-sec-panel");
+        if (!el) return false;
+        const t = el.innerText || "";
+        return t.trim().length > 0 && !t.includes("正在读这一部分…");
+      },
+      { timeout: 30000 },
+    )
+    .catch(() => {});
+
+  const panelText = await page.locator(".rf-sec-panel").first().innerText();
+  const noticeShown = panelText.includes("还没有配置 AI 模型");
+  const bodyText = panelText
+    .replace("这一部分讲了什么", "")
+    .replace(/第 \d+–\d+ 段 · \d+ 词/, "")
+    .replace(/重新生成|收起/g, "")
+    .trim();
+  check(
+    "J5 面板给出小结内容（或未配置模型的提示）",
+    bodyText.length > 10,
+    bodyText.slice(0, 50).replace(/\n/g, " "),
+  );
+
+  const cachedList = await (await fetch(`${BASE}/api/summarize?textId=${TEXT_ID}`)).json();
+  const cachedCount = (cachedList.summaries ?? []).length;
+  check(
+    "J6 小结落库与面板一致（提示态不写缓存）",
+    noticeShown ? cachedCount === 0 : cachedCount >= 1,
+    `提示=${noticeShown} 缓存=${cachedCount}`,
+  );
+
+  const badRange = await fetch(`${BASE}/api/summarize`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ textId: TEXT_ID, startIdx: 99, endIdx: 98 }),
+  });
+  check("J7 非法区间返回 400", badRange.status === 400, `status=${badRange.status}`);
+
+  const listRes = await fetch(`${BASE}/api/summarize?textId=${TEXT_ID}`);
+  const listJson = await listRes.json().catch(() => ({}));
+  check("J8 小结列表接口可用", listRes.ok && Array.isArray(listJson.summaries));
+
+  await page.locator('.rf-sec-panel .rf-sec-act:text-is("收起")').first().click();
+  await page.waitForTimeout(200);
+  check("J9 可收起小结面板", (await page.locator(".rf-sec-panel").count()) === 0);
+
   // ---------- 汇总 ----------
   await cleanup(keepIds);
   const left = await wordCount();

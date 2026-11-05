@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSystemPrompt } from "../../src/lib/ai";
+import { buildSummaryPrompt, buildSystemPrompt } from "../../src/lib/ai";
 
 /**
  * AI 释义输出结构（用户 2026-11-05 指定）：
@@ -36,4 +36,18 @@ test("英文自解释模式同样带主谓宾分析要求", () => {
   const p = buildSystemPrompt("en", true, "This post only focuses on prompt engineering.");
   assert.ok(/subject[–-]verb[–-]object analysis/i.test(p));
   assert.ok(p.toLowerCase().includes("mandatory"));
+});
+
+/**
+ * 分段小结（用户 2026-11-05）：就是一段 summary，概括这一部分讲了什么，
+ * 不做论证分析、不逐句翻译、不分点、不加「总结：」前缀。
+ */
+test("小结模板：短、纯 summary，不掺论证分析与分点", () => {
+  const p = buildSummaryPrompt();
+  assert.ok(p.includes("2~3 句话"), "长度要求必须明确");
+  assert.ok(p.includes("120 字"), "字数上限必须明确");
+  assert.ok(p.includes("不分点"), "不允许分点罗列");
+  assert.ok(p.includes("不写「总结：」") || p.includes("不写「总结"), "禁止加前缀");
+  assert.ok(!p.includes("主谓宾"), "小结不做句子成分分析");
+  assert.ok(!p.includes("**"), "小结不使用 Markdown 小标题");
 });

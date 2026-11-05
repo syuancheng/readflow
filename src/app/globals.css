@@ -1889,3 +1889,158 @@ body {
   .st-reading-voice { width: 100%; }
   .st-reading-voice .voice-picker { max-width: 100%; width: 100%; }
 }
+
+/* ====== 分段小结标记（对齐 Readlang：段落间细线 + ? 圆点） ====== */
+.rf-sec {
+  margin: -0.6em 0 1.5em;
+}
+
+.rf-sec-rail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rf-sec-line {
+  flex: 1;
+  height: 1px;
+  background: #d7e8cd;
+}
+
+.rf-sec-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #bcd9ae;
+  border-radius: 999px;
+  background: #fff;
+  color: #4f8b3b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.rf-sec-btn:hover {
+  background: #edf6e8;
+  border-color: #96c185;
+}
+
+.rf-sec-btn.is-open {
+  background: #e6f3df;
+  border-color: #7fb86c;
+  color: #37701f;
+}
+
+/* 已生成过小结的区间：标记右上角小圆点 */
+.rf-sec-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5aa844;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.rf-sec-panel {
+  margin-top: 10px;
+  padding: 14px 18px 16px;
+  border: 1px solid #dcead5;
+  border-radius: 14px;
+  background: #f8fcf5;
+}
+
+.rf-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.rf-sec-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #3f7a2c;
+  letter-spacing: 0.01em;
+}
+
+.rf-sec-range {
+  font-size: 11px;
+  font-weight: 600;
+  color: #93a58c;
+}
+
+.rf-sec-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rf-sec-act {
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7c8f74;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rf-sec-act:hover {
+  background: #e9f3e2;
+  color: #457a2f;
+}
+
+.rf-sec-text {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.7;
+  color: #2c3b2a;
+}
+
+.rf-sec-hint {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #93a58c;
+}
+
+.rf-sec-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #b4453f;
+}
+
+.rf-sec-caret {
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: middle;
+  background: #5aa844;
+  animation: rf-caret-blink 1s steps(2) infinite;
+}
+
+@keyframes rf-caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@media (max-width: 720px) {
+  .rf-sec-range { display: none; }
+}
+
+/* .reading-body p 的段落下边距会命中提示行，这里显式收掉 */
+.reading-body .rf-sec-hint {
+  margin: 0;
+}

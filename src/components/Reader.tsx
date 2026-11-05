@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildAnchor, tokenize, type Anchor } from "@/lib/tokenize";
 import { aiContextOf } from "@/lib/sentence";
+import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
@@ -138,6 +139,96 @@ const Para = memo(function Para({
   );
 });
 
+/** 一个小结区间的加载状态 */
+type SectionState = {
+  status: "loading" | "streaming" | "done" | "error";
+  content: string;
+};
+
+/**
+ * 分段小结标记（对齐 Readlang）：段落之间一条细线 + 中间一个 ? 圆点。
+ * 点击在标记**下方原地**展开小结面板，流式输出；这一区间已生成过则显示圆点提示。
+ * 位置由 planSections 决定，永远落在自然段结束后——绝不把一段切开。
+ */
+const SectionMark = memo(function SectionMark({
+  section,
+  state,
+  open,
+  cached,
+  onToggle,
+  onRegenerate,
+  onClose,
+}: {
+  section: Section;
+  state?: SectionState;
+  open: boolean;
+  /** 这一区间已有缓存（标记上显示小圆点） */
+  cached: boolean;
+  onToggle: () => void;
+  onRegenerate: () => void;
+  onClose: () => void;
+}) {
+  const label = `第 ${section.startIdx + 1}–${section.endIdx + 1} 段 · ${section.words} 词`;
+  return (
+    <div
+      className="rf-sec"
+      onClick={(e) => e.stopPropagation()}
+      onMouseUp={(e) => e.stopPropagation()}
+    >
+      <div className="rf-sec-rail">
+        <span className="rf-sec-line" />
+        <button
+          type="button"
+          className={`rf-sec-btn${open ? " is-open" : ""}`}
+          onClick={onToggle}
+          title={`查看这一部分的小结（${label}）`}
+          aria-label={`查看第 ${section.startIdx + 1} 到 ${section.endIdx + 1} 段的小结`}
+          aria-expanded={open}
+        >
+          ?
+          {cached && !open && <span className="rf-sec-dot" aria-hidden />}
+        </button>
+        <span className="rf-sec-line" />
+      </div>
+
+      {open && (
+        <div className="rf-sec-panel">
+          <div className="rf-sec-head">
+            <span className="rf-sec-title">这一部分讲了什么</span>
+            <span className="rf-sec-range">{label}</span>
+            <span className="rf-sec-actions">
+              {state?.status !== "loading" && state?.status !== "streaming" && (
+                <button type="button" className="rf-sec-act" onClick={onRegenerate}>
+                  重新生成
+                </button>
+              )}
+              <button type="button" className="rf-sec-act" onClick={onClose}>
+                收起
+              </button>
+            </span>
+          </div>
+
+          {state?.status === "error" ? (
+            <div className="rf-sec-error">
+              <span>生成失败：{state.content}</span>
+              <button type="button" className="rf-sec-act" onClick={onRegenerate}>
+                重试
+              </button>
+            </div>
+          ) : !state || (state.status === "loading" && !state.content) ? (
+            <p className="rf-sec-hint">正在读这一部分…</p>
+          ) : (
+            <div className="rf-md rf-sec-text">
+              <MarkdownText text={state.content} />
+              {state.status === "streaming" && <span className="rf-sec-caret" />}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export type SavedWordInfo = {
   id: string;
   lemma: string;
@@ -189,6 +280,106 @@ export default function Reader({
   const [savedMap, setSavedMap] = useState<Map<string, SavedWordInfo>>(() =>
     buildSavedMap(savedWords),
   );
+
+  // ===== 分段小结 =====
+  // 按累计词数分区（约 300 词一段区间），只在自然段末尾落标记，绝不拆段
+  const sections = useMemo(
+    () => planSections(paragraphs.map((p) => ({ idx: p.idx, content: p.content }))),
+    [paragraphs],
+  );
+  const sectionByEnd = useMemo(
+    () => new Map(sections.map((s) => [s.endIdx, s] as const)),
+    [sections],
+  );
+  /** 已生成过的小结（key = 区间结束段 idx） */
+  const [summaries, setSummaries] = useState<Record<number, string>>({});
+  const [secState, setSecState] = useState<Record<number, SectionState>>({});
+  const [openSec, setOpenSec] = useState<number | null>(null);
+
+  /** 拉取本文已有小结，标记上据此显示圆点 */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/summarize?textId=${encodeURIComponent(textId)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!alive) return;
+        const map: Record<number, string> = {};
+        for (const s of data.summaries ?? []) map[s.endIdx] = s.content;
+        setSummaries(map);
+      } catch {
+        /* 静默失败：小结是增强功能，不影响正文阅读 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [textId]);
+
+  /** 生成（或重新生成）某个区间的小结，流式回填 */
+  async function runSummary(sec: Section, regenerate: boolean) {
+    setOpenSec(sec.endIdx);
+    setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "loading", content: "" } }));
+    try {
+      const res = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          textId,
+          startIdx: sec.startIdx,
+          endIdx: sec.endIdx,
+          ...(regenerate ? { regenerate: true } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error(`请求失败（${res.status}）`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("无法读取流");
+
+      const decoder = new TextDecoder();
+      let text = "";
+      setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "streaming", content: "" } }));
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        // 服务端重试时会吐重置标记，丢掉上一次的半成品
+        if (text.includes(STREAM_RESET)) text = text.split(STREAM_RESET).pop() ?? "";
+        setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "streaming", content: text } }));
+      }
+
+      setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "done", content: text } }));
+      setSummaries((prev) => ({ ...prev, [sec.endIdx]: text }));
+    } catch (err) {
+      setSecState((prev) => ({
+        ...prev,
+        [sec.endIdx]: {
+          status: "error",
+          content: err instanceof Error ? err.message : "生成失败",
+        },
+      }));
+    }
+  }
+
+  function toggleSection(sec: Section) {
+    if (openSec === sec.endIdx) {
+      setOpenSec(null);
+      return;
+    }
+    setOpenSec(sec.endIdx);
+    if (secState[sec.endIdx]) return; // 已有内容 / 错误态，直接展开
+    const cached = summaries[sec.endIdx];
+    if (cached) {
+      setSecState((prev) => ({
+        ...prev,
+        [sec.endIdx]: { status: "done", content: cached },
+      }));
+      return;
+    }
+    void runSummary(sec, false);
+  }
 
   /** 拉取本文已保存的句子/短语批注（回看列表） */
   const loadAnnotations = useCallback(async () => {
@@ -542,9 +733,25 @@ export default function Reader({
       <div className="reader-main">
         <div className="duo-card reader-article-card">
           <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
-            {paragraphs.map((p) => (
-              <Para key={p.id} p={p} rangeKey={rangeKeyByPara.get(p.id) ?? ""} />
-            ))}
+            {paragraphs.map((p) => {
+              const sec = sectionByEnd.get(p.idx);
+              return (
+                <Fragment key={p.id}>
+                  <Para p={p} rangeKey={rangeKeyByPara.get(p.id) ?? ""} />
+                  {sec && (
+                    <SectionMark
+                      section={sec}
+                      state={secState[sec.endIdx]}
+                      open={openSec === sec.endIdx}
+                      cached={summaries[sec.endIdx] !== undefined}
+                      onToggle={() => toggleSection(sec)}
+                      onRegenerate={() => void runSummary(sec, true)}
+                      onClose={() => setOpenSec(null)}
+                    />
+                  )}
+                </Fragment>
+              );
+            })}
           </div>
         </div>
       </div>

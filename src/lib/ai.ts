@@ -148,12 +148,6 @@ function contextBlock(params: ExplainParams): string {
 export async function* streamExplain(
   params: ExplainParams
 ): AsyncGenerator<string, void, unknown> {
-  const provider = resolveProvider(currentSettings(), process.env);
-  if (!provider) {
-    yield "⚠️ 还没有配置 AI 模型。\n\n点击右上角头像 → **设置** → 勾选一个模型并填入 API Key；也可以继续用环境变量 `DEEPSEEK_API_KEY` 等作为兜底。";
-    return;
-  }
-
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
   const turns: ChatTurn[] = [
@@ -161,17 +155,44 @@ export async function* streamExplain(
     { role: "user", content: buildUserMessage(params) },
   ];
 
+  yield* streamTurns(turns, {
+    temperature: 0.3, // 释义要准确，不要发散
+    maxTokens: 1200,  // 分层模板在句子场景下需要更长输出
+  });
+}
+
+/** 没配置模型时的统一提示（释义与小结共用） */
+export const NO_MODEL_NOTICE =
+  "⚠️ 还没有配置 AI 模型。\n\n点击右上角头像 → **设置** → 勾选一个模型并填入 API Key；也可以继续用环境变量 `DEEPSEEK_API_KEY` 等作为兜底。";
+
+/** 是否已配置可用的模型（小结接口据此决定「生成」还是「只提示去配置」） */
+export function hasModelConfigured(): boolean {
+  return resolveProvider(currentSettings(), process.env) !== null;
+}
+
+/**
+ * 带重试的流式调用统一入口。
+ * 网络抖动 / 限流 / 模型繁忙都重试；重开前先吐 STREAM_RESET，前端据此清屏，
+ * 避免上一次的半成品和这一次拼在一起。
+ */
+async function* streamTurns(
+  turns: ChatTurn[],
+  opts: { temperature: number; maxTokens: number },
+): AsyncGenerator<string, void, unknown> {
+  const provider = resolveProvider(currentSettings(), process.env);
+  if (!provider) {
+    yield NO_MODEL_NOTICE;
+    return;
+  }
+
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const attempts = DEFAULT_RETRY.attempts;
   let lastError: unknown;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (attempt > 0) yield STREAM_RESET; // 让前端丢掉上一次的半成品
+    if (attempt > 0) yield STREAM_RESET;
     try {
-      for await (const chunk of streamChat(provider, turns, {
-        temperature: 0.3, // 释义要准确，不要发散
-        maxTokens: 1200,  // 分层模板在句子场景下需要更长输出
-      })) {
+      for await (const chunk of streamChat(provider, turns, opts)) {
         yield chunk;
       }
       return;
@@ -182,6 +203,43 @@ export async function* streamExplain(
     }
   }
   throw lastError;
+}
+
+/**
+ * 分段小结的 system prompt。
+ *
+ * 用户明确要求「这就是个 summary」：只概括这一部分讲了什么，不做论证分析、
+ * 不逐句翻译、不分点罗列。给刚读完一段的读者做「我读懂了没」的确认。
+ */
+export function buildSummaryPrompt(): string {
+  return `你是一位帮中文母语者读英文文章的阅读助教。用户正在读一篇文章，读到某一部分结束时想要一段简短总结，确认自己有没有读懂。
+用户消息会给出这一部分的原文（连续若干自然段）。请用中文写一段总结，说明这一部分讲了什么。
+
+要求：
+- 2~3 句话，总长不超过 120 字
+- 概括主要观点与关键信息，不逐句翻译，不堆细节
+- 不分点、不加小标题、不写「总结：」之类的前缀，直接输出正文
+- 不要评价文章写得好不好，也不要补原文没有的内容`;
+}
+
+/** 生成某一段落区间的小结（流式） */
+export async function* streamSectionSummary(params: {
+  /** 区间原文，段落之间用空行分隔 */
+  body: string;
+  paragraphCount: number;
+}): AsyncGenerator<string, void, unknown> {
+  const turns: ChatTurn[] = [
+    { role: "system", content: buildSummaryPrompt() },
+    {
+      role: "user",
+      content: `这一部分共 ${params.paragraphCount} 个自然段，原文如下：\n\n${params.body}`,
+    },
+  ];
+
+  yield* streamTurns(turns, {
+    temperature: 0.3,
+    maxTokens: 400, // 120 字中文足够，留余量避免被截断
+  });
 }
 
 /**

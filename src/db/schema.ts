@@ -113,6 +113,30 @@ export const settings = sqliteTable("settings", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+/**
+ * 分段小结（section summary）。
+ *
+ * 标记按累计词数落在自然段末尾（绝不拆段），一个区间的身份由
+ * (text_id, end_idx) 决定：同一篇文章、同一个结束段落 = 同一个区间。
+ * 正文入库后不再变动，所以缓存永久有效；「重新生成」就是覆盖写。
+ */
+export const sectionSummaries = sqliteTable(
+  "section_summaries",
+  {
+    id: text("id").primaryKey(),
+    textId: text("text_id")
+      .notNull()
+      .references(() => texts.id, { onDelete: "cascade" }),
+    /** 区间起始段落 idx（含） */
+    startIdx: integer("start_idx").notNull(),
+    /** 区间结束段落 idx（含）——标记落在这一段之后 */
+    endIdx: integer("end_idx").notNull(),
+    content: text("content").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_section_summaries_text_end").on(t.textId, t.endIdx)],
+);
+
 export type Text = typeof texts.$inferSelect;
 export type Paragraph = typeof paragraphs.$inferSelect;
 export type UserWord = typeof userWords.$inferSelect;

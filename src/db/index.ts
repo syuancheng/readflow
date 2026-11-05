@@ -80,6 +80,17 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS section_summaries (
+  id TEXT PRIMARY KEY,
+  text_id TEXT NOT NULL REFERENCES texts(id) ON DELETE CASCADE,
+  start_idx INTEGER NOT NULL,
+  end_idx INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_section_summaries_text_end
+  ON section_summaries(text_id, end_idx);
 `;
 
 let lastError: unknown;
