@@ -1,12 +1,11 @@
+import { splitSentences } from "./sentence";
+
 export type Token = {
   text: string;
   start: number;
   end: number;
   word: boolean;
 };
-
-/** 锚点上下文窗口：取前后各多少字符作为 prefix / suffix */
-export const CONTEXT_WINDOW = 40;
 
 /**
  * 确定性分词。
@@ -50,16 +49,40 @@ export function tokenize(text: string): Token[] {
 /**
  * 生成位置锚点。offset 只当快速路径，真正能扛住文本变化的是 quote + 前后文。
  * 见 W3C Web Annotation 的 TextQuoteSelector / TextPositionSelector 模型。
+ *
+ * prefix / suffix 截到**句子边界**（句号 / 问号 / 叹号 / 省略号结束一句）：
+ * 绝不从词中间剁（老版固定 ±40 字符窗口会把 thus 剁成 hus），
+ * 语义与 AI 上下文（sentence.ts aiContextOf）一致。
+ *
+ * 仅在客户端点词/划选事件回调中调用，不参与 SSR —— 用 Intl.Segmenter
+ * 切句没有 hydration 风险（同 sentence.ts 的约定）。
  */
 export function buildAnchor(paragraph: string, start: number, end: number) {
   const s = Math.max(0, Math.min(start, paragraph.length));
   const e = Math.max(s, Math.min(end, paragraph.length));
+
+  // 与选区重叠的第一句到最后一句：prefix 从句首起，suffix 到句末止
+  const sentences = splitSentences(paragraph);
+  let s0 = -1;
+  let s1 = -1;
+  sentences.forEach((sn, i) => {
+    if (sn.end > s && sn.start < e) {
+      if (s0 < 0) s0 = i;
+      s1 = i;
+    }
+  });
+  const sentStart = s0 >= 0 ? sentences[s0].start : 0;
+  const sentEnd = s1 >= 0 ? sentences[s1].end : paragraph.length;
+
+  // 只 trim 外侧（prefix 的头 / suffix 的尾）：
+  // 内侧贴着 quote 的空格必须保留，否则 prefix+quote+suffix 不再是原文的连续子串，
+  // resolveAnchor 的 needle 搜索会失效
   return {
     start: s,
     end: e,
     quote: paragraph.slice(s, e),
-    prefix: paragraph.slice(Math.max(0, s - CONTEXT_WINDOW), s),
-    suffix: paragraph.slice(e, Math.min(paragraph.length, e + CONTEXT_WINDOW)),
+    prefix: paragraph.slice(sentStart, s).trimStart(),
+    suffix: paragraph.slice(e, sentEnd).trimEnd(),
   };
 }
 

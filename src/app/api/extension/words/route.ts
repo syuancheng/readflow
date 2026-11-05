@@ -238,8 +238,9 @@ export async function POST(req: Request) {
           start: s,
           end: e,
           quote: word,
-          prefix: sentence.slice(Math.max(0, s - 40), s),
-          suffix: sentence.slice(e, e + 40),
+          // 坐标已在句内：前后文直接给到句首/句尾，不从词中间截断
+          prefix: sentence.slice(0, s),
+          suffix: sentence.slice(e),
           createdAt: now,
         })
         .run();
