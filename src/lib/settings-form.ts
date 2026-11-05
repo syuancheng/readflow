@@ -79,11 +79,21 @@ export function validateForm(values: FormValues, opts: { editing: boolean }): Fo
  * 设置页导航（WorkBuddy 风格：搜索框 + 分组）
  * ------------------------------------------------------------------ */
 
-export type NavId = "models" | "markji" | "extension" | "storage";
+export type NavId = "profile" | "models" | "markji" | "extension" | "storage";
 export type NavItem = { id: NavId; title: string; keywords: string[] };
 export type NavGroup = { title: string; items: NavItem[] };
 
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    title: "账户",
+    items: [
+      {
+        id: "profile",
+        title: "个人资料",
+        keywords: ["账户", "账号", "昵称", "名称", "头像", "签名", "资料", "profile", "个人信息"],
+      },
+    ],
+  },
   {
     title: "设置",
     items: [

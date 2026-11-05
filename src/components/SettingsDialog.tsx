@@ -5,6 +5,16 @@ import type { ProviderId } from "@/lib/config";
 import { PROVIDERS } from "@/lib/config";
 import { withRetry } from "@/lib/retry";
 import {
+  DEFAULT_PROFILE,
+  initialsFrom,
+  normalizeProfile,
+  PROFILE_CHANGED_EVENT,
+  PROFILE_LIMITS,
+  validateProfile,
+  type Profile,
+  type ProfileErrors,
+} from "@/lib/profile-form";
+import {
   applyModelOption,
   CUSTOM_MODEL_OPTION,
   docsUrlFor,
@@ -38,6 +48,7 @@ type SettingsPayload = {
   providers: ProviderRow[];
   markji: { configured: boolean; maskedToken: string; fromEnv: boolean };
   extension: { token: string | null };
+  profile?: Profile;
 };
 
 type Editor = { mode: "add" | "edit"; id: ProviderId };
@@ -52,6 +63,44 @@ const ICON: Record<ProviderId, { ch: string; bg: string }> = {
 };
 
 const emptyForm = (): FormValues => ({ apiKey: "", endpoint: "", model: "" });
+
+/** 把选中的图片裁成正方形并压到 128px，输出内联 data URL（不落文件、不上传） */
+function compressAvatar(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("读取图片失败"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("这个图片格式浏览器打不开"));
+      img.onload = () => {
+        const size = 128;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("浏览器不支持图片处理"));
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, size, size);
+        const side = Math.min(img.width, img.height);
+        ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 本地版不提供的账号能力，以及各自的真实门槛（不画假按钮） */
+const ACCOUNT_FEATURES = [
+  {
+    name: "绑定微信",
+    why: "需企业/组织主体的开放平台「网站应用」+ 开发者资质认证（约 ¥300/年、按年复审）、已 ICP 备案的公网域名与 HTTPS 授权回调域、应用审核与扫码联调；个人主体基本申请不下来。",
+  },
+  { name: "绑定邮箱", why: "需要可用的邮件发送服务，以及验证邮件、找回流程。" },
+  { name: "绑定手机号", why: "需要短信服务：实名资质、签名与模板审核、按条计费。" },
+  { name: "修改登录密码", why: "当前没有用户表、密码哈希与会话机制，密码无从校验。" },
+];
 
 /** 网络请求统一重试（限流/断网/网关错误），4xx 不重试 */
 async function request(url: string, init?: RequestInit): Promise<unknown> {
@@ -116,6 +165,13 @@ function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
           <path d="m9 12 2 2 4-4" />
         </svg>
       );
+    case "user":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="3.6" />
+          <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" />
+        </svg>
+      );
     case "eye":
       return (
         <svg {...common}>
@@ -156,6 +212,7 @@ function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
 }
 
 const NAV_ICON: Record<NavId, string> = {
+  profile: "user",
   models: "model",
   markji: "book",
   extension: "puzzle",
@@ -169,12 +226,19 @@ const NAV_ICON: Record<NavId, string> = {
  * 「添加模型」是独立居中弹窗：供应商下拉 → API Key（显隐 + 测试连接）→ 模型名称，
  * 底部只有取消 / 保存，接口地址这类高级项默认折叠。
  */
-export default function SettingsDialog({ onClose }: { onClose: () => void }) {
+export default function SettingsDialog({
+  onClose,
+  initialTab = "models",
+}: {
+  onClose: () => void;
+  /** Profile 菜单里的「个人资料」入口可以直接落到对应导航项 */
+  initialTab?: NavId;
+}) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [data, setData] = useState<SettingsPayload | null>(null);
   const [active, setActive] = useState<string | null>(null);
-  const [tab, setTab] = useState<NavId>("models");
+  const [tab, setTab] = useState<NavId>(initialTab);
   const [query, setQuery] = useState("");
   const [editor, setEditor] = useState<Editor | null>(null);
   const [form, setForm] = useState<FormValues>(emptyForm());
@@ -187,13 +251,17 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [markjiInput, setMarkjiInput] = useState("");
   const [showMarkji, setShowMarkji] = useState(false);
   const [notice, setNotice] = useState<Note | null>(null);
+  const [profileDraft, setProfileDraft] = useState<Profile>(DEFAULT_PROFILE);
+  const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
   const modelInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     try {
       const payload = (await request("/api/settings")) as SettingsPayload;
       setData(payload);
       setActive(payload.activeProvider);
+      if (payload.profile) setProfileDraft(normalizeProfile(payload.profile));
     } catch (err) {
       setNotice({ kind: "err", text: `读取配置失败：${String(err)}` });
     } finally {
@@ -228,6 +296,12 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
       })) as SettingsPayload;
       setData(payload);
       setActive(payload.activeProvider);
+      if (payload.profile) {
+        const p = normalizeProfile(payload.profile);
+        setProfileDraft(p);
+        // 右上角菜单与顶栏头像即时同步，不用刷新页面
+        window.dispatchEvent(new CustomEvent(PROFILE_CHANGED_EVENT, { detail: p }));
+      }
       return payload;
     } catch (err) {
       setNotice({ kind: "err", text: `保存失败：${err instanceof Error ? err.message : String(err)}` });
@@ -415,6 +489,44 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
     if (payload) setNotice({ kind: "ok", text: "已生成新的插件 Token，旧的立即失效" });
   }
 
+  // ---------- 个人资料（本地展示用，不涉及账号体系） ----------
+
+  function patchProfile(field: keyof Profile, value: string) {
+    setProfileDraft((prev) => ({ ...prev, [field]: value }));
+    setProfileErrors((prev) => ({ ...prev, [field]: undefined }));
+  }
+
+  async function onAvatarFile(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice({ kind: "err", text: "请选择图片文件" });
+      return;
+    }
+    try {
+      patchProfile("avatar", await compressAvatar(file));
+      setNotice(null);
+    } catch (err) {
+      setNotice({ kind: "err", text: err instanceof Error ? err.message : "头像处理失败" });
+    }
+  }
+
+  async function saveProfile() {
+    const errs = validateProfile(profileDraft);
+    setProfileErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      setNotice({ kind: "err", text: "请先修正资料里的错误" });
+      return;
+    }
+    const payload = await put({ profile: normalizeProfile(profileDraft) });
+    if (payload) setNotice({ kind: "ok", text: "个人资料已保存，右上角即时更新" });
+  }
+
+  async function resetProfile() {
+    if (!window.confirm("恢复默认昵称、签名并移除头像？")) return;
+    const payload = await put({ profileReset: true });
+    if (payload) setNotice({ kind: "ok", text: "已恢复默认资料" });
+  }
+
   const current = data?.providers.find((p) => p.id === active) ?? null;
   const isBusy = busy !== null;
   const groups = filterNavGroups(query);
@@ -479,6 +591,166 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               <p className="st-loading">读取配置中…</p>
             ) : (
               <>
+                {tab === "profile" && (
+                  <section className="st-section">
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">个人资料</h3>
+                          <p className="st-panel-desc">
+                            只用于右上角菜单的展示，保存在本机数据库；不涉及登录，也不会上传云端。
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="st-pf-avatar-row">
+                        <div
+                          id="st-pf-avatar"
+                          className="st-pf-avatar"
+                          data-avatar={profileDraft.avatar ? "image" : "initials"}
+                          style={
+                            profileDraft.avatar
+                              ? { backgroundImage: `url("${profileDraft.avatar}")` }
+                              : undefined
+                          }
+                        >
+                          {!profileDraft.avatar && initialsFrom(profileDraft.displayName)}
+                        </div>
+                        <div className="st-pf-avatar-actions">
+                          <input
+                            ref={avatarInputRef}
+                            id="st-pf-avatar-file"
+                            type="file"
+                            accept="image/*"
+                            hidden
+                            onChange={(e) => {
+                              void onAvatarFile(e.target.files?.[0]);
+                              e.target.value = "";
+                            }}
+                          />
+                          <div className="st-card-actions st-pf-avatar-btns">
+                            <button
+                              className="st-btn st-btn-ghost"
+                              onClick={() => avatarInputRef.current?.click()}
+                            >
+                              上传头像
+                            </button>
+                            {profileDraft.avatar && (
+                              <button
+                                className="st-btn st-btn-quiet"
+                                onClick={() => patchProfile("avatar", "")}
+                              >
+                                移除
+                              </button>
+                            )}
+                          </div>
+                          <p className="st-help">
+                            支持 PNG / JPEG / WebP / GIF，自动裁成 128×128 并压缩，只存本机。
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="st-field">
+                        <label className="st-label" htmlFor="st-pf-name">
+                          昵称 <span>（显示在右上角菜单）</span>
+                        </label>
+                        <div className="st-input-shell">
+                          <input
+                            id="st-pf-name"
+                            className="st-input"
+                            maxLength={PROFILE_LIMITS.displayName}
+                            value={profileDraft.displayName}
+                            onChange={(e) => patchProfile("displayName", e.target.value)}
+                          />
+                        </div>
+                        {profileErrors.displayName && (
+                          <p className="st-field-err">{profileErrors.displayName}</p>
+                        )}
+                      </div>
+
+                      <div className="st-field">
+                        <label className="st-label" htmlFor="st-pf-fullname">
+                          名称 <span>（真实姓名，选填）</span>
+                        </label>
+                        <div className="st-input-shell">
+                          <input
+                            id="st-pf-fullname"
+                            className="st-input"
+                            maxLength={PROFILE_LIMITS.fullName}
+                            placeholder="例如 Siyuan Cheng"
+                            value={profileDraft.fullName}
+                            onChange={(e) => patchProfile("fullName", e.target.value)}
+                          />
+                        </div>
+                        {profileErrors.fullName && (
+                          <p className="st-field-err">{profileErrors.fullName}</p>
+                        )}
+                      </div>
+
+                      <div className="st-field">
+                        <label className="st-label" htmlFor="st-pf-bio">
+                          个性签名 <span>（昵称下方的一行说明）</span>
+                        </label>
+                        <div className="st-input-shell">
+                          <input
+                            id="st-pf-bio"
+                            className="st-input"
+                            maxLength={PROFILE_LIMITS.bio}
+                            value={profileDraft.bio}
+                            onChange={(e) => patchProfile("bio", e.target.value)}
+                          />
+                        </div>
+                        {profileErrors.bio && <p className="st-field-err">{profileErrors.bio}</p>}
+                      </div>
+
+                      <div className="st-card-actions">
+                        <button
+                          className="st-btn st-btn-primary"
+                          disabled={isBusy}
+                          onClick={() => void saveProfile()}
+                        >
+                          {busy === "saving" ? "保存中…" : "保存资料"}
+                        </button>
+                        <button
+                          className="st-btn st-btn-quiet"
+                          disabled={isBusy}
+                          onClick={() => void resetProfile()}
+                        >
+                          恢复默认
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="st-panel st-pf-account">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">账号与安全</h3>
+                          <p className="st-panel-desc">
+                            本应用是单人本地版：没有用户表、登录与会话，词库和设置都在这台机器的
+                            SQLite 里。以下是尚未开放的能力与真实门槛，不做点了没反应的假按钮。
+                          </p>
+                        </div>
+                      </div>
+                      <ul className="st-pf-list">
+                        {ACCOUNT_FEATURES.map((f) => (
+                          <li className="st-pf-item" key={f.name}>
+                            <div className="st-pf-item-head">
+                              <b>{f.name}</b>
+                              <span className="st-pf-badge">本地版未启用</span>
+                            </div>
+                            <p>{f.why}</p>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="st-pf-note">
+                        要启用这些能力，需要先引入完整账号体系（用户表、会话、鉴权、数据隔离）并把数据迁到云端，
+                        这与「所有数据只保存在本机」直接冲突；其中微信登录的资质与备案成本按周计算，
+                        不适合混在个人资料页里做。
+                      </p>
+                    </div>
+                  </section>
+                )}
+
                 {tab === "models" && (
                   <section className="st-section">
                     <div className="st-panel">

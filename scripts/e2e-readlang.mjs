@@ -161,7 +161,20 @@ try {
   check("H1 Profile 设置页列出可选模型", providerCards >= 5, `${providerCards} 个 provider`);
   const navMarkji = await page.locator('.st-nav-item:has-text("墨墨记单词")').count();
   const navExt = await page.locator('.st-nav-item:has-text("浏览器插件")').count();
+  const navProfile = await page.locator('.st-nav-item:has-text("个人资料")').count();
   check("H2 设置页含墨墨 Token 与插件 Token 分组", navMarkji > 0 && navExt > 0);
+  check("H2a 设置中心新增「个人资料」导航项", navProfile === 1, `${navProfile} 项`);
+
+  // 关闭 × 应该离弹窗上下/左右边界至少 18px，不再压在圆角线上
+  const closeBox = await page.locator(".st-head .st-close").boundingBox();
+  const modalBox = await page.locator(".st-modal").boundingBox();
+  const gapTop = closeBox.y - modalBox.y;
+  const gapRight = modalBox.x + modalBox.width - (closeBox.x + closeBox.width);
+  check(
+    "H2c 关闭按钮不贴弹窗边界",
+    gapTop >= 18 && gapRight >= 18,
+    `上 ${gapTop.toFixed(1)}px / 右 ${gapRight.toFixed(1)}px`,
+  );
 
   await page.locator("#st-search").fill("墨墨");
   const filteredNav = await page.locator(".st-nav-item").count();
@@ -208,8 +221,64 @@ try {
   check("H5b 选中候选写回模型名称", chosenModel === "deepseek-reasoner", chosenModel);
 
   await page.locator(".st-editor .st-close").click();
+
+  // ---------- H7：个人资料（本地版 A 档） ----------
+  await page.locator('.st-nav-item:has-text("个人资料")').click();
+  await page.waitForSelector("#st-pf-name", { timeout: 5000 });
+  const badges = await page.locator(".st-pf-badge").count();
+  const wechatWhy = await page.locator('.st-pf-item:has-text("绑定微信")').innerText();
+  check("H7 账号与安全列出 4 项本地版未启用能力", badges === 4, `${badges} 项`);
+  check(
+    "H7b 微信绑定如实说明资质、费用与备案成本",
+    /资质|¥300/.test(wechatWhy) && /备案|回调域/.test(wechatWhy),
+  );
+
+  await page.locator("#st-pf-name").fill("E2E 测试昵称");
+  await page.locator("#st-pf-bio").fill("正在跑端到端测试");
+  await page.locator('button:text-is("保存资料")').click();
+  await page.waitForTimeout(400);
+  const savedName = await page.locator("#st-pf-name").inputValue();
+  check("H7c 昵称 / 名称 / 签名可编辑保存", savedName === "E2E 测试昵称", savedName);
+
   await page.locator(".st-head .st-close").click();
-  await page.waitForTimeout(200);
+  await page.click(".pm-trigger");
+  await page.waitForSelector(".pm-dropdown", { timeout: 5000 });
+  const menuName = await page.locator(".pm-name").innerText();
+  const menuSub = await page.locator(".pm-sub").innerText();
+  check(
+    "H7d 右上角昵称与签名即时同步（无需刷新）",
+    menuName === "E2E 测试昵称" && menuSub === "正在跑端到端测试",
+    `${menuName} / ${menuSub}`,
+  );
+  await page.click(".pm-trigger");
+
+  // 收尾：清掉 E2E 写入的资料，恢复用户看到的样子
+  const resetRes = await fetch(`${BASE}/api/settings`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ profileReset: true }),
+  });
+  const resetJson = await resetRes.json();
+  check(
+    "H7e 资料可恢复默认",
+    resetJson.profile?.displayName === "Siyuan Cheng" && resetJson.profile?.avatar === "",
+  );
+
+  // ---------- I：导出入口全站唯一 ----------
+  await page.goto(`${BASE}/words`, { waitUntil: "load" });
+  const topExport = await page.locator('.duo-nav-link:has-text("导出")').count();
+  const bottomExport = await page.locator('.duo-bottom-link:has-text("导出")').count();
+  const wordExport = await page.locator('a:has-text("导出到墨墨")').count();
+  check(
+    "I1 顶部与底部导航都不再有导出项",
+    topExport === 0 && bottomExport === 0,
+    `top=${topExport} bottom=${bottomExport}`,
+  );
+  check("I2 词库页保留唯一导出按钮", wordExport === 1, `${wordExport} 个`);
+  await page.click(".pm-trigger");
+  const restoredName = await page.locator(".pm-name").innerText();
+  check("I3 清资料后右上角恢复默认昵称", restoredName === "Siyuan Cheng", restoredName);
+  await page.click(".pm-trigger");
 
   await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
   await page.waitForTimeout(600);

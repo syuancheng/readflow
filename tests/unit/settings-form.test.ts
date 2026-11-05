@@ -75,6 +75,10 @@ test("导航搜索：空查询给全部分组，命中标题/关键字才保留"
     "extension",
   ]);
   assert.deepEqual(filterNavGroups("隐私").flatMap((g) => g.items.map((i) => i.id)), ["storage"]);
+  assert.deepEqual(filterNavGroups("头像").flatMap((g) => g.items.map((i) => i.id)), ["profile"]);
+
+  // 账户分组确实有「个人资料」这一项，且不影响按「墨墨」搜索的结果
+  assert.ok(NAV_GROUPS.some((g) => g.items.some((i) => i.id === "profile" && i.title === "个人资料")));
 
   // 空分组必须被剔除，不留一个空标题
   assert.deepEqual(filterNavGroups("不存在的设置项"), []);

@@ -1268,28 +1268,35 @@ body {
   overflow: hidden;
 }
 
+/* 关闭按钮占一条真实头部行，而不是绝对定位浮在圆角上。
+   70px 行高 + 32px 圆形按钮 + 18px 左右内边距：上下左右都留足呼吸空间，
+   hover 底也不会再被 20px 圆角裁掉。 */
 .st-head {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-  z-index: 3;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  height: 70px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--wb-line);
+  background: #fff;
 }
 .st-close {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--wb-muted);
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: 50%;
+  background: var(--wb-bg);
+  color: var(--wb-ink-soft);
   cursor: pointer;
 }
-.st-close:hover { background: #f2f5fa; color: var(--wb-ink); }
-.st-close-x { font-size: 22px; line-height: 1; font-weight: 400; }
+.st-close:hover { background: var(--wb-blue-soft); border-color: #bcd4ff; color: var(--wb-blue-dark); }
+.st-close-x { font-size: 21px; line-height: 1; font-weight: 400; margin-top: -1px; }
+/* 添加模型弹窗的头部自带标题，× 不需要下面那条分隔线 */
+.st-editor-head .st-close { border-color: transparent; background: transparent; }
 
 .st-layout { flex: 1; display: flex; min-height: 0; }
 
@@ -1743,4 +1750,74 @@ body {
   .st-editor-foot { padding: 16px 20px 22px; }
   .st-key-row { flex-wrap: wrap; }
   .st-test-btn { height: 42px; }
+  .st-pf-avatar-row { flex-wrap: wrap; }
+}
+
+/* ---- 账户 → 个人资料 ---- */
+.st-pf-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 20px 0 22px;
+}
+.st-pf-avatar {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  flex-shrink: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6ba3ff, #3f6fe0);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 4px 14px rgba(63, 111, 224, 0.18);
+  color: #fff;
+  font-size: 28px;
+  font-weight: 800;
+  user-select: none;
+}
+.st-pf-avatar-actions { min-width: 0; }
+.st-pf-avatar-btns { margin-top: 0; }
+.st-pf-account { margin-top: 18px; }
+.st-pf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.st-pf-item {
+  padding: 12px 14px;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+  background: var(--wb-bg);
+}
+.st-pf-item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.st-pf-item-head b { font-size: 13px; color: var(--wb-ink); }
+.st-pf-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1f6;
+  color: #8a94a3;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.st-pf-item p { margin: 6px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--wb-ink-soft); }
+.st-pf-note {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border-left: 3px solid #bcd4ff;
+  border-radius: 0 8px 8px 0;
+  background: #f4f8ff;
+  font-size: 11.5px;
+  line-height: 1.8;
+  color: var(--wb-ink-soft);
+}
+/* 顶栏头像支持内联图片（与设置页预览共用一套裁切规则） */
+.pm-avatar {
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
 }

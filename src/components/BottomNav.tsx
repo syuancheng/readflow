@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// 导出走词库页右上角按钮，避免顶部/底部再加一个重复入口
 const ITEMS = [
   { href: "/", label: "阅读", icon: "📖" },
   { href: "/words", label: "词库", icon: "⚡" },
-  { href: "/export", label: "导出", icon: "📤" },
   { href: "/stats", label: "战绩", icon: "🏆" },
 ];
 

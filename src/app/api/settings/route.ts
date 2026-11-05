@@ -14,6 +14,13 @@ import {
   getSetting,
   setSetting,
 } from "@/lib/settings-store";
+import {
+  isAvatarImage,
+  normalizeProfile,
+  profileFromSettings,
+  profileToSettingsPatch,
+  type Profile,
+} from "@/lib/profile-form";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +49,7 @@ export async function GET() {
     extension: {
       token: getSetting(SETTINGS_KEYS.extensionToken),
     },
+    profile: profileFromSettings(settings),
   });
 }
 
@@ -58,6 +66,9 @@ type PutBody = {
   markjiToken?: string;
   markjiClear?: boolean;
   regenerateExtensionToken?: boolean;
+  /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
+  profile?: Partial<Profile>;
+  profileReset?: boolean;
 };
 
 /**
@@ -112,6 +123,27 @@ export async function PUT(req: Request) {
 
   if (body.regenerateExtensionToken === true) {
     setSetting(SETTINGS_KEYS.extensionToken, randomUUID().replace(/-/g, ""));
+  }
+
+  const PROFILE_KEYS = [
+    SETTINGS_KEYS.profileName,
+    SETTINGS_KEYS.profileFullName,
+    SETTINGS_KEYS.profileBio,
+    SETTINGS_KEYS.profileAvatar,
+  ];
+  if (body.profileReset === true) {
+    for (const key of PROFILE_KEYS) deleteSetting(key);
+  } else if (body.profile && typeof body.profile === "object") {
+    // 头像不是普通字符串：必须在归一化（会静默丢弃非法值）之前显式挡掉
+    const rawAvatar = body.profile.avatar;
+    if (rawAvatar !== undefined && rawAvatar !== "" && !isAvatarImage(rawAvatar)) {
+      return NextResponse.json({ error: "头像只能是压缩后的内联 PNG/JPEG/WebP 图片" }, { status: 400 });
+    }
+    const patch = profileToSettingsPatch(normalizeProfile(body.profile));
+    for (const [key, value] of Object.entries(patch)) {
+      if (value) setSetting(key, value);
+      else deleteSetting(key);
+    }
   }
 
   return GET();
