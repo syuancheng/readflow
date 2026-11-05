@@ -12,7 +12,8 @@
 
 set -uo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# cd -P 解析软链接：即使从 Documents 里的替身路径启动，也取真实物理路径
+PROJECT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="com.readflow.server"
 PORT="${READFLOW_PORT:-3000}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
