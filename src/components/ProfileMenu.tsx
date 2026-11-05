@@ -9,29 +9,22 @@ import {
   type Profile,
 } from "@/lib/profile-form";
 import type { NavId } from "@/lib/settings-form";
-import VoicePicker from "./VoicePicker";
 import SettingsDialog from "./SettingsDialog";
 
 /**
  * 右上角用户菜单（仿 Readlang）：头像按钮 + 下拉面板。
- * 面板里放「系统设置」：自动收词开关、发音音色。
- * 状态存 localStorage（readflow.autoSave），变更时广播
- * readflow.autosave 自定义事件，阅读页 Reader 监听后即时生效。
+ * 面板只做「入口」：个人资料、设置。阅读偏好（自动收词 / 发音音色）
+ * 统一收进设置中心的「阅读设置」，避免同一个开关在两处出现。
  *
  * 昵称 / 头像 / 签名来自 /api/settings 的 profile（本机资料，无账号体系）；
  * 设置中心保存后广播 readflow.profile，这里即时同步，不用刷新页面。
  */
 export default function ProfileMenu() {
   const [open, setOpen] = useState(false);
-  const [autoSave, setAutoSave] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<NavId>("models");
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -70,15 +63,6 @@ export default function ProfileMenu() {
     };
   }, [open]);
 
-  function toggleAutoSave() {
-    setAutoSave((v) => {
-      const next = !v;
-      localStorage.setItem("readflow.autoSave", next ? "1" : "0");
-      window.dispatchEvent(new CustomEvent("readflow.autosave", { detail: next }));
-      return next;
-    });
-  }
-
   function openSettings(tab: NavId) {
     setOpen(false);
     setSettingsTab(tab);
@@ -112,26 +96,6 @@ export default function ProfileMenu() {
           <div className="pm-head">
             <p className="pm-name">{profile.displayName}</p>
             <p className="pm-sub">{profile.bio || DEFAULT_PROFILE.bio}</p>
-          </div>
-
-          <p className="pm-section-title">系统设置</p>
-
-          <button className="pm-row" onClick={toggleAutoSave} role="menuitemcheckbox" aria-checked={autoSave}>
-            <span className="pm-row-label">
-              自动收词
-              <span className="pm-row-hint">点词/划句后自动存入词库</span>
-            </span>
-            <span className={`pm-switch ${autoSave ? "on" : ""}`} aria-hidden>
-              <span className="pm-switch-knob" />
-            </span>
-          </button>
-
-          <div className="pm-row pm-row-static">
-            <span className="pm-row-label">
-              发音音色
-              <span className="pm-row-hint">切换后立即试听</span>
-            </span>
-            <VoicePicker />
           </div>
 
           <p className="pm-section-title">账户</p>

@@ -142,18 +142,37 @@ try {
   // E 步骤（自动收词仍开着）会顺带收词，清掉，保证 D 阶段起点干净
   await cleanup(keepIds);
 
-  // ---------- D：关掉自动收词（开关在用户菜单；阅读页无顶栏 → 去首页验证再回来） ----------
+  // ---------- D：关掉自动收词（开关已收进设置中心 → 阅读设置；阅读页无顶栏 → 去首页操作再回来） ----------
   await page.evaluate(() => localStorage.setItem("readflow.autoSave", "0"));
   await page.goto(`${BASE}/`, { waitUntil: "load" });
   await page.click(".pm-trigger");
   await page.waitForSelector(".pm-dropdown", { timeout: 5000 });
+  const menuSwitch = await page.locator(".pm-dropdown .pm-switch").count();
+  check("D0 右上角菜单不再放阅读开关（已迁到设置中心）", menuSwitch === 0, `${menuSwitch} 个`);
+  await page.locator('.pm-row:has-text("设置")').click();
+  await page.waitForSelector(".st-modal", { timeout: 5000 });
+  await page.locator('.st-nav-item:has-text("阅读设置")').click();
+  await page.waitForSelector("#st-reading-panel", { timeout: 5000 });
   const switchOn = await page
-    .locator(".pm-dropdown .pm-switch")
-    .first()
+    .locator("#st-autosave .st-switch")
     .evaluate((e) => e.classList.contains("on"));
-  check("D0 开关显示关闭态", !switchOn, switchOn ? "on" : "off");
+  check("D0b 阅读设置里自动收词显示关闭态", !switchOn, switchOn ? "on" : "off");
+
+  await page.locator("#st-autosave").click();
+  const switchedOn = await page
+    .locator("#st-autosave .st-switch")
+    .evaluate((e) => e.classList.contains("on"));
+  const storedOn = await page.evaluate(() => localStorage.getItem("readflow.autoSave"));
+  check("D0c 切换开关立即写入本地", switchedOn && storedOn === "1", `localStorage=${storedOn}`);
+  await page.locator("#st-autosave").click();
+  const storedOff = await page.evaluate(() => localStorage.getItem("readflow.autoSave"));
+  check("D0d 再切回关闭", storedOff === "0", `localStorage=${storedOff}`);
+
+  await page.locator(".st-head .st-close").click();
+  await page.waitForTimeout(150);
 
   // ---------- H：Profile 设置页（WorkBuddy 风格导航 + 添加模型弹窗） ----------
+  await page.click(".pm-trigger");
   await page.locator('.pm-row:has-text("设置")').click();
   await page.waitForSelector(".st-modal", { timeout: 5000 });
   await page.waitForSelector(".st-provider", { timeout: 5000 });
@@ -162,8 +181,10 @@ try {
   const navMarkji = await page.locator('.st-nav-item:has-text("墨墨记单词")').count();
   const navExt = await page.locator('.st-nav-item:has-text("浏览器插件")').count();
   const navProfile = await page.locator('.st-nav-item:has-text("个人资料")').count();
+  const navReading = await page.locator('.st-nav-item:has-text("阅读设置")').count();
   check("H2 设置页含墨墨 Token 与插件 Token 分组", navMarkji > 0 && navExt > 0);
   check("H2a 设置中心新增「个人资料」导航项", navProfile === 1, `${navProfile} 项`);
+  check("H2a2 设置中心新增「阅读设置」导航项", navReading === 1, `${navReading} 项`);
 
   // 关闭 × 应该离弹窗上下/左右边界至少 18px，不再压在圆角线上
   const closeBox = await page.locator(".st-head .st-close").boundingBox();
@@ -179,6 +200,14 @@ try {
   await page.locator("#st-search").fill("墨墨");
   const filteredNav = await page.locator(".st-nav-item").count();
   check("H2b 搜索设置项可过滤导航", filteredNav === 1, `${filteredNav} 项`);
+  await page.locator("#st-search").fill("音色");
+  const filteredReading = await page.locator(".st-nav-item").count();
+  const readingHit = await page.locator('.st-nav-item:has-text("阅读设置")').count();
+  check(
+    "H2b2 搜索「音色」命中阅读设置",
+    filteredReading === 1 && readingHit === 1,
+    `${filteredReading} 项`,
+  );
   await page.locator("#st-search").fill("");
   await page.locator('.st-nav-item:has-text("模型")').first().click();
 

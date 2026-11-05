@@ -1821,3 +1821,71 @@ body {
   background-position: center;
   overflow: hidden;
 }
+
+/* ---- 功能 → 阅读设置（自动收词 / 发音音色） ---- */
+.st-reading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--wb-line);
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.st-reading-row:hover { border-color: #cbdcff; background: #fbfdff; }
+.st-reading-row-static,
+.st-reading-row-static:hover { border-color: var(--wb-line); background: #fff; cursor: default; }
+.st-reading-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.st-reading-text b { font-size: 13.5px; font-weight: 700; color: var(--wb-ink); }
+.st-reading-text span { font-size: 11.5px; line-height: 1.65; color: var(--wb-muted); }
+
+.st-switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #dfe5ee;
+  transition: background 160ms ease;
+}
+.st-switch.on { background: var(--wb-blue); }
+.st-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.22);
+  transition: transform 160ms ease;
+}
+.st-switch.on .st-switch-knob { transform: translateX(18px); }
+
+.st-reading-voice { display: flex; align-items: center; flex-shrink: 0; }
+.st-reading-voice-empty { font-size: 11.5px; color: var(--wb-muted); }
+.st-reading-voice:has(.voice-picker) .st-reading-voice-empty { display: none; }
+/* 设置页里给音色下拉更宽松的宽度，避免音色名被截成省略号 */
+.st-reading-voice .voice-picker {
+  max-width: 240px;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #cddcff;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--wb-ink);
+  font-size: 12.5px;
+}
+.st-reading-voice .voice-picker:hover { border-color: var(--wb-blue); }
+
+@media (max-width: 720px) {
+  .st-reading-row { flex-wrap: wrap; }
+  .st-reading-voice { width: 100%; }
+  .st-reading-voice .voice-picker { max-width: 100%; width: 100%; }
+}

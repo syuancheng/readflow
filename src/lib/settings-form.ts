@@ -79,7 +79,7 @@ export function validateForm(values: FormValues, opts: { editing: boolean }): Fo
  * 设置页导航（WorkBuddy 风格：搜索框 + 分组）
  * ------------------------------------------------------------------ */
 
-export type NavId = "profile" | "models" | "markji" | "extension" | "storage";
+export type NavId = "profile" | "models" | "markji" | "reading" | "extension" | "storage";
 export type NavItem = { id: NavId; title: string; keywords: string[] };
 export type NavGroup = { title: string; items: NavItem[] };
 
@@ -104,6 +104,11 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "功能",
     items: [
+      {
+        id: "reading",
+        title: "阅读设置",
+        keywords: ["自动收词", "发音", "音色", "朗读", "tts", "voice", "收词", "阅读"],
+      },
       { id: "extension", title: "浏览器插件", keywords: ["插件", "extension", "chrome", "同步"] },
     ],
   },

@@ -14,6 +14,7 @@ import {
   type Profile,
   type ProfileErrors,
 } from "@/lib/profile-form";
+import VoicePicker from "./VoicePicker";
 import {
   applyModelOption,
   CUSTOM_MODEL_OPTION,
@@ -172,6 +173,13 @@ function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
           <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" />
         </svg>
       );
+    case "speaker":
+      return (
+        <svg {...common}>
+          <path d="M4 9.5h3.2L12 5.5v13L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
+          <path d="M16 9.2a4 4 0 0 1 0 5.6M18.8 6.6a7.6 7.6 0 0 1 0 10.8" />
+        </svg>
+      );
     case "eye":
       return (
         <svg {...common}>
@@ -215,6 +223,7 @@ const NAV_ICON: Record<NavId, string> = {
   profile: "user",
   models: "model",
   markji: "book",
+  reading: "speaker",
   extension: "puzzle",
   storage: "shield",
 };
@@ -253,6 +262,7 @@ export default function SettingsDialog({
   const [notice, setNotice] = useState<Note | null>(null);
   const [profileDraft, setProfileDraft] = useState<Profile>(DEFAULT_PROFILE);
   const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
+  const [autoSave, setAutoSave] = useState(true);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -273,6 +283,21 @@ export default function SettingsDialog({
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 阅读偏好存 localStorage（与阅读页 Reader 共用同一份约定）
+  useEffect(() => {
+    setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
+  }, []);
+
+  /** 立即生效：写 localStorage + 广播，阅读页监听后即时切换，不用刷新 */
+  function toggleAutoSave() {
+    setAutoSave((v) => {
+      const next = !v;
+      localStorage.setItem("readflow.autoSave", next ? "1" : "0");
+      window.dispatchEvent(new CustomEvent("readflow.autosave", { detail: next }));
+      return next;
+    });
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -820,6 +845,51 @@ export default function SettingsDialog({
                     <p className="st-security">
                       请妥善保管 API Key：它关联您的账户与额度。密钥只保存在本机数据库、接口返回时一律脱敏；
                       自定义模型产生的费用由您向服务商支付，接入前请确认服务商可信。
+                    </p>
+                  </section>
+                )}
+
+                {tab === "reading" && (
+                  <section className="st-section" id="st-reading-panel">
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">阅读设置</h3>
+                          <p className="st-panel-desc">
+                            影响阅读页的收词与朗读，改动立即生效，不需要点保存。
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        id="st-autosave"
+                        className="st-reading-row"
+                        role="switch"
+                        aria-checked={autoSave}
+                        onClick={toggleAutoSave}
+                      >
+                        <span className="st-reading-text">
+                          <b>自动收词</b>
+                          <span>点词 / 划句后自动存入词库；关掉后只在批注卡里手动收词</span>
+                        </span>
+                        <span className={`st-switch ${autoSave ? "on" : ""}`} aria-hidden>
+                          <span className="st-switch-knob" />
+                        </span>
+                      </button>
+
+                      <div className="st-reading-row st-reading-row-static">
+                        <span className="st-reading-text">
+                          <b>发音音色</b>
+                          <span>朗读单词与释义时使用的本地英文音色，切换后立即试听</span>
+                        </span>
+                        <div className="st-reading-voice">
+                          <VoicePicker />
+                          <span className="st-reading-voice-empty">此设备没有可用的本地英文音色</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="st-security">
+                      这两项保存在这台电脑的浏览器里（localStorage），不上传云端；换浏览器或清空站点数据会恢复默认。
                     </p>
                   </section>
                 )}
