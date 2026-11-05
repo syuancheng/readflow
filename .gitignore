@@ -53,6 +53,9 @@ next-env.d.ts
 # strays
 nohup.out
 
+# local service logs
+/logs/
+
 # db backups
 /data/*.bak*
 

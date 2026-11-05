@@ -18,7 +18,12 @@
     "verify:stats": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-stats.js",
     "bench": "node scripts/bench-reader.mjs",
     "test:settings": "node scripts/smoke-settings.mjs",
-    "pack:extension": "node scripts/pack-extension.mjs"
+    "pack:extension": "node scripts/pack-extension.mjs",
+    "service:install": "bash scripts/service.sh install",
+    "service:status": "bash scripts/service.sh status",
+    "service:restart": "bash scripts/service.sh restart",
+    "service:logs": "bash scripts/service.sh logs",
+    "service:uninstall": "bash scripts/service.sh uninstall"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
