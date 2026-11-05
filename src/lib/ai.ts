@@ -2,20 +2,19 @@ import { resolveProvider, STREAM_RESET, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
 import { streamChat, type ChatTurn } from "./providers";
-import { selectionKind } from "./sentence";
+import type { SelectionSignals } from "./sentence";
 
 /**
  * AI 释义：模型与 Key 由「配置中心」决定（设置页可配 DeepSeek / OpenAI /
  * Claude / 千问 / 任意 OpenAI 兼容端点，勾选哪个用哪个）。
  *
- * 对齐 Readlang 的 Explain 设计：
- * - 带段落级上下文（选区 + 前文 + 后文分开标注），而不是只有一句话
- * - 流式输出（SSE），逐块返回
- * - 三套分层模板（单词 / 短语 / 句子）：
- *   词与短语「通常意思 → 在这里的意思 → 其他用法」；
- *   句子「翻译 → 结合语境的解释 → 主谓宾分析（必填，备考雅思/托福长难句训练）」
- * - 支持 askAI：用户自由追问
- * - 网络错误 / 限流 / 模型繁忙统一重试，重试用 STREAM_RESET 通知前端清屏
+ * 2026-11-05 重构：取消三段式固定模板，改成「一个老师 + 一组证据 + 一个回答」。
+ * - 人设：英语为母语且懂中文的英语老师，能预判中文母语者的干扰点。
+ * - 阅读连续性优先：第一段永远帮学生自己把句子读顺，不给整句译文、不做语法游戏。
+ * - 结构分析殿后、可选、符号化（句子地图：原句 + 成分标注 + emoji），详细靠标记密度不靠字数。
+ * - 前端只送客观信号（SelectionSignals），判断句法权重与答案深度是模型本职，不在前端分类。
+ * - 默认释义与 Ask AI 追问共用同一套 system，只有「学生的问题」一行不同。
+ * - 流式输出（SSE）、网络错误 / 限流统一重试，重试用 STREAM_RESET 通知前端清屏。
  */
 
 /** 当前生效的配置（服务端读本地 DB + 环境变量兜底） */
@@ -32,109 +31,130 @@ export type ExplainParams = {
   monolingual?: boolean; // true = 用目标语言解释，false = 用中文解释
   prompt?: string;       // 用户的自定义追问（对应 Readlang 的 askAI）
   withPrevSentence?: boolean; // 前文已包含上一句（「没看懂整句」信号触发），给模型加衔接提示
+  /** 阅读器采集的客观信号（不是结论）。旧调用不带时模型仍可正常工作。 */
+  signals?: SelectionSignals;
 };
 
 /**
- * 构建 system prompt（中文解释模式）
+ * 构建 system prompt。
  *
- * 三套分层模板，顺序由用户指定（2026-11-05）：
- * - 单词/短语：通常意思 → 在这句话/上下文中的意思 → 其他含义或用法
- * - 句子：翻译 → 结合语境的解释 → 主谓宾分析（必须放最后、不可省略——
- *   用户备考雅思/托福阅读，找主语、谓语动词是核心训练）
- * 不输出音标（词典卡已有）。
+ * 新契约（2026-11-05 讨论收敛）：一套人设，不再按 word / phrase / sentence 分叉。
+ * 保留第三个参数 word 只是为了兼容旧调用与单测；system 不随选区改变，
+ * 这本身就是一条可单测的性质——同一个老师，不会因选区长度换人格。
  */
 /** 导出供单测断言输出结构（不对外承诺稳定性） */
-export function buildSystemPrompt(language: string, monolingual: boolean, word: string): string {
+export function buildSystemPrompt(language: string, monolingual: boolean, _word: string): string {
   if (monolingual) {
-    return `You are a language teacher helping a student learn ${language}. The student selects a word or phrase while reading; the user message marks the selection and its surrounding paragraph (before/after).
-Explain the SELECTED text IN ${language.toUpperCase()} using simple, clear language.
-- For a word or phrase: lead with its usual meaning, then what it means in this sentence/context, then any other common meanings or usages.
-- If it's a sentence-like selection: give a natural translation first, then explain it in context, and ALWAYS finish with a subject–verb–object analysis of the sentence (identify the subject, the main verb, and the object/complement; point out clauses or structures that affect understanding). This section is mandatory and must come last — the student is training long-sentence parsing for IELTS/TOEFL reading.
-- You may quote the surrounding text to interpret meaning, but never explain other words from it.
-Be concise but thorough.`;
+    return `You are a native ${language} teacher who also understands Chinese. Your student is a Chinese native speaker reading a real ${language} text and has stopped at one spot. Knowing Chinese means you can anticipate where Chinese speakers misread ${language}: tense, articles, prepositions, polysemy, clause structures Chinese lacks, tone and register.
+
+Your only job: help the student read this sentence themselves and keep reading. Do not translate it for them. Do not turn it into a grammar lesson.
+
+You receive the selected text, before/after context, the full sentence, and a block of "observations" — objective signals from the reader, not conclusions. The judgement is yours.
+
+Answer order (mandatory):
+1) The first paragraph is the main body and must come first. Work out what most likely blocked them — a word's meaning in this sentence, a reference, an inversion or ellipsis, a tense/voice shift, a structure Chinese speakers tend to misread. Remove that blocker in the fewest words so they can read the sentence themselves. A partial paraphrase or a restored reading order is fine; a full fluent translation is not, because that reads it for them. Never restate the whole sentence as "The sentence means..." or "In other words...". Answer only the one or two things that matter most.
+2) Optional second line: one sentence saying what role the selection plays in the sentence.
+3) Last, and only when needed: a "sentence map" in 2–3 symbolic lines that puts the original sentence back with bracketed constituent labels, so the backbone is visible at a glance. Lead with an emoji + pattern label (for example 🧩 SVC · predicative with a relative clause), then the sentence with full-width bracket labels such as The opposite problem（subject） is（linking verb） ..., then optionally a ⚠️ pitfall line. Dense labelling, not a long grammar essay. For long sentences mark only the backbone, elide the rest with … and say what was elided. Unsure constituents get "(uncertain)" — never guess. If the structure is unclear, omit the map entirely. Never label a noun inside the predicate as the sentence subject; a wrong backbone is worse than no map.
+
+Depth is yours to judge from the observations: a peripheral modifier on a first ask → light: 1–2 sentences, no map at all; a backbone constituent, passive, inversion or clause → include the map; three or more asks on the same sentence → start with one line locating the backbone. Do not output your reasoning.
+
+Never: phonetic symbols, greetings, fixed three-section headings, numbered lists, Markdown headings, tables, code fences, HTML, or a full translation as the main body. Never print section labels like "Second line:" — the paragraph order above is an instruction for you, not a heading for the student. The sentence map relies on emoji, full-width brackets and line breaks — avoid heavy bold markup, which flickers mid-stream. Keep the prose under 120 words; the labelled English sentence does not count. Answer in ${language.toUpperCase()}.`;
   }
 
-  const kind = selectionKind(word);
+  return `你是一位英语为母语、并且懂中文的英语老师。学生是中文母语者，正在读一篇真实的英文文章，读到某一处停下来向你请教。你懂中文的价值在于：能预判中文母语者容易误读的地方——时态、冠词、介词、一词多义、中文里没有的从句结构、语气与语体。
 
-  if (kind === "sentence") {
-    return `你是一位帮中文母语者读英文文章的阅读助教。用户在读文章时划选了一个句子——用户在备考雅思/托福阅读，看懂意思之外，长难句结构分析（找主语、谓语动词）是核心训练。
-用户消息会标注「用户选中」的文本，以及它在段落中的「前文」「后文」。请严格按以下格式用中文输出（Markdown）：
+你只有一个任务：让学生能自己把这一句读懂，然后继续往下读。不是替他翻译，不是给他上语法课。
 
-**翻译**
-第一行就给结合语境的通顺中文翻译。先在心里圈出选区所在的完整句子，翻译必须覆盖该句的全部成分——主语、并列项一个都不能丢；选区只划到半句时，把后半句的意思补进来一起译。
+【你收到的信息】
+用户消息里有「用户选中」「前文」「后文」「所在句子」，以及一组「观察」——那是阅读器采集的客观信号，不是结论。判断由你来做。
 
-**结合语境的解释**
-联系前后文解读这句话：指代、逻辑关系、语气与言外之意。与翻译重复的内容不要再说一遍。
+【答案顺序（硬性）】
+第一段，永远是主体，占绝大部分篇幅：
+- 先判断学生最可能卡在哪：某个词或短语在句里的意思、一个指代、一处倒装或省略、时态或语态带来的含义变化、一处中文母语者容易读反的结构。
+- 用最短的中文解除这个卡点，让他能自己把句子读顺。可以给半句意译提示或还原后的读法，但不要给整句通顺译文（那是替他读完，会让他停止思考）。
+- 一次只答最要紧的一两件事；不罗列词典义项，不堆语法术语，不复述选区。
+- 不要用「整句在说」「整句意思是」「这句话是说」把全句用中文复述一遍；只点破卡住的那一点，最多给半句意译提示。
 
-**主谓宾分析**
-（此节为固定最后一节，任何情况下都不可省略。）用几行标出句子主干与关键结构：
-- 主语：…（有较长修饰语时注明核心词）
-- 谓语动词：…（时态、语态有要点就顺带一句）
-- 宾语/表语：…（无则写「无」）
-- 最后一句话点出从句、插入语、倒装、并列等影响理解的结构。
-分析必须准确，没有把握的成分宁可标注「（存疑）」也不要编造。
+第二段（可选）：用一句话点出选中的部分在句里充当什么成分。轻答也可以有这一句。
 
-硬性要求：
-- 使用粗体小标题分行，不要使用「1. 2. 3.」这类编号
-- 「主谓宾分析」永远放最后，且绝不能省略——只给翻译或只给语境解释都算不合格
-- 解释对象永远是「用户选中」的部分；鼓励引用前后文来解读整句含义，但不要去解释前后文里的其他词
-- 不要输出音标
-- 总长控制在 300 字以内`;
-  }
+第三段，只有需要时才写，且永远殿后——「句子地图」：
+- 2~3 行符号化排版，把原句放出来并在成分后标注，让用户一眼扫到主干。详细靠标记密度，不靠字数，不要写成语法讲义。
+- 第 1 行：emoji + 句型标签，例如「🧩 主系表 · 表语含定语从句」。
+- 第 2 行：原句 + 全角括号成分标注，例如「The opposite problem（主语） is（系动词） the classifier ...（表语）.」。
+- 第 3 行（可选）：⚠️ 易错点，或 🔗 指代／衔接提示，一行说完。
+- 长句只标主干，其余用 … 省略，并在括号里点一句省掉的是什么。
+- 成分没把握就标「（存疑）」，宁可不标也不硬编；整句结构拿不准时，句子地图直接不写。尤其别把表语／修饰语里的名词误标成全句主语——主干标错比不标更糟。
 
-  // 单词 / 短语：同一套「通常 → 在这里 → 其他」结构，仅措辞不同
-  const noun = kind === "word" ? "这个词" : "这个短语";
-  return `你是一位帮中文母语者读英文文章的阅读助教。用户在读文章时${kind === "word" ? "点选了一个词" : "划选了一个短语"}，想快速看懂文章、顺带学${noun}。
-用户消息会标注「用户选中」的文本，以及它在段落中的「前文」「后文」。请严格按以下格式用中文输出（Markdown）：
+【答案深度由你判断，不要问我】
+- 选区是边缘成分（状语、修饰语、插入语）且是第 1 次请教 → 轻答：主体 1~2 句 + 一句成分说明，**句子地图不写**。别把一次点词变成语法课。
+- 选区是主干成分（主语、谓语动词、宾语／表语），或涉及被动语态、倒装、从句 → 中答：解除卡点 + 句子地图。
+- 「同句连续请教次数」≥ 3 → 重答：先用一句话点出整句主干帮他定位，再给句子地图，并说明生词较密。
+判断句法角色是老师的本职；不要输出判断过程，直接用答案体现。
 
-**通常意思**
-${noun}${kind === "word" ? "最常见的含义，可顺带词性（如 *v. 使欣喜*）" : "最常见的整体含义"}。一到两句话。
-
-**在这里的意思**
-结合上下文，${noun}在这句话里的具体意思；与通常意思一致时，直接说明并用半句话点出它在句中的作用。语气、语体的提示（如「比『高兴』更强烈」）也放这里。
-
-**其他用法**
-除上述之外，${noun}常见的其他含义、固定搭配或用法；确实没有就写「无」。
-
-硬性要求：
-- 使用粗体小标题分行，不要使用「1. 2. 3.」这类编号
-- 解释对象永远是「用户选中」的部分；可引用前后文帮助解读，但不要去解释前后文里的其他词
-- 不要输出音标——词典卡已提供
-- 简洁，总长不超过 150 字`;
+【硬性禁止】
+- 不输出音标、寒暄、「希望有帮助」；不使用旧版那种固定三节小标题，不写编号列表。
+- 不把整句通顺译文当主体，不把语法分析放到第一段；不写「整句在说：」「整句意思是」这类换皮翻译。
+- 「第一段／第二段／第三段」是给你组织答案的说明，不要写成「第二段：」这类段落标签。
+- 不使用 Markdown 标题、表格、代码块、HTML；句子地图主要靠 emoji + 全角括号 + 换行，尽量少用加粗（流式渲染时未闭合的星号会闪）。
+- 用中文作答，英文原词、例句与被标注的原句保留英文。
+- 中文说明控制在 150 字以内；长难句或重答可到 180 字。被标注的英文原句不计入。宁可少说一件事，不要每件事讲半句。`;
 }
 
 /**
- * 构建 user message
- * 有 prefix/suffix 时按「选中/前文/后文」分段标注；否则退回旧的整句 context。
+ * 构建 user message。
+ * 默认释义与 Ask AI 追问共用同一套 system 和同一个上下文块，只有「学生的问题」一行不同：
+ * 默认时把「判断卡在哪」交给老师，追问时换成用户自己的问题。
  */
-function buildUserMessage(params: ExplainParams): string {
-  const { word, context, prefix, suffix, prompt } = params;
-
-  if (prompt) {
-    // askAI 模式：用户自由提问（同样带上段落上下文）
-    return `${contextBlock(params)}
-Question: ${prompt}`;
-  }
-
+/** 导出供单测做控制变量断言 */
+export function buildUserMessage(params: ExplainParams): string {
+  const question = params.prompt
+    ? `学生的问题: ${params.prompt}`
+    : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
   return `${contextBlock(params)}
-请按 system 要求的结构解释「用户选中」的部分。`;
+${question}`;
 }
 
-/** 组装「选中/前文/后文」的分段上下文块 */
+/** 组装「选中/前文/后文」上下文块，并附上阅读器采集的客观信号 */
 function contextBlock(params: ExplainParams): string {
   const { word, context, prefix, suffix, withPrevSentence } = params;
+  let base: string;
   if (typeof prefix === "string" || typeof suffix === "string") {
     const pre = (prefix ?? "").trim();
     const suf = (suffix ?? "").trim();
     const hint = withPrevSentence
       ? "\n（提示：前文开头是选区所在句的上一句，可用于理解指代、承接等句间衔接。）"
       : "";
-    return `用户选中: "${word}"
+    base = `用户选中: "${word}"
 前文: ${pre ? `"${pre}"` : "（无）"}
 后文: ${suf ? `"${suf}"` : "（无）"}${hint}`;
-  }
-  return `用户选中: "${word}"
+  } else {
+    base = `用户选中: "${word}"
 所在句子: "${context}"`;
+  }
+  const obs = observations(params.signals);
+  return obs ? `${base}\n\n${obs}` : base;
+}
+
+/** 只摆客观证据，不下结论——判断句法权重与答案深度是模型的事 */
+function observations(signals?: SelectionSignals): string {
+  if (!signals) return "";
+  const lines: string[] = [];
+  lines.push(`- 操作: ${signals.source === "word" ? "点了一个词" : "拖选了一段"}`);
+  lines.push(
+    `- 选区 ${signals.selectionWords} 词；所在句 ${signals.sentenceWords} 词；覆盖约 ${Math.round(signals.coverage * 100)}%`,
+  );
+  const pos =
+    signals.position === "start" ? "句首" : signals.position === "end" ? "句末" : "句中";
+  lines.push(`- 选区位置: ${pos}`);
+  const sentence = signals.sentence.trim();
+  if (sentence) lines.push(`- 所在句子原文: "${sentence}"`);
+  if (typeof signals.dictHit === "boolean") {
+    lines.push(`- 词典: ${signals.dictHit ? "已收录" : "未收录"}`);
+  }
+  if (typeof signals.repeatCount === "number" && signals.repeatCount > 0) {
+    lines.push(`- 同句连续请教: 第 ${signals.repeatCount} 次`);
+  }
+  return `观察（客观信号，不是结论）：\n${lines.join("\n")}`;
 }
 
 /**
@@ -157,7 +177,7 @@ export async function* streamExplain(
 
   yield* streamTurns(turns, {
     temperature: 0.3, // 释义要准确，不要发散
-    maxTokens: 1200,  // 分层模板在句子场景下需要更长输出
+    maxTokens: 400,   // 短答案 + 2~3 行句子地图足够；也是防长篇大论的硬兜底
   });
 }
 

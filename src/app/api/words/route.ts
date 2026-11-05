@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { userWords, contexts, texts, paragraphs, LOCAL_USER } from "@/db/schema";
 import { lookup } from "@/lib/dict";
+import { cardGloss } from "@/lib/gloss";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +70,9 @@ function dedup<T extends { id: string }>(rows: T[]): T[] {
  *   quote:      选中文字
  *   prefix:     前文
  *   suffix:     后文
- *   aiGloss?:   AI 释义文本（如有）
+ *   aiGloss?:   AI 释义全文（如有）。完整存 contexts.ai_gloss 供回看；
+ *               词典未收录时才用 cardGloss() 提炼短释义填 translation，
+ *               句子地图 / 成分标注不进词库与墨墨卡片背面（P10）。
  */
 export async function POST(req: Request) {
   let body: {
@@ -113,7 +116,9 @@ export async function POST(req: Request) {
   const lemmaForm = dictResult.lemmaForm || word.trim();
   const displayForm = word.trim();
   const phonetic = dictResult.entry?.phonetic ?? null;
-  const translation = dictResult.entry?.translation ?? aiGloss ?? "(待补充释义)";
+  // 词典释义优先；词典查不到时只取 AI 主体段的短释义，绝不把整段贴语境的
+  // 句子地图写进卡片背面。AI 全文仍然原样落在 contexts.ai_gloss。
+  const translation = dictResult.entry?.translation ?? cardGloss(aiGloss) ?? "(待补充释义)";
   const pos = dictResult.entry?.pos ?? null;
 
   const now = Date.now();

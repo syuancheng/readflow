@@ -4,7 +4,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { buildAnchor, tokenize, type Anchor, type Token } from "@/lib/tokenize";
 import { groupBlocks, isSkipped, type Group } from "@/lib/import/group";
 import { isProse, type BlockKind, type BlockMeta, type InlineRange } from "@/lib/import/types";
-import { aiContextOf } from "@/lib/sentence";
+import { aiContextOf, selectionSignals, type SelectionSignals } from "@/lib/sentence";
 import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
@@ -48,6 +48,8 @@ type Pick = {
   contextId?: string;
   /** 从已存批注回看时，直接展示当时保存的 AI 释义，不重新请求 */
   initialGloss?: string;
+  /** 这次选区采集的客观信号，随 /api/explain 送给模型（不是结论） */
+  signals?: SelectionSignals;
 };
 
 /** 一篇文本里已保存的句子/短语批注（来自 contexts 表） */
@@ -465,6 +467,19 @@ export default function Reader({
   const [showAnnotations, setShowAnnotations] = useState(true);
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  // 场景 4：同一句里连续请教的次数。只放内存、不落库——「这句卡了三次」是
+  // 阅读会话内的瞬时状态，不该变成被永久记住的用户数据。
+  // key 用「段落 + 句子区间」：换句自动归零，翻页/刷新随组件重挂载清零。
+  const sentenceAskRef = useRef<{ key: string; count: number }>({ key: "", count: 0 });
+
+  function noteSelection(sig: SelectionSignals, paragraphId: string): number {
+    const key = `${paragraphId}:${sig.sentenceStart}:${sig.sentenceEnd}`;
+    const cur = sentenceAskRef.current;
+    if (cur.key === key) cur.count += 1;
+    else sentenceAskRef.current = { key, count: 1 };
+    return sentenceAskRef.current.count;
+  }
+
   // 已收词表（含状态），键为小写 displayForm / lemma
   const [savedMap, setSavedMap] = useState<Map<string, SavedWordInfo>>(() =>
     buildSavedMap(savedWords),
@@ -677,6 +692,7 @@ export default function Reader({
       return;
     }
 
+    const sig = selectionSignals(p.content, s, en, "word");
     const pickData: Pick = {
       paragraphId: pid,
       paragraphIdx: p.idx,
@@ -684,6 +700,7 @@ export default function Reader({
       x: rect.left + rect.width / 2,
       y: rect.bottom,
       source: "word",
+      signals: { ...sig, repeatCount: noteSelection(sig, pid) },
     };
     markActiveAnchor([wordEl]);
     setPick(pickData);
@@ -733,6 +750,7 @@ export default function Reader({
       return en > start && s < end;
     });
     markActiveAnchor(anchors);
+    const sig = selectionSignals(p.content, start, end, "select");
     const pickData: Pick = {
       paragraphId: pid,
       paragraphIdx: p.idx,
@@ -740,6 +758,7 @@ export default function Reader({
       x: e.clientX,
       y: e.clientY,
       source: "select",
+      signals: { ...sig, repeatCount: noteSelection(sig, pid) },
     };
     setPick(pickData);
 
@@ -836,7 +855,10 @@ export default function Reader({
 
   /** 从「已存批注」列表回看：重建批注卡 + 滚动到原文 + 显示已存释义 */
   function openAnnotation(a: Annotation) {
+    const para = paragraphs.find((x) => x.id === a.paragraphId);
+    const sig = para ? selectionSignals(para.content, a.start, a.end, "select") : undefined;
     const pd: Pick = {
+      signals: sig,
       paragraphId: a.paragraphId,
       paragraphIdx: a.paragraphIdx,
       anchor: {
@@ -1127,6 +1149,11 @@ function PickCard({
   );
   const [showAskInput, setShowAskInput] = useState(false);
   const [askPrompt, setAskPrompt] = useState("");
+  /** 用户主动把「整句模式」改回按词回答（只影响本次弹层） */
+  const [forceWordMode, setForceWordMode] = useState(false);
+
+  // 场景 4：同句连续请教 ≥3 次时模型会按整句分析，这里给一个可撤销的入口
+  const wholeSentenceMode = (pick.signals?.repeatCount ?? 0) >= 3 && !forceWordMode;
 
   // 是短语（含空格）还是单词
   const isPhrase = /\s/.test(anchor.quote.trim());
@@ -1139,6 +1166,7 @@ function PickCard({
     setAiStatus(initialGloss ? "done" : "idle");
     setShowAskInput(false);
     setAskPrompt("");
+    setForceWordMode(false);
 
     fetch(`/api/dict?word=${encodeURIComponent(anchor.quote)}`)
       .then((r) => r.json())
@@ -1149,10 +1177,19 @@ function PickCard({
       .catch(() => setDictLoading(false));
   }, [anchor.quote, initialGloss]);
 
-  /** 触发 AI 释义（流式） */
-  async function triggerAI(prompt?: string) {
+  /** 触发 AI 释义（流式）。forceWord = 把「按整句分析」临时改回按词回答。 */
+  async function triggerAI(prompt?: string, forceWord = false) {
     setAiStatus("loading");
     setAiText("");
+
+    // 客观信号：前端只采集证据，不下结论。词典命中在这里补（构造 Pick 时还没查词典）。
+    const signals = pick.signals
+      ? {
+          ...pick.signals,
+          dictHit: Boolean(dict?.entry),
+          ...(forceWord ? { repeatCount: 0 } : {}),
+        }
+      : undefined;
 
     // 段落级上下文：选区 + 段内完整前文/后文（保证句子完整，不被锚点窗口截断）
     const body = {
@@ -1163,6 +1200,7 @@ function PickCard({
       language: "en",
       monolingual: false,
       ...(prompt ? { prompt } : {}),
+      ...(signals ? { signals } : {}),
     };
 
     try {
@@ -1328,9 +1366,23 @@ function PickCard({
               </span>
             )}
             {aiStatus === "done" && !showAskInput && (
-              <button className="rf-ask-mini" onClick={() => setShowAskInput(true)}>
-                追问
-              </button>
+              <>
+                {wholeSentenceMode && (
+                  <button
+                    className="rf-ask-mini"
+                    title="这句连续请教了多次，已按整句分析；点这里改回按词回答"
+                    onClick={() => {
+                      setForceWordMode(true);
+                      void triggerAI(undefined, true);
+                    }}
+                  >
+                    已按整句分析 · 改按词答
+                  </button>
+                )}
+                <button className="rf-ask-mini" onClick={() => setShowAskInput(true)}>
+                  追问
+                </button>
+              </>
             )}
           </div>
           <div className="rf-md text-[14px] leading-relaxed text-ink">

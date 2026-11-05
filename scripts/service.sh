@@ -115,7 +115,14 @@ cmd_install() {
 EOF
 
   loaded && launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null
-  launchctl bootstrap "$DOMAIN" "$PLIST" || die "launchctl 加载失败：$PLIST"
+  if ! launchctl bootstrap "$DOMAIN" "$PLIST"; then
+    # 从 IDE / Agent 这类受限会话调用时，launchd 常拒绝注册新服务（Bootstrap failed: 5）。
+    # plist 本身是合法的，换到用户登录会话里执行就能装上；下次登录也会自动加载。
+    warn "若当前会话来自 IDE / Agent 工具，launchd 可能拒绝注册新服务（Bootstrap failed: 5）。"
+    warn "请在 macOS 自带「终端」里执行：bash scripts/service.sh install"
+    warn "plist 已写好且合法（${PLIST}），下次登录也会自动加载。"
+    die "launchctl 加载失败：$PLIST"
+  fi
   ok "已安装：$PLIST"
 
   local i

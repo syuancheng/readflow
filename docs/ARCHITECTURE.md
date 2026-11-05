@@ -3,7 +3,7 @@
 > 面向要改这个仓库的人（包括三个月后的自己）。
 > 产品定位与背景见 [`../README.md`](../README.md)。
 
-**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入已完成）
+**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入、P10 AI 释义重构已完成）
 **代码规模**：`src/` + `scripts/` 约 6k 行（TypeScript / TSX / CSS）
 **最后核对的运行环境**：Node 24.x，Next.js 16.4.3，React 19.3.0
 
@@ -456,49 +456,65 @@ maxHeight = min(vh - top - 16, 560)              // 硬约束：永不溢出视�
 ### 5.1 时序
 
 ```
-点词
+点词 / 拖选短语
  │
  ├─▶ GET /api/dict?word=bank ──▶ ECDICT（<5ms）
- │        │
- │        ├ 有结果 → 渲染第 1 层（音标 / 中文释义 / 英文释义折叠 / 柯林斯星级）
- │        │          底栏按钮文案 = 「🤖 AI 深度释义」
- │        └ 无结果 或 是短语 → 渲染「词典未收录」
- │                   底栏按钮文案 = 「🔍 用 AI 解释」（引导升级）
+ │        ├ 有结果 → 第 1 层（音标 / 中文释义 / 英文释义折叠 / 柯林斯星级）
+ │        └ 无结果 或 选区是短语 → 「词典未收录 · 可用 AI 解释」
  │
- └─▶ 用户点按钮 / 追问
-        GET /api/explain?word=&context=&language=en&monolingual=false[&prompt=]
-        → ReadableStream 逐块 enqueue
-        → 前端 res.body.getReader() + TextDecoder 逐块 setState
-        → 光标动画 + 内容区自动滚动
+ └─▶ 用户点「✨ AI 释义」或追问
+        ├ aiContextOf(段落, start, end)      → 段落级 prefix / suffix，按句子边界裁
+        ├ selectionSignals(段落, start, end) → 客观信号 + dictHit + repeatCount
+        └ POST /api/explain {word, prefix, suffix, withPrevSentence?, signals?, prompt?}
+             → 服务端 narrowSignals() 白名单裁剪（客户端数据不能直接进模型）
+             → ReadableStream 逐块 enqueue
+             → 前端 res.body.getReader() + TextDecoder 逐块 setState
+             → MarkdownText 逐帧重解析 + 内容区自动滚动
 ```
+
+`GET /api/explain?word=&context=` 仍保留，只带一句话上下文、不带 signals，供扩展与旧脚本兼容；阅读器新链路一律走 POST。
 
 **为什么不是打开弹层就自动调 AI？** 因为 80% 的点词词典就够，自动调 = 每次点击都烧钱、都在等首字。用户主动点按钮是成本闸门，也是 Readlang 的设计（Explain 是显式的第二个动作）。
 
-### 5.2 context 是怎么来的
+### 5.2 上下文与证据是怎么来的
 
-```ts
-function sentenceOf(anchor) {
-  const prefixSent = anchor.prefix.replace(/^.*[.!?]\s*/, "");  // 砍掉前一句
-  const suffixSent = anchor.suffix.replace(/\s*[.!?].*$/, "");   // 砍掉后一句
-  return `${prefixSent}${anchor.quote}${suffixSent}`.trim() || anchor.quote;
-}
-```
+已不是 `sentenceOf(anchor)` 那种「锚点前后各砍到句末再拼一句」的做法。`lib/sentence.ts` 提供两个确定性纯函数：
 
-只取**当前这一句**。这是刻意的取舍，理由见 8.2。
+- **`aiContextOf(paragraph, start, end)`**：从完整段落里截前文/后文。单词或短语截到所在句边界（保证主语完整）；选区盖满句子 ≥75% 词汇，或句中已收生词密度 ≥75% 时，前文额外带上一句（可能跨段），并置 `withPrevSentence=true` 提示模型注意指代与衔接。理由见 8.2。
+- **`selectionSignals(paragraph, start, end, source)`**：给出 `source`、选区词数、所在句原文与词数、`coverage`、选区位置、句子在段内的字符区间。前端再补 `dictHit` 与同句连续请教次数 `repeatCount`。
 
-### 5.3 Prompt 结构（`lib/ai.ts`）
+**关键取舍：前端只送证据，不送结论。** 早期版本让服务端用 `selectionKind()` 反猜「这是单词 / 短语 / 句子」再切模板，结果同一个几何动作被换了好几套人格。现在判断「选区是不是主干、该给多深的答案、要不要画句子地图」全部交给模型，`selectionKind()` 降级为普通几何信号。这也对应产品判断：用户说不清自己是「不认识这个词」还是「不懂这个语法」，几何动作完全相同，硬分类必然误判。
 
-| 模式 | system | user |
+`repeatCount` 只存在 `Reader.tsx` 的 `sentenceAskRef`（内存），key 是 `${paragraphId}:${sentenceStart}:${sentenceEnd}`；换句、刷新、重挂载自动清零，**不落库**。≥3 时模型按整句分析，批注卡给「已按整句分析 · 改按词答」的撤销入口。
+
+### 5.3 Prompt 契约（`lib/ai.ts`，P10 重构后）
+
+**一套 system，不按选区类型分叉。** 人设是「英语为母语、并且懂中文的英语老师」；唯一任务是让学生**自己把句子读顺、继续往下读**（阅读连续性优先），不是替他翻译，也不是给他上语法课。默认释义与追问共用同一个 system 和同一个上下文块，只有 user message 最后一行不同：默认写「学生没有说出具体问题……」，追问换成「学生的问题: …」。这条性质有单测做控制变量。
+
+| 位置 | 内容 | 是否可省 |
 |---|---|---|
-| 默认（中文解释） | 你是一位语言教师，帮助中文母语者学习英语…重点解释当前语境下的含义…用 Markdown 输出 | 请解释 "bank" 在下面这句话中的含义："…" 请给出：词性、当前语境下的意思、用法说明 |
-| monolingual | Explain words and phrases IN ENGLISH…focus on the one that fits the context | Explain the word "bank" as used in this sentence… |
-| 追问（prompt） | 同上 | `Word/phrase: "bank"\nContext sentence: "…"\nQuestion: 这个词还有别的用法吗？` |
+| 第一段（主体） | 判断最可能卡在哪 → 用最短中文解除；不给整句通顺译文、不罗列义项、不堆术语 | 否 |
+| 第二段 | 一句话点出选区在句里充当什么成分 | 是 |
+| 第三段（永远殿后） | 「句子地图」：2~3 行，emoji 句型标签 + 原句带全角括号成分标注 + 一行易错点 | 是 |
 
-**追问时 word 和 context 仍然带上**——这是「上下文感知追问」和「泛泛问一个词」的区别。
+结构分析**不是一句话带过，也不是长篇大论**：详细来自标记密度（原句 + 成分标注 + emoji），不来自字数；没把握的成分标「（存疑）」，整句结构拿不准就整块不写。这是对用户裁决的落实——「语法分析可以有，但不能放到主体，我们是要用户更多地去读，而不是做语法游戏」。中文说明 ≤150 字（长难句 / 重答 180 字），被标注的英文原句不计入。
 
-参数：`model: deepseek-chat`、`stream: true`、`temperature: 0.3`（释义要准不要发散）、`max_tokens: 800`。
+答案深度由模型从 `observations()` 拼的「观察」块判断：边缘成分且首次请教 → 轻答；主干成分 / 被动 / 倒装 / 从句 → 带句子地图；同句连续 ≥3 次 → 先点主干再给地图。判断过程不输出。观察块只列客观证据（操作、词数、覆盖率、位置、所在句原文、词典命中、连续次数），不含「这是主干」「应该给」这类结论。
 
-无 `DEEPSEEK_API_KEY` 时 `getClient()` 返回 `null`，generator 直接 yield 一段提示文案并 return——**不抛错、不白屏**。前端看到的就是一段普通文本。
+参数：provider 由配置中心决定（`resolveProvider()`，可换 DeepSeek / OpenAI / Claude / 千问 / 任意 OpenAI 兼容端点），`stream: true`、`temperature: 0.3`、`max_tokens: 400`（旧版 1200；短答案 + 2~3 行地图足够，也是防长篇大论的硬兜底）。monolingual 模式是同一套契约的英文版本，同样不按选区分叉。
+
+无可用模型时 `resolveProvider()` 返回 `null`，`streamTurns()` 直接 yield `NO_MODEL_NOTICE` 并 return——**不抛错、不白屏**。前端看到的就是一段普通文本；这段提示也不会被收进词库（见 5.5）。
+
+**真实样本收敛（2026-11-05）**：拿 `The opposite problem is the classifier repeatedly stopping something that is routine in your setup.` 在生产 3000 真调模型，用四个控制变量（点 `classifier` / 点 `routine` / 同句第 3 次 / 追问 `is`）验输出，暴露四处执行偏差，已写进 system 并由单测固化：
+
+| 观察到的偏差 | 为什么不行 | 收敛后的约束 |
+|---|---|---|
+| 主体段出现「整句在说：…」 | 换皮的整句翻译，等于替学生读完 | 点名禁止这类开头，只给半句意译提示 |
+| 追问答案写出「第二段：」 | 把给模型的组织说明照抄成用户可见标签 | 明确段落序号只是组织说明，不是标题 |
+| 重答把表语里的 `the classifier` 标成全句主语 | 主干标错比不标更糟 | 句子地图加「别把表语／修饰语里的名词误标成主语」 |
+| 边缘词首次请教仍给完整地图 | 一次点词变成语法课 | 轻答硬约束为 1~2 句 + 不写地图 |
+
+复验后：换皮翻译与段落标签消失，主干标注修正为 `The opposite problem is …`。涉及定语从句的场景模型仍给地图，符合「从句 → 中答」的契约，不算误判；模型偶尔仍会在主体末尾带一句半句意译，那是 prompt 允许的「还原后的读法」，不是整句通顺译文。**单测只能锁住契约字面，模型输出质量必须真调一次**——这也是 12.6 把真实样本列为必做项的原因。
 
 ### 5.4 流式的实现细节
 
@@ -533,19 +549,41 @@ while (true) {
 - `decode(value, { stream: true })` 是必须的。中文字符 3 字节，可能被切在两个 chunk 中间，不加会出乱码。
 - **Content-Type 写的是 `text/event-stream`，但 body 没有 `data:` 帧**。前端直接读 `res.body` 所以能用；若要换成标准 `EventSource`，需要在服务端加 `data: ` 前缀 + `\n\n` 分隔，并在客户端按事件解析。这是已知的不一致（README 限制章节也记了）。
 
+### 5.5 AI 全文只留在批注里，不进卡片背面
+
+这是 P10 容易被忽略的一条约束：新版释义**贴死在原句上**，而 `user_words.translation` 是墨墨卡片背面的数据源。把整段照抄过去，复习时看到的是一堆脱离原文的 emoji、成分标注和英文原句，既没意义也误导。
+
+```
+AI 全文
+ ├─▶ contexts.ai_gloss       原样存，回看批注时完整展示
+ └─▶ cardGloss(aiGloss)      只提炼主体段 → user_words.translation → 卡片背面
+```
+
+`lib/gloss.ts` 的 `cardGloss()` 是确定性纯函数：遇到句子地图标记（🧩 / ⚠️ / 🔗 / 「句子地图」）整块截断，丢掉带成分标注的英文原句行与旧三段式纯小标题，清掉 Markdown 记号，合并成一行并限长 100 字；无模型提示 / `[Error:]` 文案返回 `undefined`。同文件的 `shortGloss()` 是给浏览器扩展小标签用的 24 字版本，两者用途不同，别混用。
+
+两个写入口都走它：
+
+| 入口 | 规则 |
+|---|---|
+| `POST /api/words` | 词典查得到 → 用词典释义；查不到 → `cardGloss(aiGloss)` → `(待补充释义)` |
+| `PATCH /api/contexts/[id]` | 短语覆盖为短释义；单词只在还是占位符时才补 |
+
+`cardgen.ts` 无需改动：它拿到的 `translation` 本来就该是一行短文本（`translationLines()` 会按行拆成卡片列表项）。`tests/unit/card-gloss.test.ts` 用控制变量断言「地图不进卡片、主体仍在、全文不等于短释义」。
+
 ---
 
 ## 6. 链路四：收词与去重
 
 ```
 弹层「+」按钮
-  │  onSave(aiStatus === "done" ? aiText : undefined)   ← AI 释义顺带存成 ai_gloss
+  │  onSave(aiStatus === "done" ? aiText : undefined)   ← AI 全文顺带存成 contexts.ai_gloss
   ▼
 POST /api/words { word, textId, paragraphId, start, end, quote, prefix, suffix, aiGloss? }
   │
   ├ 校验 textId / paragraphId 存在（404 兜底）
   ├ lookup(word) → lemmaForm / phonetic / translation / pos
-  │   translation 优先级：词典释义 > aiGloss 前 500 字 > "(待补充释义)"
+  │   translation 优先级：词典释义 > cardGloss(aiGloss) 短释义 > "(待补充释义)"
+  │      （句子地图不进卡片背面，见 5.5）
   ├ db.transaction:
   │    ├ 按 lemma 查 user_words
   │    │    ├ 命中 → 更新（更好的 phonetic / translation 覆盖旧的）
@@ -605,6 +643,8 @@ POST /api/words { word, textId, paragraphId, start, end, quote, prefix, suffix, 
 一个句子已经是完整语义单元（搭配、语法角色、情境都在里面）。段落只在「代词指代」「跨句因果」这类场景有增量价值，而增量大约 5%、成本 +300%，还会拉高首字延迟——首字延迟直接杀死「点词即出」的手感。
 
 Readlang 十年也选了同一档。真要补，正确做法是**追问时**把段落作为附加 context，而不是默认带。
+
+**2026-11-05 更新**：现在默认走 `aiContextOf()` 的**段落级窗口**，但没有推翻这张表——窗口仍按句子边界裁：单词/短语只拿所在句，只有「划了大半句」或「句中已收生词密度 ≥75%」才额外带上一句。所以常规点击成本仍是 1x，多出的一句只在确有整句理解需求时出现。更准确的说法是：**默认不塞整段，但保留按需取相邻句的能力**。
 
 ### 8.3 为什么用 OpenAI SDK 调 DeepSeek
 
@@ -937,9 +977,32 @@ API / SSR 回归（可在 dev 跑）与交互验证（**必须在生产 3000 跑
 
 所有 E2E 脚本都在 `finally` 里删掉自己创建的文本与词，不污染用户库。
 
+### 12.6 AI 释义专项（P10）
+
+改 `lib/ai.ts` / `lib/sentence.ts` / `lib/gloss.ts` / `Reader.tsx` 的选区链路时，按顺序验：
+
+```bash
+npm test                    # 含 ai-prompt / sentence / card-gloss 的控制变量测试
+npm run typecheck
+```
+
+单测管的是**契约**，不是模型输出质量：
+
+| 检查 | 期望 |
+|---|---|
+| `buildSystemPrompt("en", false, "steer")` vs 长句选区 | 逐字相同，同一个老师不按选区换人格 |
+| 默认释义 vs 追问的 `buildUserMessage` | 前缀逐字相同，只有最后一行「学生的问题」不同 |
+| 三段式固定栏目 | `**通常意思**` / `**翻译**` / `**主谓宾分析**` / 「不可省略」全部不存在 |
+| `selectionSignals()` | 给出完整所在句原文；点词与拖短语只差 `source`；越界不崩 |
+| `cardGloss()` | 地图 / emoji / 成分标注行不进卡片，降级提示返回 `undefined` |
+
+**模型输出必须真调一次**，单测替代不了：拿一段含被动 / 倒装 / 从句的真实句子，分别点 1 个边缘词、1 个主干词、连续点 3 次，肉眼核对三件事——第一段有没有给整句译文、句子地图是否殿后且带原句与全角括号、中文说明有没有超篇幅。没配 key 时页面出的是 `NO_MODEL_NOTICE`，这是预期降级，不是坏掉。
+
+**交互验证必须在生产 3000 跑**（见 9.7）：`next dev` 页面可能没 hydrate，点词没反应是假阴性；判断是否 hydrate 看 DOM 上有没有 `__reactProps$*` 键。
+
 ---
 
-### 12.6 真实写卡（不可逆，只在用户明确同意后跑）
+### 12.7 真实写卡（不可逆，只在用户明确同意后跑）
 
 ```bash
 npm run push:one -- list                                   # 列牌组/章节（只读）
@@ -970,8 +1033,10 @@ npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
 
 | 想改什么 | 改哪里 | 注意 |
 |---|---|---|
-| 换 AI 供应商 | `lib/ai.ts` 的 `getClient()`（baseURL/apiKey/model） | 保持 OpenAI 兼容即可，其余不用动 |
-| 改 prompt | `lib/ai.ts` 的 `buildSystemPrompt` / `buildUserMessage` | monolingual 分支和 prompt 分支要同步 |
+| 换 AI 供应商 | 设置页 / `lib/config.ts` 的 `resolveProvider()` | 保持 OpenAI 兼容即可，`lib/ai.ts` 不用动 |
+| 改 prompt | `lib/ai.ts` 的 `buildSystemPrompt` / `buildUserMessage` / `observations()` | 中文与 monolingual 两套人设同步；默认释义与追问必须共用同一 system（单测有控制变量断言） |
+| 改卡片背面释义 | `lib/gloss.ts` 的 `cardGloss()` | `/api/words` 与 `/api/contexts/[id]` 两个写入口都依赖它；改完跑 `tests/unit/card-gloss.test.ts` |
+| 改阅读器证据 | `lib/sentence.ts` 的 `selectionSignals()` + `/api/explain` 的 `narrowSignals()` | 只送证据不送结论；新字段要同步白名单裁剪 |
 | 加词典字段 | `lib/dict.ts` 的 SELECT + `DictEntry` + `Reader.tsx` 的 `DictView` | 三处同步 |
 | 改分词规则 | `lib/tokenize.ts` 的 `TOKEN_RE` | 必须保持确定性（不能依赖环境） |
 | 改切段规则 | `lib/split.ts` | ⚠️ 会让历史锚点失效，先读 3.2 |

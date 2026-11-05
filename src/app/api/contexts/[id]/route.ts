@@ -2,14 +2,16 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { contexts, userWords } from "@/db/schema";
+import { cardGloss } from "@/lib/gloss";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * PATCH /api/contexts/[id]
- * 把 AI 释义回填到某条批注，翻回去看时不用重新请求 AI。
- * 若词条释义还是占位符，顺手补上（词库页也能看到）。
+ * 把 AI 释义**全文**回填到某条批注，翻回去看时不用重新请求 AI。
+ * 若词条释义还是占位符，顺手用 cardGloss() 提炼的短释义补上（词库页 / 卡片背面）。
+ * 句子地图贴死在原句上，只留在 contexts.ai_gloss，不写进 user_words.translation。
  *
  * Body: { aiGloss: string }
  */
@@ -38,14 +40,16 @@ export async function PATCH(
   db.update(contexts).set({ aiGloss: gloss }).where(eq(contexts.id, id)).run();
 
   // 回填词条释义，让词库页也能看到：
-  // - 短语/句子：词典本来就查不到，AI 释义就是它的释义，直接全量覆盖（不再截 500 字）
+  // - 短语/句子：词典本来就查不到，用 AI 主体段的短释义覆盖
   // - 单词：词典释义更规整，只在还是占位符时补上
+  // 降级提示 / 报错文案提炼不出释义，此时什么都不覆盖。
+  const short = cardGloss(gloss);
   const word = db.select().from(userWords).where(eq(userWords.id, row.userWordId)).get();
-  if (word) {
+  if (word && short) {
     if (word.isPhrase === 1) {
-      db.update(userWords).set({ translation: gloss }).where(eq(userWords.id, word.id)).run();
+      db.update(userWords).set({ translation: short }).where(eq(userWords.id, word.id)).run();
     } else if (word.translation === "(待补充释义)" || !word.translation) {
-      db.update(userWords).set({ translation: gloss }).where(eq(userWords.id, word.id)).run();
+      db.update(userWords).set({ translation: short }).where(eq(userWords.id, word.id)).run();
     }
   }
 

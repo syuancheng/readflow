@@ -1,21 +1,54 @@
 import { NextRequest } from "next/server";
 import { streamExplain, type ExplainParams } from "@/lib/ai";
+import type { SelectionSignals } from "@/lib/sentence";
 
 export const dynamic = "force-dynamic";
 
 /**
  * AI 释义接口（流式）
  *
- * GET  /api/explain?word=...&context=...（兼容旧调用，只带一句话上下文）
- * POST /api/explain  body: { word, prefix?, suffix?, language?, monolingual?, prompt? }
- *   —— 新版：段落级上下文，选区/前文/后文分开标注（对齐 Readlang Explain）
+ * GET  /api/explain?word=...&context=...（兼容旧调用，只带一句话上下文，不带 signals）
+ * POST /api/explain  body: { word, prefix?, suffix?, language?, monolingual?, prompt?, signals? }
+ *   —— 段落级上下文 + 阅读器采集的客观信号（选中/前文/后文/观察分开标注）
  *
  * - 流式输出（SSE）
  * - 支持 monolingual（目标语言解释）
- * - 支持 prompt（用户自由追问，对应 Readlang 的 askAI）
+ * - 支持 prompt（用户自由追问，对应 Readlang 的 askAI）；与默认释义共用同一套 system
+ * - signals 只含客观证据、不含结论；判断句法权重与答案深度交给模型
  *
  * 返回 text/event-stream，每个 chunk 是纯文本。
  */
+
+const clamp = (v: unknown, lo: number, hi: number): number | undefined => {
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  return Math.max(lo, Math.min(hi, v));
+};
+
+/** 白名单提取 + 数值裁剪：signals 来自客户端，不能直接信任 */
+function narrowSignals(v: unknown): SelectionSignals | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const source = o.source === "word" || o.source === "select" ? o.source : undefined;
+  const position =
+    o.position === "start" || o.position === "middle" || o.position === "end"
+      ? o.position
+      : undefined;
+  if (!source || !position) return undefined;
+
+  const repeat = clamp(o.repeatCount, 0, 99);
+  return {
+    source,
+    position,
+    selectionWords: clamp(o.selectionWords, 0, 10000) ?? 0,
+    sentenceWords: clamp(o.sentenceWords, 0, 10000) ?? 0,
+    coverage: clamp(o.coverage, 0, 1) ?? 0,
+    sentence: typeof o.sentence === "string" ? o.sentence.slice(0, 2000) : "",
+    sentenceStart: clamp(o.sentenceStart, 0, 10_000_000) ?? 0,
+    sentenceEnd: clamp(o.sentenceEnd, 0, 10_000_000) ?? 0,
+    ...(typeof o.dictHit === "boolean" ? { dictHit: o.dictHit } : {}),
+    ...(repeat !== undefined ? { repeatCount: repeat } : {}),
+  };
+}
 
 async function handle(params: ExplainParams) {
   const encoder = new TextEncoder();
@@ -84,5 +117,6 @@ export async function POST(req: NextRequest) {
     monolingual: body.monolingual === true,
     prompt: str(body.prompt)?.trim() || undefined,
     withPrevSentence: body.withPrevSentence === true,
+    signals: narrowSignals(body.signals),
   });
 }

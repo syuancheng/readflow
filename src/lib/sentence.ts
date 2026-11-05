@@ -53,13 +53,14 @@ function wordsOf(text: string): string[] {
 export type SelectionKind = "word" | "phrase" | "sentence";
 
 /**
- * 选区三分类，决定 AI 释义用哪套输出结构：
+ * 选区三分类（几何信号，纯函数，可单测）：
  * - word    单个词（无空白）
  * - phrase  短语（多词，但不是完整句子）
  * - sentence 句子：以句末标点（.!?…，可带引号/括号收尾）结束；
  *   或 ≥15 词的超长选区——没标点也按长难句处理（多从句、无标点截选）
  *
- * 纯函数，供前端与 ai.ts 共用，可单测。
+ * 注意：新版 AI 释义不再用它决定输出模板（那会让同一个动作得到不同人格）。
+ * 它现在只作为客观证据之一交给模型，或供其他需要粗分类的链路使用。
  */
 export function selectionKind(text: string): SelectionKind {
   const t = text.trim();
@@ -166,4 +167,78 @@ function lastSentenceOf(text: string): string {
   if (spans.length === 0) return "";
   const last = spans[spans.length - 1];
   return text.slice(last.start, last.end);
+}
+
+/**
+ * 阅读器采集的客观信号，随释义请求送给模型。
+ *
+ * 设计原则（2026-11-05 讨论收敛）：
+ * - 前端只送「证据」，不送「结论」。判断选区是不是主干、该给多深的答案，是老师的本职。
+ * - 这些字段都不依赖模型的二次分类，也不落库；`splitSentences()` 的句子区间顺带用来
+ *   给「同一句连续请教」计数做 key。
+ * - 只在浏览器事件回调里调用，不参与 SSR 渲染，避免 ICU 差异导致 hydration mismatch。
+ */
+export type SelectionSignals = {
+  /** 点词还是拖选 */
+  source: "word" | "select";
+  /** 选区词数 */
+  selectionWords: number;
+  /** 选区所在句的完整原文（跨句选区会合并，供句子地图标注） */
+  sentence: string;
+  /** 所在句词数 */
+  sentenceWords: number;
+  /** 选区覆盖所在句的词汇比例，0..1 */
+  coverage: number;
+  /** 选区在句中的位置（粗证据：句首常是主语/状语，句中常是谓语） */
+  position: "start" | "middle" | "end";
+  /** 所在句在段落内的字符区间 */
+  sentenceStart: number;
+  sentenceEnd: number;
+  /** 同一句内连续请教的次数（会话内累计，不落库） */
+  repeatCount?: number;
+  /** 词典是否收录选区（短语通常查不到） */
+  dictHit?: boolean;
+};
+
+/** 计算一次选区的客观信号。确定性纯函数，可单测。 */
+export function selectionSignals(
+  paragraph: string,
+  start: number,
+  end: number,
+  source: "word" | "select",
+): SelectionSignals {
+  const s = Math.max(0, Math.min(start, paragraph.length));
+  const e = Math.max(s, Math.min(end, paragraph.length));
+  const sentences = splitSentences(paragraph);
+
+  let first = -1;
+  let last = -1;
+  sentences.forEach((span, i) => {
+    if (span.end > s && span.start < e) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  });
+  const span =
+    first >= 0
+      ? { start: sentences[first].start, end: sentences[last].end }
+      : { start: s, end: e };
+
+  const sentence = paragraph.slice(span.start, span.end);
+  const sentenceWords = wordsOf(sentence).length;
+  const selectionWords = wordsOf(paragraph.slice(s, e)).length;
+  const coverage = sentenceWords > 0 ? Math.min(1, selectionWords / sentenceWords) : 1;
+  const rel = span.end > span.start ? (s - span.start) / (span.end - span.start) : 0;
+  const position = rel < 0.25 ? "start" : rel > 0.75 ? "end" : "middle";
+
+  return {
+    source,
+    selectionWords,
+    sentence,
+    sentenceWords,
+    coverage,
+    position,
+    sentenceStart: span.start,
+    sentenceEnd: span.end,
+  };
 }
