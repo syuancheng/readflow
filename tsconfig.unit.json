@@ -17,6 +17,7 @@
     "src/lib/retry.ts",
     "src/lib/providers.ts",
     "src/lib/gloss.ts",
+    "src/lib/settings-form.ts",
     "src/lib/settings-store.ts",
     "src/db/sqlite.ts",
     "tests/unit/**/*.ts"

@@ -153,16 +153,36 @@ try {
     .evaluate((e) => e.classList.contains("on"));
   check("D0 开关显示关闭态", !switchOn, switchOn ? "on" : "off");
 
-  // ---------- H：Profile 里的设置页（模型配置 / 墨墨 / 插件 Token） ----------
+  // ---------- H：Profile 里的设置页（分栏导航 + 添加模型表单） ----------
   await page.locator('.pm-row:has-text("设置")').click();
   await page.waitForSelector(".st-modal", { timeout: 5000 });
   await page.waitForSelector(".st-provider", { timeout: 5000 });
   const providerCards = await page.locator(".st-provider").count();
   check("H1 Profile 设置页列出可选模型", providerCards >= 5, `${providerCards} 个 provider`);
-  const markjiSection = await page.locator('.st-section:has-text("墨墨记单词")').count();
-  const extSection = await page.locator('.st-section:has-text("浏览器插件")').count();
-  check("H2 设置页含墨墨 Token 与插件 Token", markjiSection > 0 && extSection > 0);
-  await page.keyboard.press("Escape");
+  const navMarkji = await page.locator('.st-nav-item:has-text("墨墨记单词")').count();
+  const navExt = await page.locator('.st-nav-item:has-text("浏览器插件")').count();
+  check("H2 设置页含墨墨 Token 与插件 Token 分组", navMarkji > 0 && navExt > 0);
+
+  await page.locator(".st-add-btn").click();
+  await page.waitForSelector(".st-pick-grid", { timeout: 5000 });
+  const picks = await page.locator(".st-pick-card").count();
+  check("H3 添加模型先选提供商", picks >= 5, `${picks} 个预设`);
+  await page.locator('.st-pick-card:has-text("DeepSeek")').first().click();
+  await page.waitForSelector("#st-api-key", { timeout: 5000 });
+  const presetEndpoint = await page.locator("#st-endpoint").inputValue();
+  const presetModel = await page.locator("#st-model").inputValue();
+  check(
+    "H4 预设自动带出接口地址与默认模型名",
+    presetEndpoint.includes("api.deepseek.com") && presetModel === "deepseek-chat",
+    `${presetEndpoint} / ${presetModel}`,
+  );
+  const fieldLabels = await page.locator(".st-label").allInnerTexts();
+  check(
+    "H5 表单含接口地址 / API Key / 模型名称三个字段",
+    ["接口地址", "API Key", "模型名称"].every((t) => fieldLabels.some((l) => l.includes(t))),
+  );
+  await page.locator(".st-editor .st-close").click();
+  await page.locator(".st-head .st-close").click();
   await page.waitForTimeout(200);
 
   await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
