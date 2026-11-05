@@ -1,14 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProviderId } from "@/lib/config";
+import { PROVIDERS } from "@/lib/config";
 import { withRetry } from "@/lib/retry";
 import {
+  applyModelOption,
+  CUSTOM_MODEL_OPTION,
+  docsUrlFor,
+  filterNavGroups,
+  isPresetModel,
+  modelOptionsFor,
   normalizeEndpoint,
   presetFor,
+  PROVIDER_SELECT_LABEL,
   validateForm,
   type FormErrors,
   type FormValues,
+  type NavId,
 } from "@/lib/settings-form";
 
 export type ProviderRow = {
@@ -31,14 +40,8 @@ type SettingsPayload = {
   extension: { token: string | null };
 };
 
-type Tab = "models" | "markji" | "extension";
-type Editor = { mode: "add" | "edit"; id: ProviderId; picked: boolean };
-
-const NAV: { id: Tab; icon: string; title: string; desc: string }[] = [
-  { id: "models", icon: "AI", title: "模型服务", desc: "API Key 与接口地址" },
-  { id: "markji", icon: "墨", title: "墨墨记单词", desc: "开放 API Token" },
-  { id: "extension", icon: "扩", title: "浏览器插件", desc: "词表同步 Token" },
-];
+type Editor = { mode: "add" | "edit"; id: ProviderId };
+type Note = { kind: "ok" | "err"; text: string };
 
 const ICON: Record<ProviderId, { ch: string; bg: string }> = {
   deepseek: { ch: "D", bg: "#4d6bfe" },
@@ -65,26 +68,126 @@ async function request(url: string, init?: RequestInit): Promise<unknown> {
   );
 }
 
+/** 细线图标，颜色跟随 currentColor */
+function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+  switch (name) {
+    case "search":
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      );
+    case "model":
+      return (
+        <svg {...common}>
+          <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" />
+          <path d="m4 7.5 8 4.5 8-4.5M12 12v9" />
+        </svg>
+      );
+    case "book":
+      return (
+        <svg {...common}>
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5V5.5Z" />
+          <path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5A2.5 2.5 0 0 1 4 20.5Z" />
+        </svg>
+      );
+    case "puzzle":
+      return (
+        <svg {...common}>
+          <path d="M10 3h4v2.2a2 2 0 1 0 4 0V5h3v4h-1.8a2 2 0 1 0 0 4H21v4h-3v-1.8a2 2 0 1 0-4 0V17h-4v-2.8a2 2 0 1 0 0-4V13H3V9h1.2a2 2 0 1 0 4 0H10V3Z" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg {...common}>
+          <path d="M12 3 4.5 6v5.5c0 4.4 3 7.7 7.5 9.5 4.5-1.8 7.5-5.1 7.5-9.5V6L12 3Z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      );
+    case "eye":
+      return (
+        <svg {...common}>
+          <path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12Z" />
+          <circle cx="12" cy="12" r="2.8" />
+        </svg>
+      );
+    case "eye-off":
+      return (
+        <svg {...common}>
+          <path d="M3 3 21 21" />
+          <path d="M10.6 6.8A9.8 9.8 0 0 1 12 6.7c6 0 9.5 5.3 9.5 5.3a15 15 0 0 1-3 3.5M6.2 8.2A15.6 15.6 0 0 0 2.5 12S6 17.3 12 17.3c1 0 1.9-.1 2.7-.4" />
+          <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+        </svg>
+      );
+    case "chevron":
+      return (
+        <svg {...common}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      );
+    case "cloud":
+      return (
+        <svg {...common}>
+          <path d="M7 18h10.5a3.5 3.5 0 0 0 .3-7A5.5 5.5 0 0 0 7.2 9.6 4.2 4.2 0 0 0 7 18Z" />
+        </svg>
+      );
+    case "external":
+      return (
+        <svg {...common} width={14} height={14}>
+          <path d="M14 4h6v6M20 4l-8 8" />
+          <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+const NAV_ICON: Record<NavId, string> = {
+  models: "model",
+  markji: "book",
+  extension: "puzzle",
+  storage: "shield",
+};
+
 /**
  * 设置中心（右上角头像 → 设置）。
  *
- * 信息架构对齐 WorkBuddy：左侧分组导航 + 右侧内容；模型以列表呈现，
- * 「添加模型」才展开表单——先选提供商（自动带出接口地址/默认模型名），
- * 再补 API Key，逐字段校验，可测试连接，最后保存。
+ * 视觉与信息架构对齐 WorkBuddy 设置页：搜索框 + 分组导航 + 右侧内容；
+ * 「添加模型」是独立居中弹窗：供应商下拉 → API Key（显隐 + 测试连接）→ 模型名称，
+ * 底部只有取消 / 保存，接口地址这类高级项默认折叠。
  */
 export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [data, setData] = useState<SettingsPayload | null>(null);
   const [active, setActive] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("models");
+  const [tab, setTab] = useState<NavId>("models");
+  const [query, setQuery] = useState("");
   const [editor, setEditor] = useState<Editor | null>(null);
   const [form, setForm] = useState<FormValues>(emptyForm());
   const [errors, setErrors] = useState<FormErrors>({});
   const [showKey, setShowKey] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [customModel, setCustomModel] = useState("");
+  const [testNote, setTestNote] = useState<Note | null>(null);
   const [markjiInput, setMarkjiInput] = useState("");
   const [showMarkji, setShowMarkji] = useState(false);
-  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [notice, setNotice] = useState<Note | null>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     try {
@@ -106,13 +209,13 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      // 二级表单开着时先关表单，再按一次才退出设置
-      if (editor) setEditor(null);
+      if (modelMenuOpen) setModelMenuOpen(false);
+      else if (editor) setEditor(null);
       else onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [editor, onClose]);
+  }, [editor, modelMenuOpen, onClose]);
 
   /** 统一写配置：每次只提交本次操作涉及的字段，保存后立即生效 */
   async function put(body: Record<string, unknown>): Promise<SettingsPayload | null> {
@@ -136,37 +239,55 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   // ---------- 模型服务 ----------
 
-  function openAdd() {
+  function openAdd(id: ProviderId = "deepseek") {
     setNotice(null);
     setErrors({});
+    setTestNote(null);
     setShowKey(false);
-    setForm(emptyForm());
-    setEditor({ mode: "add", id: "deepseek", picked: false });
+    setModelMenuOpen(false);
+    setShowAdvanced(id === "custom");
+    setForm({ apiKey: "", ...presetFor(id) });
+    setEditor({ mode: "add", id });
   }
 
-  function pickProvider(id: ProviderId) {
-    const preset = presetFor(id);
-    setEditor({ mode: "add", id, picked: true });
-    setForm({ apiKey: "", endpoint: preset.endpoint, model: preset.model });
+  function changeProvider(id: ProviderId) {
+    if (!editor) return;
+    setEditor({ ...editor, id });
+    setForm({ apiKey: "", ...presetFor(id) });
     setErrors({});
+    setTestNote(null);
+    setModelMenuOpen(false);
+    if (id === "custom") setShowAdvanced(true);
   }
 
   function openEdit(p: ProviderRow) {
     setNotice(null);
     setErrors({});
+    setTestNote(null);
     setShowKey(false);
-    setEditor({ mode: "edit", id: p.id, picked: true });
+    setModelMenuOpen(false);
+    setShowAdvanced(p.id === "custom" || Boolean(p.baseUrl && p.baseUrl !== presetFor(p.id).endpoint));
+    setEditor({ mode: "edit", id: p.id });
     setForm({ apiKey: "", endpoint: p.baseUrl, model: p.model });
   }
 
   function closeEditor() {
     setEditor(null);
     setErrors({});
+    setTestNote(null);
+    setModelMenuOpen(false);
   }
 
   function patchForm(field: keyof FormValues, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
+    setTestNote(null);
+  }
+
+  function chooseModel(option: string) {
+    patchForm("model", applyModelOption(option, customModel, form.model));
+    setModelMenuOpen(false);
+    if (option === CUSTOM_MODEL_OPTION) modelInputRef.current?.focus();
   }
 
   async function selectProvider(id: ProviderId) {
@@ -180,7 +301,11 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
     if (!editor) return false;
     const errs = validateForm(form, { editing: editor.mode === "edit" });
     setErrors(errs);
-    if (Object.keys(errs).length > 0) return false;
+    if (Object.keys(errs).length > 0) {
+      // 接口地址默认折叠，校验失败时展开，否则错误提示用户看不到
+      if (errs.endpoint) setShowAdvanced(true);
+      return false;
+    }
 
     const patch: Record<string, string> = {
       baseUrl: normalizeEndpoint(form.endpoint),
@@ -191,10 +316,13 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   }
 
   async function saveAndClose() {
-    if (await saveForm()) {
-      closeEditor();
-      setNotice({ kind: "ok", text: "模型配置已保存" });
-    }
+    if (!editor) return;
+    const shouldActivate = editor.mode === "add" && !active;
+    const id = editor.id;
+    if (!(await saveForm())) return;
+    if (shouldActivate) await put({ activeProvider: id });
+    closeEditor();
+    setNotice({ kind: "ok", text: shouldActivate ? "已添加模型并设为当前使用" : "模型配置已保存" });
   }
 
   async function testForm() {
@@ -202,19 +330,20 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
     if (!(await saveForm())) return;
     const id = editor.id;
     setBusy(`test:${id}`);
+    setTestNote(null);
     try {
       const res = (await request("/api/settings/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target: "ai", providerId: id }),
       })) as { ok: boolean; detail?: string; error?: string };
-      setNotice(
+      setTestNote(
         res.ok
           ? { kind: "ok", text: res.detail ?? "连接成功" }
           : { kind: "err", text: res.error ?? "连接失败" },
       );
     } catch (err) {
-      setNotice({ kind: "err", text: `测试失败：${err instanceof Error ? err.message : String(err)}` });
+      setTestNote({ kind: "err", text: `测试失败：${err instanceof Error ? err.message : String(err)}` });
     } finally {
       setBusy(null);
     }
@@ -231,6 +360,14 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
       closeEditor();
       setNotice({ kind: "ok", text: "已移除该模型配置" });
     }
+  }
+
+  async function clearAllModels() {
+    if (!window.confirm("清空所有模型的 API Key 与配置？墨墨与插件 Token 不受影响，此操作不可撤销。"))
+      return;
+    const providers = Object.fromEntries(PROVIDERS.map((p) => [p.id, { clear: true }]));
+    const payload = await put({ providers, activeProvider: null });
+    if (payload) setNotice({ kind: "ok", text: "已清空所有模型配置" });
   }
 
   // ---------- 墨墨 / 插件 ----------
@@ -279,17 +416,12 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   }
 
   const current = data?.providers.find((p) => p.id === active) ?? null;
-  const editingRow = editor ? data?.providers.find((p) => p.id === editor.id) : null;
   const isBusy = busy !== null;
+  const groups = filterNavGroups(query);
+  const options = editor ? modelOptionsFor(editor.id) : [];
 
   return (
-    <div
-      className="st-overlay"
-      onMouseDown={() => {
-        if (editor) setEditor(null);
-        else onClose();
-      }}
-    >
+    <div className="st-overlay" onMouseDown={onClose}>
       <div
         className="st-modal"
         role="dialog"
@@ -298,35 +430,42 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="st-head">
-          <div>
-            <h2 className="st-title">设置</h2>
-            <p className="st-sub">配置只保存在本机数据库，不会上传云端</p>
-          </div>
-          <button className="st-close" onClick={onClose} aria-label="关闭设置">×</button>
+          <button className="st-close" onClick={onClose} aria-label="关闭设置">
+            <span className="st-close-x">×</span>
+          </button>
         </div>
 
         <div className="st-layout">
           <nav className="st-nav" aria-label="设置分组">
-            {NAV.map((n) => (
-              <button
-                key={n.id}
-                className={`st-nav-item ${tab === n.id ? "st-nav-item-on" : ""}`}
-                onClick={() => {
-                  setTab(n.id);
-                  setNotice(null);
-                }}
-              >
-                <span className="st-nav-icon">{n.icon}</span>
-                <span className="st-nav-text">
-                  <b>{n.title}</b>
-                  <small>{n.desc}</small>
-                </span>
-              </button>
+            <label className="st-search">
+              <SvgIcon name="search" size={16} />
+              <input
+                id="st-search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索设置项"
+                aria-label="搜索设置项"
+              />
+            </label>
+            {groups.map((g) => (
+              <div className="st-nav-group" key={g.title}>
+                <div className="st-nav-group-title">{g.title}</div>
+                {g.items.map((it) => (
+                  <button
+                    key={it.id}
+                    className={`st-nav-item ${tab === it.id ? "st-nav-item-on" : ""}`}
+                    onClick={() => {
+                      setTab(it.id);
+                      setNotice(null);
+                    }}
+                  >
+                    <SvgIcon name={NAV_ICON[it.id]} size={17} />
+                    <span>{it.title}</span>
+                  </button>
+                ))}
+              </div>
             ))}
-            <div className="st-nav-foot">
-              <b>仅保存在本机</b>
-              <span>API Key 写入本机 SQLite，不会上传云端，也不会写回 .env。</span>
-            </div>
+            {groups.length === 0 && <p className="st-nav-empty">没有匹配的设置项</p>}
           </nav>
 
           <div className="st-main">
@@ -342,89 +481,94 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               <>
                 {tab === "models" && (
                   <section className="st-section">
-                    <div className="st-current">
-                      <div>
-                        <span className="st-current-label">当前使用</span>
-                        <b className="st-current-name">
-                          {current?.label ?? "尚未选择模型"}
-                        </b>
-                        <span className="st-current-hint">
-                          {current
-                            ? `${current.model} · ${current.configured ? "配置完整" : "配置不完整"}`
-                            : "添加并勾选一个模型后，AI 释义才会启用"}
-                        </span>
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">自定义模型</h3>
+                          <p className="st-panel-desc">
+                            模型添加后会自动写入到本机{" "}
+                            <code>data/readflow.db</code> 的 settings 表中。
+                          </p>
+                        </div>
+                        <button className="st-add-btn" onClick={() => openAdd()}>
+                          添加模型
+                        </button>
                       </div>
-                      <button className="duo-btn duo-btn-primary st-add-btn" onClick={openAdd}>
-                        + 添加模型
-                      </button>
-                    </div>
 
-                    <div className="st-section-head">
-                      <h3>模型服务</h3>
-                      <span>勾选一个作为当前使用，配几个都行</span>
-                    </div>
+                      <div className="st-current-line">
+                        当前使用
+                        <b>{current?.label ?? "尚未选择模型"}</b>
+                        {current && <span>{current.model}</span>}
+                      </div>
 
-                    <div className="st-providers">
-                      {data?.providers.map((p) => {
-                        const selected = active === p.id;
-                        return (
-                          <div key={p.id} className={`st-provider ${selected ? "st-provider-on" : ""}`}>
-                            <span className="st-provider-icon" style={{ background: ICON[p.id].bg }}>
-                              {ICON[p.id].ch}
-                            </span>
-                            <span className="st-provider-name">
-                              <b>{p.label}</b>
-                              <span>{p.hint}</span>
-                            </span>
-                            <span className="st-provider-meta">
-                              <span className={`st-badge ${p.configured ? "st-badge-on" : ""}`}>
-                                {p.configured ? (p.source === "env" ? "环境变量" : "已配置") : "未配置"}
-                              </span>
-                              {p.maskedKey && <code>{p.maskedKey}</code>}
-                            </span>
-                            <span className="st-provider-actions">
-                              <button
-                                className={`st-use ${selected ? "st-use-on" : ""}`}
-                                disabled={!p.configured || isBusy}
-                                onClick={() => void selectProvider(p.id)}
-                                role="radio"
-                                aria-checked={selected}
-                                aria-label={`使用 ${p.label}`}
+                      <div className="st-providers">
+                        {(data?.providers ?? []).map((p) => {
+                          const selected = active === p.id;
+                          return (
+                            <div
+                              key={p.id}
+                              className={`st-provider ${selected ? "st-provider-on" : ""}`}
+                            >
+                              <span
+                                className="st-provider-icon"
+                                style={{ background: ICON[p.id].bg }}
                               >
-                                {selected ? "使用中" : "设为使用"}
-                              </button>
-                              <button className="st-mini-btn" onClick={() => openEdit(p)}>
-                                编辑
-                              </button>
-                            </span>
-                          </div>
-                        );
-                      })}
+                                {ICON[p.id].ch}
+                              </span>
+                              <span className="st-provider-name">
+                                <b>{p.label}</b>
+                                <span>
+                                  {p.configured ? `${p.model} · ${p.maskedKey}` : p.hint}
+                                </span>
+                              </span>
+                              <span className="st-provider-actions">
+                                <button
+                                  className={`st-use ${selected ? "st-use-on" : ""}`}
+                                  disabled={!p.configured || isBusy}
+                                  onClick={() => void selectProvider(p.id)}
+                                  role="radio"
+                                  aria-checked={selected}
+                                  aria-label={`使用 ${p.label}`}
+                                >
+                                  {selected ? "使用中" : "设为使用"}
+                                </button>
+                                <button
+                                  className="st-mini-btn"
+                                  onClick={() => (p.configured ? openEdit(p) : openAdd(p.id))}
+                                >
+                                  {p.configured ? "编辑" : "配置"}
+                                </button>
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
-                    <div className="st-security">
-                      <b>请妥善保管 API Key</b>：它关联您的账户与额度，请勿分享给他人在共享环境中填写。
-                      自定义模型产生的费用由您向服务商支付；接入前请确认服务商可信。
-                    </div>
+                    <p className="st-security">
+                      请妥善保管 API Key：它关联您的账户与额度。密钥只保存在本机数据库、接口返回时一律脱敏；
+                      自定义模型产生的费用由您向服务商支付，接入前请确认服务商可信。
+                    </p>
                   </section>
                 )}
 
                 {tab === "markji" && (
                   <section className="st-section">
-                    <div className="st-section-head">
-                      <h3>墨墨记单词</h3>
-                      <span>导出记忆卡时使用的开放 API Token</span>
-                    </div>
-                    <div className="st-card">
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">墨墨记单词</h3>
+                          <p className="st-panel-desc">导出记忆卡时使用的开放 API Token。</p>
+                        </div>
+                      </div>
                       <div className="st-field">
                         <label className="st-label" htmlFor="st-markji-token">
                           开放 API Token
-                          <span>每个用户填自己的，留空表示不修改已保存的值</span>
                         </label>
-                        <div className="st-input-row">
+                        <div className="st-input-shell">
                           <input
                             id="st-markji-token"
-                            className="duo-input st-input"
+                            className="st-input"
                             type={showMarkji ? "text" : "password"}
                             autoComplete="off"
                             placeholder={
@@ -435,8 +579,12 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                             value={markjiInput}
                             onChange={(e) => setMarkjiInput(e.target.value)}
                           />
-                          <button className="st-mini-btn" onClick={() => setShowMarkji(!showMarkji)}>
-                            {showMarkji ? "隐藏" : "显示"}
+                          <button
+                            className="st-eye"
+                            onClick={() => setShowMarkji(!showMarkji)}
+                            aria-label={showMarkji ? "隐藏 Token" : "显示 Token"}
+                          >
+                            <SvgIcon name={showMarkji ? "eye-off" : "eye"} size={17} />
                           </button>
                         </div>
                         <p className="st-help">
@@ -445,64 +593,95 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
                         </p>
                       </div>
                       <div className="st-card-actions">
-                        <button className="st-mini-btn" disabled={isBusy} onClick={() => void verifyMarkji()}>
+                        <button
+                          className="st-btn st-btn-ghost"
+                          disabled={isBusy}
+                          onClick={() => void verifyMarkji()}
+                        >
                           {busy === "test:markji" ? "验证中…" : "验证并保存"}
                         </button>
-                        <button className="st-mini-btn" disabled={isBusy} onClick={() => void saveMarkji()}>
+                        <button
+                          className="st-btn st-btn-primary"
+                          disabled={isBusy}
+                          onClick={() => void saveMarkji()}
+                        >
                           保存
                         </button>
                         {data?.markji.configured && !data.markji.fromEnv && (
-                          <button
-                            className="st-mini-btn st-mini-btn-quiet"
-                            disabled={isBusy}
-                            onClick={() => void clearMarkji()}
-                          >
+                          <button className="st-btn st-btn-quiet" disabled={isBusy} onClick={() => void clearMarkji()}>
                             清除
                           </button>
                         )}
                       </div>
                     </div>
-                    <div className="st-security">
-                      <b>写入不可逆</b>：导出卡片前请先看预览。Token 仅保存在本机数据库，不会上传云端。
-                    </div>
+                    <p className="st-security">
+                      导出卡片前请先看预览：墨墨开放 API 不支持删卡，写入后只能在 App 端手动删除。
+                    </p>
                   </section>
                 )}
 
                 {tab === "extension" && (
                   <section className="st-section">
-                    <div className="st-section-head">
-                      <h3>浏览器插件</h3>
-                      <span>把 Token 填进插件 popup 里即可同步词表</span>
-                    </div>
-                    <div className="st-card">
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">浏览器插件</h3>
+                          <p className="st-panel-desc">把 Token 填进插件 popup 里即可同步词表。</p>
+                        </div>
+                      </div>
                       <div className="st-field">
-                        <label className="st-label">
-                          同步 Token
-                          <span>插件用它读写你的词库，重新生成会使旧 Token 立即失效</span>
-                        </label>
+                        <label className="st-label">同步 Token</label>
                         <div className="st-input-row">
                           <code className="st-token">{data?.extension.token ?? "尚未生成"}</code>
                           {data?.extension.token && (
                             <button
-                              className="st-mini-btn"
+                              className="st-btn st-btn-ghost"
                               onClick={() => void navigator.clipboard?.writeText(data.extension.token!)}
                             >
                               复制
                             </button>
                           )}
                           <button
-                            className="st-mini-btn st-mini-btn-quiet"
+                            className="st-btn st-btn-quiet"
                             disabled={isBusy}
                             onClick={() => void regenerateToken()}
                           >
                             {data?.extension.token ? "重新生成" : "生成"}
                           </button>
                         </div>
+                        <p className="st-help">重新生成会使旧 Token 立即失效。</p>
                       </div>
                     </div>
-                    <p className="st-help">
+                    <p className="st-security">
                       服务地址填 http://localhost:3000（或你的部署域名）。插件目录：项目下的 extension/，
                       在 chrome://extensions 开启开发者模式后「加载已解压的扩展程序」。
+                    </p>
+                  </section>
+                )}
+
+                {tab === "storage" && (
+                  <section className="st-section">
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">本机数据</h3>
+                          <p className="st-panel-desc">所有配置只保存在这台机器上。</p>
+                        </div>
+                      </div>
+                      <ul className="st-facts">
+                        <li>数据库：<code>data/readflow.db</code>（SQLite，WAL 模式）</li>
+                        <li>API Key 与 Token 写入 settings 表，接口返回时只给后四位掩码</li>
+                        <li>不会写回 .env，也不会上传到任何云端服务</li>
+                        <li>浏览器插件通过独立的同步 Token 鉴权，可随时重新生成</li>
+                      </ul>
+                      <div className="st-card-actions">
+                        <button className="st-btn st-btn-danger" disabled={isBusy} onClick={() => void clearAllModels()}>
+                          清空所有模型配置
+                        </button>
+                      </div>
+                    </div>
+                    <p className="st-security">
+                      清空只影响模型 API Key、接口地址与模型名；词库、文章、墨墨与插件 Token 均保留。
                     </p>
                   </section>
                 )}
@@ -510,150 +689,206 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
             )}
           </div>
         </div>
+      </div>
 
-        <div className="st-foot">
-          <span className="st-foot-hint">保存后立即生效，无需重启</span>
-          <button className="duo-btn st-done" onClick={onClose}>完成</button>
-        </div>
-
-        {editor && (
-          <div className="st-editor" role="dialog" aria-modal="true" aria-label="模型配置">
+      {/* 添加 / 编辑模型：独立居中弹窗 */}
+      {editor && (
+        <div
+          className="st-editor-overlay"
+          onMouseDown={(e) => {
+            // 阻止冒泡到外层设置遮罩，否则点弹窗会把整个设置一起关掉
+            e.stopPropagation();
+            if (e.target === e.currentTarget) closeEditor();
+          }}
+        >
+          <div
+            className="st-editor"
+            role="dialog"
+            aria-modal="true"
+            aria-label={editor.mode === "add" ? "添加模型" : "编辑模型"}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <div className="st-editor-head">
-              <div>
-                <h3>{editor.mode === "add" ? "添加模型" : `编辑 ${editingRow?.label ?? editor.id}`}</h3>
-                <p>{editor.picked ? "补全配置后即可测试连接并保存" : "先选提供商，自动带出接口地址与默认模型名"}</p>
-              </div>
-              <button className="st-close" onClick={closeEditor} aria-label="关闭">×</button>
+              <h3>{editor.mode === "add" ? "添加模型" : `编辑 ${PROVIDER_SELECT_LABEL[editor.id]}`}</h3>
+              <button className="st-close" onClick={closeEditor} aria-label="关闭">
+                <span className="st-close-x">×</span>
+              </button>
             </div>
 
             <div className="st-editor-body">
-              {!editor.picked ? (
-                <div className="st-pick">
-                  <p className="st-pick-intro">
-                    内置主流厂商预设，选中后自动带出接口地址与默认模型名，通常只需补 API Key。
-                    服务不在列表里可选「自定义 / 本地模型」。
-                  </p>
-                  <div className="st-pick-grid">
-                    {data?.providers.map((p) => (
-                      <button key={p.id} className="st-pick-card" onClick={() => pickProvider(p.id)}>
-                        <span className="st-provider-icon" style={{ background: ICON[p.id].bg }}>
-                          {ICON[p.id].ch}
-                        </span>
-                        <b>{p.label}</b>
-                        <small>{p.hint}</small>
-                      </button>
-                    ))}
-                  </div>
+              <div className="st-field">
+                <div className="st-field-head">
+                  <label className="st-label" htmlFor="st-provider">
+                    供应商 <span>（支持 OpenAI 兼容 / Anthropic 协议）</span>
+                  </label>
+                  <a
+                    className="st-docs"
+                    href={docsUrlFor(editor.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    查看文档 <SvgIcon name="external" />
+                  </a>
                 </div>
-              ) : (
-                <>
-                  <div className="st-chosen">
-                    <span className="st-provider-icon" style={{ background: ICON[editor.id].bg }}>
-                      {ICON[editor.id].ch}
-                    </span>
-                    <span className="st-provider-name">
-                      <b>{editingRow?.label ?? editor.id}</b>
-                      <span>提供商 · {editingRow?.protocol === "anthropic" ? "Anthropic 原生接口" : "OpenAI 兼容接口"}</span>
-                    </span>
-                    {editor.mode === "add" && (
-                      <button
-                        className="st-mini-btn"
-                        onClick={() => setEditor({ ...editor, picked: false })}
-                      >
-                        更换
-                      </button>
-                    )}
-                  </div>
+                <div className="st-select-wrap">
+                  <span className="st-select-lead">
+                    <SvgIcon name="cloud" size={19} />
+                  </span>
+                  <select
+                    id="st-provider"
+                    className="st-select"
+                    value={editor.id}
+                    disabled={editor.mode === "edit"}
+                    onChange={(e) => changeProvider(e.target.value as ProviderId)}
+                  >
+                    {PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {PROVIDER_SELECT_LABEL[p.id]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="st-select-arrow">
+                    <SvgIcon name="chevron" size={17} />
+                  </span>
+                </div>
+                {editor.mode === "edit" && (
+                  <p className="st-help">编辑时不可更换供应商；需要更换请先移除后重新添加。</p>
+                )}
+              </div>
 
-                  <div className="st-field">
-                    <label className="st-label" htmlFor="st-endpoint">
-                      接口地址
-                      <span>基地址即可，SDK 会自动补 /chat/completions</span>
-                    </label>
+              <div className="st-field">
+                <label className="st-label" htmlFor="st-api-key">
+                  API Key
+                </label>
+                <div className="st-key-row">
+                  <div className="st-input-shell">
+                    <input
+                      id="st-api-key"
+                      className="st-input"
+                      type={showKey ? "text" : "password"}
+                      autoComplete="off"
+                      placeholder={
+                        editor.mode === "edit" && data?.providers.find((p) => p.id === editor.id)?.maskedKey
+                          ? `已保存 ${data.providers.find((p) => p.id === editor.id)!.maskedKey}，留空表示不修改`
+                          : "输入你的 API Key"
+                      }
+                      value={form.apiKey}
+                      onChange={(e) => patchForm("apiKey", e.target.value)}
+                    />
+                    <button
+                      className="st-eye"
+                      onClick={() => setShowKey(!showKey)}
+                      aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
+                    >
+                      <SvgIcon name={showKey ? "eye-off" : "eye"} size={17} />
+                    </button>
+                  </div>
+                  <button className="st-test-btn" disabled={isBusy} onClick={() => void testForm()}>
+                    {busy?.startsWith("test:") ? "测试中…" : "测试连接"}
+                  </button>
+                </div>
+                {errors.apiKey && <p className="st-field-err">{errors.apiKey}</p>}
+                {testNote && (
+                  <p className={testNote.kind === "ok" ? "st-test-ok" : "st-field-err"}>
+                    {testNote.text}
+                  </p>
+                )}
+              </div>
+
+              <div className="st-field">
+                <label className="st-label" htmlFor="st-model">
+                  模型名称
+                </label>
+                <div className="st-select-wrap">
+                  <input
+                    id="st-model"
+                    ref={modelInputRef}
+                    className="st-select st-select-input"
+                    value={form.model}
+                    placeholder="选择或输入模型名称"
+                    onChange={(e) => patchForm("model", e.target.value)}
+                  />
+                  {form.model && !isPresetModel(editor.id, form.model) && (
+                    <span className="st-custom-tag">自定义</span>
+                  )}
+                  <button
+                    className="st-select-arrow st-select-arrow-btn"
+                    aria-label="选择模型名称"
+                    onClick={() => {
+                      setCustomModel(form.model);
+                      setModelMenuOpen((v) => !v);
+                    }}
+                  >
+                    <SvgIcon name="chevron" size={17} />
+                  </button>
+                  {modelMenuOpen && (
+                    <div className="st-menu" role="listbox">
+                      {options.map((m, i) => (
+                        <button key={m} className="st-menu-item" onClick={() => chooseModel(m)}>
+                          {m}
+                          {i === 0 && <small>默认</small>}
+                        </button>
+                      ))}
+                      <div className="st-menu-sep" />
+                      <button
+                        className="st-menu-item"
+                        onClick={() => chooseModel(CUSTOM_MODEL_OPTION)}
+                      >
+                        自定义模型名…
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {errors.model && <p className="st-field-err">{errors.model}</p>}
+              </div>
+
+              <button className="st-advanced" onClick={() => setShowAdvanced((v) => !v)}>
+                <span className={showAdvanced ? "st-advanced-arrow open" : "st-advanced-arrow"}>
+                  <SvgIcon name="chevron" size={15} />
+                </span>
+                高级设置 · 接口地址
+              </button>
+              {showAdvanced && (
+                <div className="st-field st-advanced-field">
+                  <label className="st-label" htmlFor="st-endpoint">
+                    接口地址
+                  </label>
+                  <div className="st-input-shell">
                     <input
                       id="st-endpoint"
-                      className="duo-input st-input"
+                      className="st-input"
                       placeholder="https://api.example.com/v1"
                       value={form.endpoint}
                       onChange={(e) => patchForm("endpoint", e.target.value)}
                     />
-                    {errors.endpoint && <p className="st-field-err">{errors.endpoint}</p>}
                   </div>
-
-                  <div className="st-field">
-                    <label className="st-label" htmlFor="st-api-key">
-                      API Key
-                      <span>
-                        {editor.mode === "edit" && editingRow?.maskedKey
-                          ? `已保存 ${editingRow.maskedKey}，留空表示不修改`
-                          : "从服务商控制台获取，请勿分享给他人"}
-                      </span>
-                    </label>
-                    <div className="st-input-row">
-                      <input
-                        id="st-api-key"
-                        className="duo-input st-input"
-                        type={showKey ? "text" : "password"}
-                        autoComplete="off"
-                        placeholder="sk-..."
-                        value={form.apiKey}
-                        onChange={(e) => patchForm("apiKey", e.target.value)}
-                      />
-                      <button className="st-mini-btn" onClick={() => setShowKey(!showKey)}>
-                        {showKey ? "隐藏" : "显示"}
-                      </button>
-                    </div>
-                    {errors.apiKey && <p className="st-field-err">{errors.apiKey}</p>}
-                  </div>
-
-                  <div className="st-field">
-                    <label className="st-label" htmlFor="st-model">
-                      模型名称
-                      <span>服务端实际使用的 model ID</span>
-                    </label>
-                    <input
-                      id="st-model"
-                      className="duo-input st-input"
-                      placeholder="deepseek-chat"
-                      value={form.model}
-                      onChange={(e) => patchForm("model", e.target.value)}
-                    />
-                    {errors.model && <p className="st-field-err">{errors.model}</p>}
-                  </div>
-
-                  <div className="st-security">
-                    <b>仅保存在本机</b>：API Key 写入本机 SQLite，不会上传云端，也不会写回 .env。
-                    自定义模型产生的费用由您向服务商支付，接入前请确认服务商可信。
-                  </div>
-
-                  {editor.mode === "edit" && editingRow?.configured && (
-                    <button className="st-remove" onClick={() => void removeProvider()} disabled={isBusy}>
-                      移除此模型配置
-                    </button>
-                  )}
-                </>
+                  {errors.endpoint && <p className="st-field-err">{errors.endpoint}</p>}
+                  <p className="st-help">填写基地址即可，SDK 会自动补 /chat/completions。</p>
+                </div>
               )}
             </div>
 
-            {editor.picked && (
-              <div className="st-editor-foot">
-                <button className="st-mini-btn" disabled={isBusy} onClick={() => void testForm()}>
-                  {busy?.startsWith("test:") ? "测试中…" : "测试连接"}
+            <div className="st-editor-foot">
+              {editor.mode === "edit" && (
+                <button className="st-remove" onClick={() => void removeProvider()} disabled={isBusy}>
+                  移除此模型配置
                 </button>
-                <span className="st-foot-hint">校验通过后才可保存</span>
-                <button className="st-mini-btn" onClick={closeEditor}>取消</button>
-                <button
-                  className="duo-btn duo-btn-primary st-save"
-                  disabled={isBusy}
-                  onClick={() => void saveAndClose()}
-                >
-                  {busy === "saving" ? "保存中…" : "保存"}
-                </button>
-              </div>
-            )}
+              )}
+              <span className="st-editor-foot-spacer" />
+              <button className="st-btn st-btn-ghost" onClick={closeEditor}>
+                取消
+              </button>
+              <button
+                className="st-btn st-btn-primary"
+                disabled={isBusy}
+                onClick={() => void saveAndClose()}
+              >
+                {busy === "saving" ? "保存中…" : "保存"}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyModelOption,
   checkApiKey,
   checkEndpoint,
   checkModel,
+  CUSTOM_MODEL_OPTION,
+  docsUrlFor,
+  filterNavGroups,
+  isPresetModel,
+  modelOptionsFor,
+  NAV_GROUPS,
   normalizeEndpoint,
   presetFor,
+  PROVIDER_SELECT_LABEL,
   validateForm,
 } from "../../src/lib/settings-form";
 
@@ -51,6 +59,50 @@ test("模型名称不能为空", () => {
   assert.equal(checkModel(""), "请输入模型名称");
   assert.equal(checkModel("  "), "请输入模型名称");
   assert.equal(checkModel("deepseek-chat"), null);
+});
+
+test("导航搜索：空查询给全部分组，命中标题/关键字才保留", () => {
+  assert.equal(filterNavGroups("").length, NAV_GROUPS.length);
+  assert.equal(filterNavGroups("   ").length, NAV_GROUPS.length);
+
+  const byTitle = filterNavGroups("墨墨");
+  assert.equal(byTitle.length, 1);
+  assert.deepEqual(byTitle[0].items.map((i) => i.id), ["markji"]);
+
+  // 关键字命中：英文 / 别名 / 大小写
+  assert.deepEqual(filterNavGroups("API KEY").flatMap((g) => g.items.map((i) => i.id)), ["models"]);
+  assert.deepEqual(filterNavGroups("chrome").flatMap((g) => g.items.map((i) => i.id)), [
+    "extension",
+  ]);
+  assert.deepEqual(filterNavGroups("隐私").flatMap((g) => g.items.map((i) => i.id)), ["storage"]);
+
+  // 空分组必须被剔除，不留一个空标题
+  assert.deepEqual(filterNavGroups("不存在的设置项"), []);
+});
+
+test("供应商下拉：每家都有展示名、文档链接与模型候选", () => {
+  const ids = ["deepseek", "openai", "claude", "qwen", "custom"] as const;
+  for (const id of ids) {
+    assert.ok(PROVIDER_SELECT_LABEL[id].length > 0, `${id} 缺展示名`);
+    assert.match(docsUrlFor(id), /^https:\/\//, `${id} 文档链接不合法`);
+    assert.ok(modelOptionsFor(id).length >= 2, `${id} 候选模型太少`);
+    assert.ok(modelOptionsFor(id).every((m) => m.trim().length > 0));
+  }
+  // 预设默认模型永远排第一，且不重复
+  assert.equal(modelOptionsFor("deepseek")[0], "deepseek-chat");
+  assert.equal(new Set(modelOptionsFor("deepseek")).size, modelOptionsFor("deepseek").length);
+  // 自定义端点没有预设地址/模型，候选仍可手填
+  assert.equal(modelOptionsFor("custom")[0], "qwen3:8b");
+});
+
+test("模型名下拉：预设判定与自定义项取值", () => {
+  assert.equal(isPresetModel("deepseek", "deepseek-chat"), true);
+  assert.equal(isPresetModel("deepseek", "my-finetuned-model"), false);
+  assert.equal(isPresetModel("custom", ""), false);
+
+  assert.equal(applyModelOption("deepseek-reasoner", "whatever", "deepseek-chat"), "deepseek-reasoner");
+  assert.equal(applyModelOption(CUSTOM_MODEL_OPTION, "  my-model  ", "deepseek-chat"), "my-model");
+  assert.equal(applyModelOption("", "", "deepseek-chat"), "deepseek-chat");
 });
 
 test("新建配置必须填 Key，编辑配置可留空", () => {
