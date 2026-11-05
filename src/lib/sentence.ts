@@ -50,6 +50,25 @@ function wordsOf(text: string): string[] {
   return [...text.matchAll(/[A-Za-z]+(?:['’-][A-Za-z]+)*/g)].map((m) => m[0].toLowerCase());
 }
 
+export type SelectionKind = "word" | "phrase" | "sentence";
+
+/**
+ * 选区三分类，决定 AI 释义用哪套输出结构：
+ * - word    单个词（无空白）
+ * - phrase  短语（多词，但不是完整句子）
+ * - sentence 句子：以句末标点（.!?…，可带引号/括号收尾）结束；
+ *   或 ≥15 词的超长选区——没标点也按长难句处理（多从句、无标点截选）
+ *
+ * 纯函数，供前端与 ai.ts 共用，可单测。
+ */
+export function selectionKind(text: string): SelectionKind {
+  const t = text.trim();
+  if (!t || !/\s/.test(t)) return "word";
+  if (/[.!?…]["'”’)\]]*$/.test(t)) return "sentence";
+  if (wordsOf(t).length >= 15) return "sentence";
+  return "phrase";
+}
+
 export type AIContext = {
   prefix: string;
   suffix: string;

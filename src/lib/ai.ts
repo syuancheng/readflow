@@ -2,6 +2,7 @@ import { resolveProvider, STREAM_RESET, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
 import { streamChat, type ChatTurn } from "./providers";
+import { selectionKind } from "./sentence";
 
 /**
  * AI 释义：模型与 Key 由「配置中心」决定（设置页可配 DeepSeek / OpenAI /
@@ -10,7 +11,9 @@ import { streamChat, type ChatTurn } from "./providers";
  * 对齐 Readlang 的 Explain 设计：
  * - 带段落级上下文（选区 + 前文 + 后文分开标注），而不是只有一句话
  * - 流式输出（SSE），逐块返回
- * - 分层输出模板：单词与句子两套，句子场景「意思」置顶、语法殿后
+ * - 三套分层模板（单词 / 短语 / 句子）：
+ *   词与短语「通常意思 → 在这里的意思 → 其他用法」；
+ *   句子「翻译 → 结合语境的解释 → 主谓宾分析（必填，备考雅思/托福长难句训练）」
  * - 支持 askAI：用户自由追问
  * - 网络错误 / 限流 / 模型繁忙统一重试，重试用 STREAM_RESET 通知前端清屏
  */
@@ -31,68 +34,72 @@ export type ExplainParams = {
   withPrevSentence?: boolean; // 前文已包含上一句（「没看懂整句」信号触发），给模型加衔接提示
 };
 
-/** 选区是单词还是句子/短语（含空格即视为后者，与前端 PickCard 一致） */
-function isSentenceLike(word: string): boolean {
-  return /\s/.test(word.trim());
-}
-
 /**
  * 构建 system prompt（中文解释模式）
  *
- * 单词与句子两套分层模板。核心原则：
- * - 用户在读文章，首要目标是「看懂」，语言知识是次要的
- * - 句子场景：第一行就给结合语境的意译，语法要点放最后且从简
- * - 单词场景：先给本句中的意思，再给义项/语气/所在短语；不输出音标（词典卡已有）
+ * 三套分层模板，顺序由用户指定（2026-11-05）：
+ * - 单词/短语：通常意思 → 在这句话/上下文中的意思 → 其他含义或用法
+ * - 句子：翻译 → 结合语境的解释 → 主谓宾分析（必须放最后、不可省略——
+ *   用户备考雅思/托福阅读，找主语、谓语动词是核心训练）
+ * 不输出音标（词典卡已有）。
  */
-function buildSystemPrompt(language: string, monolingual: boolean, word: string): string {
+/** 导出供单测断言输出结构（不对外承诺稳定性） */
+export function buildSystemPrompt(language: string, monolingual: boolean, word: string): string {
   if (monolingual) {
     return `You are a language teacher helping a student learn ${language}. The student selects a word or phrase while reading; the user message marks the selection and its surrounding paragraph (before/after).
 Explain the SELECTED text IN ${language.toUpperCase()} using simple, clear language.
-- Lead with what it means in this context.
-- If it's a sentence-like selection, give a natural interpretation first; grammar notes last and only if needed.
+- For a word or phrase: lead with its usual meaning, then what it means in this sentence/context, then any other common meanings or usages.
+- If it's a sentence-like selection: give a natural translation first, then explain it in context, and ALWAYS finish with a subject–verb–object analysis of the sentence (identify the subject, the main verb, and the object/complement; point out clauses or structures that affect understanding). This section is mandatory and must come last — the student is training long-sentence parsing for IELTS/TOEFL reading.
 - You may quote the surrounding text to interpret meaning, but never explain other words from it.
 Be concise but thorough.`;
   }
 
-  if (isSentenceLike(word)) {
-    return `你是一位帮中文母语者读英文文章的阅读助教。用户在读文章时划选了一个句子或短语——此刻用户最需要的是「看懂这句话」，语法和词汇讲解都是次要的。
+  const kind = selectionKind(word);
+
+  if (kind === "sentence") {
+    return `你是一位帮中文母语者读英文文章的阅读助教。用户在读文章时划选了一个句子——用户在备考雅思/托福阅读，看懂意思之外，长难句结构分析（找主语、谓语动词）是核心训练。
 用户消息会标注「用户选中」的文本，以及它在段落中的「前文」「后文」。请严格按以下格式用中文输出（Markdown）：
 
-**这句话在这里的意思**
-第一行就给结合语境的通顺意译。先在心里圈出选区所在的完整句子，意译必须覆盖该句的全部成分——主语、并列项一个都不能丢；选区到一半时，把后半句的意思补进来一起译。
+**翻译**
+第一行就给结合语境的通顺中文翻译。先在心里圈出选区所在的完整句子，翻译必须覆盖该句的全部成分——主语、并列项一个都不能丢；选区只划到半句时，把后半句的意思补进来一起译。
 
-**关键词组**
-只讲影响理解的关键词/词组，每个给简短中文释义；挑 2~4 个真正难的，简单的不要列。
+**结合语境的解释**
+联系前后文解读这句话：指代、逻辑关系、语气与言外之意。与翻译重复的内容不要再说一遍。
 
-**语气与言外之意**
-说话人的态度、情绪、言外之意；实在没有可省略此节。
-
-**语法要点**
-只点真正影响理解的语法点，从简；没有把握的不要强行分析，宁可直接写「无特别语法难点」。此节必须放最后。
+**主谓宾分析**
+（此节为固定最后一节，任何情况下都不可省略。）用几行标出句子主干与关键结构：
+- 主语：…（有较长修饰语时注明核心词）
+- 谓语动词：…（时态、语态有要点就顺带一句）
+- 宾语/表语：…（无则写「无」）
+- 最后一句话点出从句、插入语、倒装、并列等影响理解的结构。
+分析必须准确，没有把握的成分宁可标注「（存疑）」也不要编造。
 
 硬性要求：
 - 使用粗体小标题分行，不要使用「1. 2. 3.」这类编号
+- 「主谓宾分析」永远放最后，且绝不能省略——只给翻译或只给语境解释都算不合格
 - 解释对象永远是「用户选中」的部分；鼓励引用前后文来解读整句含义，但不要去解释前后文里的其他词
 - 不要输出音标
-- 不要先堆词性、语法再给意思
-- 总长控制在 250 字以内`;
+- 总长控制在 300 字以内`;
   }
 
-  return `你是一位帮中文母语者读英文文章的阅读助教。用户在读文章时点选了一个词，想快速看懂文章、顺带学这个词。
-用户消息会标注「用户选中」的词，以及它在段落中的「前文」「后文」。请严格按以下格式用中文输出（Markdown）：
+  // 单词 / 短语：同一套「通常 → 在这里 → 其他」结构，仅措辞不同
+  const noun = kind === "word" ? "这个词" : "这个短语";
+  return `你是一位帮中文母语者读英文文章的阅读助教。用户在读文章时${kind === "word" ? "点选了一个词" : "划选了一个短语"}，想快速看懂文章、顺带学${noun}。
+用户消息会标注「用户选中」的文本，以及它在段落中的「前文」「后文」。请严格按以下格式用中文输出（Markdown）：
 
-**本句中的意思**
-一句话直接给出这个词在此处的含义，可顺带词性（如 *v. 使欣喜*）。
+**通常意思**
+${noun}${kind === "word" ? "最常见的含义，可顺带词性（如 *v. 使欣喜*）" : "最常见的整体含义"}。一到两句话。
 
-**义项与语气**
-常见义项、语体或语气提示（如「语气比『高兴』更强烈」）。不要输出音标——词典卡已提供。
+**在这里的意思**
+结合上下文，${noun}在这句话里的具体意思；与通常意思一致时，直接说明并用半句话点出它在句中的作用。语气、语体的提示（如「比『高兴』更强烈」）也放这里。
 
-**所在短语**
-这个词与前后词搭成的短语/搭配在本句中的整体意思；若是单独一词、无固定搭配，此节可省略。
+**其他用法**
+除上述之外，${noun}常见的其他含义、固定搭配或用法；确实没有就写「无」。
 
 硬性要求：
 - 使用粗体小标题分行，不要使用「1. 2. 3.」这类编号
-- 解释对象永远是「用户选中」的词；可引用前后文帮助解读，但不要去解释前后文里的其他词
+- 解释对象永远是「用户选中」的部分；可引用前后文帮助解读，但不要去解释前后文里的其他词
+- 不要输出音标——词典卡已提供
 - 简洁，总长不超过 150 字`;
 }
 
