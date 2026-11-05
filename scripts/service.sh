@@ -57,7 +57,7 @@ cmd_install() {
     for pid in $busy; do
       cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
       if [ "$cwd" = "$PROJECT_DIR" ]; then
-        info "停止本项目的手动实例（PID $pid）"
+        info "停止本项目的手动实例（PID ${pid}）"
         kill "$pid" 2>/dev/null
       else
         die "端口 $PORT 被其他程序占用（PID $pid${cwd:+，目录 $cwd}），请先关掉它再安装"
@@ -164,7 +164,7 @@ cmd_status() {
 cmd_logs() {
   mkdir -p "$LOG_DIR"
   touch "$LOG_DIR/readflow.out.log" "$LOG_DIR/readflow.err.log"
-  info "日志：$LOG_DIR（Ctrl-C 退出）"
+  info "日志：${LOG_DIR}（Ctrl-C 退出）"
   tail -n 50 -f "$LOG_DIR/readflow.out.log" "$LOG_DIR/readflow.err.log"
 }
 
