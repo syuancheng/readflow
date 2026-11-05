@@ -61,3 +61,6 @@ nohup.out
 
 # unit test build output
 /.unit/
+
+# 插件打包产物
+/dist/

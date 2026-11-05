@@ -46,16 +46,27 @@ if (!cfg.extension.token) {
 const token = cfg.extension.token;
 if (!token) throw new Error("拿不到插件 Token");
 
+/**
+ * 浏览器选择：
+ *  - 默认 channel="chromium"：Playwright 自带完整 Chromium 的新 headless 模式，支持扩展。
+ *  - EXT_BROWSER=chrome：系统 Chrome（Chrome 137+ 已禁用命令行 --load-extension，会 SKIP）。
+ *  - HEADFUL=1：有界面运行，用于真实验收。
+ */
+const headless = process.env.HEADFUL !== "1";
+const channel = process.env.EXT_BROWSER === "chrome" ? "chrome" : "chromium";
+
 let context;
 try {
   context = await chromium.launchPersistentContext(PROFILE, {
-    headless: true,
-    channel: "chrome",
+    headless,
+    channel,
     args: [
       `--disable-extensions-except=${EXT}`,
       `--load-extension=${EXT}`,
       "--no-first-run",
       "--no-default-browser-check",
+      // 有界面模式把窗口挪到屏幕外，别打断正在用电脑的人
+      ...(headless ? [] : ["--window-position=-2400,-2400", "--window-size=1200,900"]),
     ],
   });
 
@@ -92,12 +103,15 @@ try {
   await popup.fill("#server", BASE);
   await popup.fill("#token", token);
   await popup.click("#save");
+  // 等真正的同步结果（带 ✓），不能只匹配「已同步」——否则会提前命中占位文案
   await popup.waitForFunction(
-    () => document.getElementById("status")?.textContent?.includes("已同步"),
+    () => /✓ 已同步 \d+ 个词/.test(document.getElementById("status")?.textContent || ""),
     { timeout: 15000 },
   );
   const status = await popup.locator("#status").innerText();
-  check("X1 popup 保存配置并同步词表", status.includes("已同步") && !status.includes("失败"), status);
+  const syncedCount = Number(status.match(/已同步 (\d+) 个词/)?.[1] ?? -1);
+  check("X1 popup 保存配置并同步词表", /✓ 已同步 \d+ 个词/.test(status), status);
+  check("X1b 同步回来的词表非空", syncedCount >= 2, `${syncedCount} 词`);
   await popup.close();
 
   const page = await context.newPage();

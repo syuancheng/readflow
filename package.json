@@ -17,7 +17,8 @@
     "backfill:lemma": "tsc -p tsconfig.verify.json && node .verify/scripts/backfill-lemma.js",
     "verify:stats": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-stats.js",
     "bench": "node scripts/bench-reader.mjs",
-    "test:settings": "node scripts/smoke-settings.mjs"
+    "test:settings": "node scripts/smoke-settings.mjs",
+    "pack:extension": "node scripts/pack-extension.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

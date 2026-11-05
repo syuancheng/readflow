@@ -30,7 +30,8 @@ function render(state) {
     const when = state.syncedAt
       ? new Date(state.syncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
       : "尚未同步";
-    setStatus(`已同步 ${state.count} 个词 · ${when}`);
+    // 未同步时别写「已同步 0 个词」，容易让人以为词表是空的
+    setStatus(state.syncedAt ? `已同步 ${state.count} 个词 · ${when}` : `已缓存 ${state.count} 个词 · ${when}`);
   }
 }
 
@@ -47,7 +48,8 @@ async function save() {
   btn.disabled = true;
   btn.textContent = "保存中…";
   try {
-    const state = await send({
+    // 先落配置再同步；同步完成前不要 render 旧状态，否则会闪一下「0 个词」
+    await send({
       type: "rf:setConfig",
       patch: {
         serverUrl: $("server").value.trim(),
@@ -56,7 +58,7 @@ async function save() {
         enabled: $("enabled").classList.contains("on"),
       },
     });
-    render(state);
+    setStatus("同步中…");
     const synced = await send({ type: "rf:sync" });
     render(synced);
     if (synced.syncError) setStatus(`同步失败：${synced.syncError}`, true);
