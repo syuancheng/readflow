@@ -9,6 +9,7 @@ import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
+import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
 import MarkdownText from "@/components/MarkdownText";
 
 /**
@@ -46,6 +47,8 @@ type Pick = {
   justSaved?: boolean;
   /** 拖选自动入库后对应的 context id，用于回填 AI 释义 / 回看 */
   contextId?: string;
+  /** 从「已存批注」列表回看旧批注：不是新选区，不自动发起 AI 请求 */
+  fromAnnotation?: boolean;
   /** 从已存批注回看时，直接展示当时保存的 AI 释义，不重新请求 */
   initialGloss?: string;
   /** 这次选区采集的客观信号，随 /api/explain 送给模型（不是结论） */
@@ -467,6 +470,14 @@ export default function Reader({
   const [showAnnotations, setShowAnnotations] = useState(true);
   const bodyRef = useRef<HTMLDivElement>(null);
 
+  // AI 释义是流式的，写回发生在几秒后；那时自动收词才刚把新批注加载进来。
+  // 用 ref 拿最新的批注列表，避免 persistGloss 闭包停在弹层打开时的快照。
+  // 查找按 (段落, start, end) 精确匹配，中途切换选区也不会写错批注。
+  const annotationsRef = useRef<Annotation[]>(annotations);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
+
   // 场景 4：同一句里连续请教的次数。只放内存、不落库——「这句卡了三次」是
   // 阅读会话内的瞬时状态，不该变成被永久记住的用户数据。
   // key 用「段落 + 句子区间」：换句自动归零，翻页/刷新随组件重挂载清零。
@@ -710,12 +721,17 @@ export default function Reader({
     if (saved) return;
     if (!autoSave) return;
 
-    // 自动收词：落库后回填 justSaved（收起批注时可撤销）；
+    // 自动收词：落库后回填 justSaved（收起批注时可撤销）与 contextId；
+    // 后者让随后自动生成的 AI 释义能写回这条批注（词典查不到的词尤其需要）。
     // 并刷新批注列表——单词那次出现的持久绿虚线（w-annotated）由此而来
     void saveWord(pickData).then((info) => {
       setPick((cur) =>
         cur && cur.source === "word" && cur.anchor.quote.toLowerCase() === key
-          ? { ...cur, justSaved: info?.created === true }
+          ? {
+              ...cur,
+              justSaved: info?.created === true,
+              contextId: info?.contextId ?? cur.contextId,
+            }
           : cur,
       );
       if (info) void loadAnnotations();
@@ -837,16 +853,26 @@ export default function Reader({
 
   /** AI 释义生成完成后回填到批注，翻回去看时不用重新请求 AI */
   async function persistGloss(pickData: Pick, gloss: string) {
-    if (!pickData.contextId) return;
+    // 已收过的词、或点词自动入库还没回填 contextId 时，用锚点从批注列表里补一次。
+    // 词典查不到的选区现在会自动生成释义，写不回去就等于「只能看一遍」。
+    const contextId =
+      pickData.contextId ??
+      annotationsRef.current.find(
+        (a) =>
+          a.paragraphId === pickData.paragraphId &&
+          a.start === pickData.anchor.start &&
+          a.end === pickData.anchor.end,
+      )?.id;
+    if (!contextId) return;
     try {
-      const res = await fetch(`/api/contexts/${pickData.contextId}`, {
+      const res = await fetch(`/api/contexts/${contextId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ aiGloss: gloss }),
       });
       if (!res.ok) return;
       setAnnotations((prev) =>
-        prev.map((a) => (a.id === pickData.contextId ? { ...a, aiGloss: gloss } : a)),
+        prev.map((a) => (a.id === contextId ? { ...a, aiGloss: gloss } : a)),
       );
     } catch {
       /* 静默失败 */
@@ -872,6 +898,7 @@ export default function Reader({
       y: 0,
       source: "select",
       contextId: a.id,
+      fromAnnotation: true,
       initialGloss: a.aiGloss ?? undefined,
     };
     const pEl = document.querySelector<HTMLElement>(`[data-pid="${a.paragraphId}"]`);
@@ -1155,10 +1182,22 @@ function PickCard({
   // 场景 4：同句连续请教 ≥3 次时模型会按整句分析，这里给一个可撤销的入口
   const wholeSentenceMode = (pick.signals?.repeatCount ?? 0) >= 3 && !forceWordMode;
 
+  /** 没配模型时服务端返回的是引导文案：给重试入口，别把它当答案，也不写回批注 */
+  const needsSetup = aiStatus === "done" && isNotAGloss(aiText);
+
   // 是短语（含空格）还是单词
   const isPhrase = /\s/.test(anchor.quote.trim());
 
-  // 弹层打开时自动查词典
+  /** 这个弹层会不会在词典查不到时自动问老师（用于文案，也用于避免误导） */
+  const autoExplain = shouldAutoExplain({
+    dictHit: Boolean(dict?.entry),
+    hasInitialGloss: Boolean(initialGloss),
+    fromAnnotation: Boolean(pick.fromAnnotation),
+  });
+
+  // 弹层打开时自动查词典；查不到就顺着第 2 层直接开始 AI 释义。
+  // 自动触发挂在 fetch 回调里而不是一个「看 dict state」的 effect：
+  // 组件复用时 state 会短暂残留上一次的结果，只有请求自己确认「这次没命中」才可靠。
   useEffect(() => {
     setDict(null);
     setDictLoading(true);
@@ -1168,13 +1207,34 @@ function PickCard({
     setAskPrompt("");
     setForceWordMode(false);
 
+    // 选区切换后，旧请求的回调不能再替新的选区发起 AI 请求
+    let cancelled = false;
+
     fetch(`/api/dict?word=${encodeURIComponent(anchor.quote)}`)
       .then((r) => r.json())
       .then((data) => {
+        if (cancelled) return;
         setDict(data);
         setDictLoading(false);
+        if (
+          shouldAutoExplain({
+            dictHit: Boolean(data?.entry),
+            hasInitialGloss: Boolean(initialGloss),
+            fromAnnotation: Boolean(pick.fromAnnotation),
+          })
+        ) {
+          // 词典给不出答案：用户已经停下来请教了，别再让他多点一次按钮。
+          // 此时 dict state 还是 null，triggerAI() 里算出的 dictHit=false 正是实情。
+          void triggerAI();
+        }
       })
-      .catch(() => setDictLoading(false));
+      .catch(() => {
+        if (!cancelled) setDictLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [anchor.quote, initialGloss]);
 
   /** 触发 AI 释义（流式）。forceWord = 把「按整句分析」临时改回按词回答。 */
@@ -1231,8 +1291,9 @@ function PickCard({
       }
 
       setAiStatus("done");
-      // 生成完成即写回该批注，翻回去看时不用重新请求 AI
-      onAIGloss?.(text);
+      // 生成完成即写回该批注，翻回去看时不用重新请求 AI。
+      // 但「没配模型」的引导文案 / 报错文案不是释义，存进去会被当成已存释义展示。
+      if (!isNotAGloss(text)) onAIGloss?.(text);
     } catch (err) {
       setAiText(`[Error: ${err instanceof Error ? err.message : "AI 释义失败"}]`);
       setAiStatus("error");
@@ -1310,7 +1371,9 @@ function PickCard({
           ) : (
             <button
               className="duo-icon-btn duo-icon-btn-sm"
-              onClick={() => onSave(aiStatus === "done" ? aiText : undefined)}
+              onClick={() =>
+                onSave(aiStatus === "done" && !isNotAGloss(aiText) ? aiText : undefined)
+              }
               title="收进词库"
               aria-label="收进词库"
             >
@@ -1341,11 +1404,12 @@ function PickCard({
         <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
       ) : (
         <p className="text-[13px] font-bold text-ink-faint mt-4">
-          {isPhrase ? "短语不在词典中" : "词典未收录"} · 可用 AI 解释
+          {isPhrase ? "短语不在词典中" : "词典未收录"} ·{" "}
+          {autoExplain ? "交给 AI 老师解释" : "可用 AI 解释"}
         </p>
       )}
 
-      {/* AI 释义：小按钮入口 */}
+      {/* 新选区在词典未命中时已自动触发；这个手动入口留给回看旧批注 / 请求失败重试 */}
       {aiStatus === "idle" && (
         <button className="rf-ai-mini mt-3" onClick={() => triggerAI()}>
           ✨ AI 释义
@@ -1365,7 +1429,17 @@ function PickCard({
                 生成中…
               </span>
             )}
-            {aiStatus === "done" && !showAskInput && (
+            {aiStatus === "error" && (
+              <button className="rf-ask-mini" onClick={() => void triggerAI()}>
+                重试
+              </button>
+            )}
+            {needsSetup && (
+              <button className="rf-ask-mini" onClick={() => void triggerAI()}>
+                配置好模型后重试
+              </button>
+            )}
+            {aiStatus === "done" && !needsSetup && !showAskInput && (
               <>
                 {wholeSentenceMode && (
                   <button

@@ -43,6 +43,22 @@ test("降级提示与流式报错文案不是释义，不能写进词库", () =>
   assert.equal(cardGloss("前半段答案\n\n[Error: rate limited]"), undefined);
 });
 
+test("回归：主体段里顺手写的一处「（主语 …）」不能让整段释义被丢掉", () => {
+  // 真调 DeepSeek 时观察到：老师偶尔会在第一段用全角括号补一句成分说明。
+  // 旧规则只要看到「（主语」就删整行，结果卡片背面只剩第二段的语法说明。
+  const raw = `dates back to 是个固定搭配，意思是「可追溯到」（主语 The tradition 是单数），别拆开理解。
+
+这里作谓语，后面接宾语。`;
+  const card = cardGloss(raw, 200) ?? "";
+  assert.match(card, /可追溯到/, "主体段必须保留");
+  assert.match(card, /主语 The tradition/, "顺带的成分说明仍是释义的一部分");
+});
+
+test("句子地图的原句行（多处成分标注）即便没有 emoji 标记也要剔除", () => {
+  const raw = "先解释这句。\nThe problem（主语） is（系动词） clear（表语）.";
+  assert.equal(cardGloss(raw, 200), "先解释这句。");
+});
+
 test("空输入 / 只有句子地图 / 只有小标题 → undefined，由调用方用占位符", () => {
   assert.equal(cardGloss(undefined), undefined);
   assert.equal(cardGloss(""), undefined);

@@ -3,7 +3,7 @@
 > 面向要改这个仓库的人（包括三个月后的自己）。
 > 产品定位与背景见 [`../README.md`](../README.md)。
 
-**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入、P10 AI 释义重构已完成）
+**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入、P10 AI 释义重构、P11 词典未命中自动问 AI 已完成）
 **代码规模**：`src/` + `scripts/` 约 6k 行（TypeScript / TSX / CSS）
 **最后核对的运行环境**：Node 24.x，Next.js 16.4.3，React 19.3.0
 
@@ -458,23 +458,32 @@ maxHeight = min(vh - top - 16, 560)              // 硬约束：永不溢出视�
 ```
 点词 / 拖选短语
  │
- ├─▶ GET /api/dict?word=bank ──▶ ECDICT（<5ms）
- │        ├ 有结果 → 第 1 层（音标 / 中文释义 / 英文释义折叠 / 柯林斯星级）
- │        └ 无结果 或 选区是短语 → 「词典未收录 · 可用 AI 解释」
- │
- └─▶ 用户点「✨ AI 释义」或追问
-        ├ aiContextOf(段落, start, end)      → 段落级 prefix / suffix，按句子边界裁
-        ├ selectionSignals(段落, start, end) → 客观信号 + dictHit + repeatCount
-        └ POST /api/explain {word, prefix, suffix, withPrevSentence?, signals?, prompt?}
-             → 服务端 narrowSignals() 白名单裁剪（客户端数据不能直接进模型）
-             → ReadableStream 逐块 enqueue
-             → 前端 res.body.getReader() + TextDecoder 逐块 setState
-             → MarkdownText 逐帧重解析 + 内容区自动滚动
+ └─▶ GET /api/dict?word=bank ──▶ ECDICT（<5ms）
+          │
+          ├ 有结果 → 第 1 层结束（音标 / 中文释义 / 英文释义折叠 / 柯林斯星级）
+          │          ✋ 不发 AI 请求；「✨ AI 释义」按钮留给主动深挖
+          │
+          └ 无结果 ──▶ shouldAutoExplain() 判边界
+                       │  ├ 词典命中 / 已有 ai_gloss / 回看旧批注 → 不自动，保留手动按钮
+                       │  └ 新选区 → **自动进入第 2 层**（不再要求多点一次）
+                       │
+                       ├ aiContextOf(段落, start, end)      → 段落级 prefix / suffix，按句子边界裁
+                       ├ selectionSignals(段落, start, end) → 客观信号 + dictHit + repeatCount
+                       └ POST /api/explain {word, prefix, suffix, withPrevSentence?, signals?, prompt?}
+                            → 服务端 narrowSignals() 白名单裁剪（客户端数据不能直接进模型）
+                            → ReadableStream 逐块 enqueue
+                            → 前端 res.body.getReader() + TextDecoder 逐块 setState
+                            → MarkdownText 逐帧重解析 + 内容区自动滚动
+                            → 完成且不是降级文案 → PATCH /api/contexts/{id} 写回 ai_gloss
 ```
+
+追问（Ask AI）与「改按词答」复用同一个 `triggerAI()`，只是多带 `prompt` 或把 `repeatCount` 覆写为 0。
 
 `GET /api/explain?word=&context=` 仍保留，只带一句话上下文、不带 signals，供扩展与旧脚本兼容；阅读器新链路一律走 POST。
 
-**为什么不是打开弹层就自动调 AI？** 因为 80% 的点词词典就够，自动调 = 每次点击都烧钱、都在等首字。用户主动点按钮是成本闸门，也是 Readlang 的设计（Explain 是显式的第二个动作）。
+**成本闸门放在哪里？** 旧版是「用户主动点按钮」，理由是 80% 的点词词典就够，打开弹层就调 AI 等于每次点击都烧钱。P11 把闸门换成**词典命中率**：只有 ECDICT 确认查不到才自动进第 2 层，命中词典的点击依然零 AI 请求。短语在词典里必然查不到，让它再点一次按钮只是纯粹摩擦，不是成本控制。判定固化在 `lib/explain-policy.ts` 的 `shouldAutoExplain()`，三个例外（词典命中 / 已有释义 / 回看旧批注）各有控制变量单测。
+
+自动触发挂在**词典 fetch 的回调**里，而不是一个「看 `dict` state」的 effect：组件复用时 state 会短暂残留上一次的结果，只有请求自己确认「这次没命中」才可靠。回调带 `cancelled` 标记，选区切换后旧请求不会替新选区发 AI 请求。`fromAnnotation` 由 `openAnnotation()` 打标，回看旧批注时只是展示，不悄悄计费。
 
 ### 5.2 上下文与证据是怎么来的
 
@@ -503,7 +512,7 @@ maxHeight = min(vh - top - 16, 560)              // 硬约束：永不溢出视�
 
 参数：provider 由配置中心决定（`resolveProvider()`，可换 DeepSeek / OpenAI / Claude / 千问 / 任意 OpenAI 兼容端点），`stream: true`、`temperature: 0.3`、`max_tokens: 400`（旧版 1200；短答案 + 2~3 行地图足够，也是防长篇大论的硬兜底）。monolingual 模式是同一套契约的英文版本，同样不按选区分叉。
 
-无可用模型时 `resolveProvider()` 返回 `null`，`streamTurns()` 直接 yield `NO_MODEL_NOTICE` 并 return——**不抛错、不白屏**。前端看到的就是一段普通文本；这段提示也不会被收进词库（见 5.5）。
+无可用模型时 `resolveProvider()` 返回 `null`，`streamTurns()` 直接 yield `NO_MODEL_NOTICE` 并 return——**不抛错、不白屏**。这段文案定义在没有服务端依赖的 `lib/explain-policy.ts`（`lib/ai.ts` 只 re-export），前端用同一份 `NO_MODEL_MARKER` 识别：`isNotAGloss()` 为真时既不写回 `contexts.ai_gloss`、也不收进词库（见 5.5），弹层改显示「配置好模型后重试」。P11 之前这只是手动点按钮的兜底；现在每个词典未收录的选区都会自动走到，所以「服务端文案 / 前端识别 / 词库过滤」必须共用一份字符串，这条零漂移有单测断言。
 
 **真实样本收敛（2026-11-05）**：拿 `The opposite problem is the classifier repeatedly stopping something that is routine in your setup.` 在生产 3000 真调模型，用四个控制变量（点 `classifier` / 点 `routine` / 同句第 3 次 / 追问 `is`）验输出，暴露四处执行偏差，已写进 system 并由单测固化：
 
@@ -559,7 +568,9 @@ AI 全文
  └─▶ cardGloss(aiGloss)      只提炼主体段 → user_words.translation → 卡片背面
 ```
 
-`lib/gloss.ts` 的 `cardGloss()` 是确定性纯函数：遇到句子地图标记（🧩 / ⚠️ / 🔗 / 「句子地图」）整块截断，丢掉带成分标注的英文原句行与旧三段式纯小标题，清掉 Markdown 记号，合并成一行并限长 100 字；无模型提示 / `[Error:]` 文案返回 `undefined`。同文件的 `shortGloss()` 是给浏览器扩展小标签用的 24 字版本，两者用途不同，别混用。
+`lib/gloss.ts` 的 `cardGloss()` 是确定性纯函数：遇到句子地图标记（🧩 / ⚠️ / 🔗 / 「句子地图」）整块截断，丢掉带成分标注的英文原句行与旧三段式纯小标题，清掉 Markdown 记号，合并成一行并限长 100 字；无模型提示 / `[Error:]` 文案（`isNotAGloss()`）返回 `undefined`。同文件的 `shortGloss()` 是给浏览器扩展小标签用的 24 字版本，两者用途不同，别混用。
+
+**成分标注行的判据是「≥2 处标注」，不是「出现过一次」**：P11 的浏览器验证里真调模型，老师在第一段顺手写了一句「（主语 The tradition 是单数）」，旧规则只要看到「（主语」就删整行，卡片背面于是只剩第二段的「dates back to 整体作谓语…」——比不提炼更没用。改成数标注个数后主体段保住了，另有单测锁这个回归。
 
 两个写入口都走它：
 
@@ -977,13 +988,15 @@ API / SSR 回归（可在 dev 跑）与交互验证（**必须在生产 3000 跑
 
 所有 E2E 脚本都在 `finally` 里删掉自己创建的文本与词，不污染用户库。
 
-### 12.6 AI 释义专项（P10）
+### 12.6 AI 释义专项（P10 / P11）
 
-改 `lib/ai.ts` / `lib/sentence.ts` / `lib/gloss.ts` / `Reader.tsx` 的选区链路时，按顺序验：
+改 `lib/ai.ts` / `lib/sentence.ts` / `lib/explain-policy.ts` / `lib/gloss.ts` / `Reader.tsx` 的选区链路时，按顺序验：
 
 ```bash
-npm test                    # 含 ai-prompt / sentence / card-gloss 的控制变量测试
+npm test                    # 含 ai-prompt / sentence / card-gloss / explain-policy 的控制变量测试
 npm run typecheck
+npm run build               # 交互验证前必须重建，并重启生产 3000
+npm run test:auto-explain   # 真实浏览器：见下方 P11 段
 ```
 
 单测管的是**契约**，不是模型输出质量：
@@ -994,11 +1007,17 @@ npm run typecheck
 | 默认释义 vs 追问的 `buildUserMessage` | 前缀逐字相同，只有最后一行「学生的问题」不同 |
 | 三段式固定栏目 | `**通常意思**` / `**翻译**` / `**主谓宾分析**` / 「不可省略」全部不存在 |
 | `selectionSignals()` | 给出完整所在句原文；点词与拖短语只差 `source`；越界不崩 |
-| `cardGloss()` | 地图 / emoji / 成分标注行不进卡片，降级提示返回 `undefined` |
+| `cardGloss()` | 地图 / emoji / 成分标注行不进卡片，降级提示返回 `undefined`；主体段只有一处「（主语 …）」时不能被删 |
+| `shouldAutoExplain()` | 只改词典命中 / 已有释义 / 回看旧批注其中一个，各自翻转为 `false` |
+| `isNotAGloss()` | 无模型引导与 `[Error:]` 为 `true`；含 🧩/⚠️ 的真释义为 `false` |
 
 **模型输出必须真调一次**，单测替代不了：拿一段含被动 / 倒装 / 从句的真实句子，分别点 1 个边缘词、1 个主干词、连续点 3 次，肉眼核对三件事——第一段有没有给整句译文、句子地图是否殿后且带原句与全角括号、中文说明有没有超篇幅。没配 key 时页面出的是 `NO_MODEL_NOTICE`，这是预期降级，不是坏掉。
 
 **交互验证必须在生产 3000 跑**（见 9.7）：`next dev` 页面可能没 hydrate，点词没反应是假阴性；判断是否 hydrate 看 DOM 上有没有 `__reactProps$*` 键。
+
+**P11 的四个浏览器控制变量**（`npm run test:auto-explain`）：脚本自己造一篇临时文本，先断言已 hydrate，再验 ① 点词典命中的 `tradition` 不发 `/api/explain`；② 拖选 `dates back to` 完全不点按钮就自动发请求并流式出答案；③ AI 全文写回 `contexts.ai_gloss`，而 `user_words.translation` 不含句子地图 / 成分标注；④ reload 后回看一条没有 AI 释义的旧批注，不重复发请求且手动入口仍在。`finally` 里删掉自己造的文本与词。
+
+没配模型时自动请求返回 `NO_MODEL_NOTICE`，弹层显示「配置好模型后重试」——这是预期降级，不是坏掉；`isNotAGloss()` 保证这段引导文案既不写回批注也不进词库。
 
 ---
 
@@ -1037,6 +1056,8 @@ npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
 | 改 prompt | `lib/ai.ts` 的 `buildSystemPrompt` / `buildUserMessage` / `observations()` | 中文与 monolingual 两套人设同步；默认释义与追问必须共用同一 system（单测有控制变量断言） |
 | 改卡片背面释义 | `lib/gloss.ts` 的 `cardGloss()` | `/api/words` 与 `/api/contexts/[id]` 两个写入口都依赖它；改完跑 `tests/unit/card-gloss.test.ts` |
 | 改阅读器证据 | `lib/sentence.ts` 的 `selectionSignals()` + `/api/explain` 的 `narrowSignals()` | 只送证据不送结论；新字段要同步白名单裁剪 |
+| 改「何时自动问 AI」 | `lib/explain-policy.ts` 的 `shouldAutoExplain()` + `Reader.tsx` 词典 fetch 回调 | 自动触发必须挂在请求回调里（state 会残留上一次结果）；改完跑 `npm run test:auto-explain` |
+| 改无模型提示文案 | `lib/explain-policy.ts` 的 `NO_MODEL_NOTICE` / `NO_MODEL_MARKER` | `lib/ai.ts` 只 re-export；前端识别与词库过滤共用同一标记，别复制字符串 |
 | 加词典字段 | `lib/dict.ts` 的 SELECT + `DictEntry` + `Reader.tsx` 的 `DictView` | 三处同步 |
 | 改分词规则 | `lib/tokenize.ts` 的 `TOKEN_RE` | 必须保持确定性（不能依赖环境） |
 | 改切段规则 | `lib/split.ts` | ⚠️ 会让历史锚点失效，先读 3.2 |

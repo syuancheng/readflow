@@ -3,6 +3,9 @@ import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
 import { streamChat, type ChatTurn } from "./providers";
 import type { SelectionSignals } from "./sentence";
+import { NO_MODEL_NOTICE } from "./explain-policy";
+// 保留原有导入路径：/api/summarize 仍从 lib/ai 取这段提示
+export { NO_MODEL_NOTICE };
 
 /**
  * AI 释义：模型与 Key 由「配置中心」决定（设置页可配 DeepSeek / OpenAI /
@@ -180,10 +183,6 @@ export async function* streamExplain(
     maxTokens: 400,   // 短答案 + 2~3 行句子地图足够；也是防长篇大论的硬兜底
   });
 }
-
-/** 没配置模型时的统一提示（释义与小结共用） */
-export const NO_MODEL_NOTICE =
-  "⚠️ 还没有配置 AI 模型。\n\n点击右上角头像 → **设置** → 勾选一个模型并填入 API Key；也可以继续用环境变量 `DEEPSEEK_API_KEY` 等作为兜底。";
 
 /** 是否已配置可用的模型（小结接口据此决定「生成」还是「只提示去配置」） */
 export function hasModelConfigured(): boolean {

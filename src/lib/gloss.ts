@@ -1,3 +1,5 @@
+import { isNotAGloss } from "./explain-policy";
+
 /** 词库释义可能是长段词典文本或 AI Markdown，插件小标签只留一行短释义 */
 export function shortGloss(raw: string | null | undefined, cap = 24): string {
   if (!raw) return "";
@@ -19,9 +21,20 @@ export function shortGloss(raw: string | null | undefined, cap = 24): string {
 /** 句子地图的起始标记：emoji 句型标签 / 易错点 / 指代提示 / 显式标题 */
 const SENTENCE_MAP = /^\s*(?:🧩|⚠️|🔗|📐|句子地图|Sentence map)/i;
 
-/** 带成分标注的英文原句行（如 `The problem（主语） is（系动词） ...`），离开原句没有意义 */
-const LABELLED_SENTENCE =
-  /[（(]\s*(?:主语|谓语|宾语|表语|定语|状语|补语|系动词|存疑|subject|object|predicate|linking verb|uncertain)/i;
+/** 成分标注记号（句子地图里的原句行会把主谓宾挨个标出来） */
+const CONSTITUENT_MARK =
+  /[（(]\s*(?:主语|谓语|宾语|表语|定语|状语|补语|系动词|存疑|subject|object|predicate|linking verb|uncertain)/gi;
+
+/**
+ * 带成分标注的英文原句行（如 `The problem（主语） is（系动词） ...`），离开原句没有意义。
+ *
+ * 判据是「≥2 处标注」，不能只凭出现一次「（主语」就删整行：老师有时会在主体段里
+ * 顺手写一句「（主语 The tradition 是单数）」，那仍是释义。只删一行就会把卡片背面
+ * 变成后半段的语法说明，反而更没用。
+ */
+function isLabelledSentence(line: string): boolean {
+  return (line.match(CONSTITUENT_MARK) ?? []).length >= 2;
+}
 
 /**
  * 从 AI 释义全文里提炼**可脱离原句**的短释义，用于 `user_words.translation`
@@ -38,8 +51,8 @@ const LABELLED_SENTENCE =
  */
 export function cardGloss(raw: string | null | undefined, cap = 100): string | undefined {
   if (!raw || !raw.trim()) return undefined;
-  // 无模型 / 出错时的提示文案不是释义，不能进词库
-  if (raw.includes("还没有配置 AI 模型") || raw.includes("[Error:")) return undefined;
+  // 无模型 / 出错时的提示文案不是释义，不能进词库（与前端写回批注共用同一判断）
+  if (isNotAGloss(raw)) return undefined;
 
   const lines = raw
     .replace(/```[\s\S]*?```/g, " ")
@@ -54,7 +67,7 @@ export function cardGloss(raw: string | null | undefined, cap = 100): string | u
 
   const prose = head
     .filter(Boolean)
-    .filter((l) => !LABELLED_SENTENCE.test(l))
+    .filter((l) => !isLabelledSentence(l))
     .filter((l) => !/^\*\*[^*]{1,30}\*\*$/.test(l)) // 旧三段式的纯小标题
     .filter((l) => !/^#{1,6}\s/.test(l))
     .map((l) =>
