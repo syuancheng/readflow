@@ -11,6 +11,7 @@
     "test:e2e": "node scripts/e2e-readlang.mjs",
     "test:extension": "node scripts/e2e-extension.mjs",
     "test:auto-explain": "node scripts/e2e-auto-explain.mjs",
+    "test:gloss-persist": "node scripts/e2e-gloss-persist.mjs",
     "import:ecdict": "node scripts/import-ecdict.mjs",
     "verify:cards": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-export.js",
     "verify:markji": "tsc -p tsconfig.verify.json && node .verify/scripts/verify-markji.js",

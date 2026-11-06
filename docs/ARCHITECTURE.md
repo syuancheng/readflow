@@ -3,7 +3,7 @@
 > 面向要改这个仓库的人（包括三个月后的自己）。
 > 产品定位与背景见 [`../README.md`](../README.md)。
 
-**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入、P10 AI 释义重构、P11 词典未命中自动问 AI 已完成）
+**版本**：本地单机可用（P0–P4、P6、P8 CEFR 粗估、P9 结构化导入、P10 AI 释义重构、P11 词典未命中自动问 AI、P12 AI 释义持久化与批注锚点修复已完成）
 **代码规模**：`src/` + `scripts/` 约 6k 行（TypeScript / TSX / CSS）
 **最后核对的运行环境**：Node 24.x，Next.js 16.4.3，React 19.3.0
 
@@ -458,6 +458,14 @@ maxHeight = min(vh - top - 16, 560)              // 硬约束：永不溢出视�
 ```
 点词 / 拖选短语
  │
+ ├─▶ 自动收词开 → POST /api/contexts/ensure {锚点}（P12）
+ │      服务端 ensureContextByAnchor() 按 (textId, paragraphId, start, end) 幂等
+ │      已有 context 原样返回 / 没有就补建 → 「本文这一处」一定有批注
+ │      ⚠️ 不看 savedMap（全量词库）、也不看前端 annotations 快照
+ │
+ ├─▶ savedGlossFor(paragraphId, start, end) 命中 → 直接摊开已存答案
+ │     ✋ 不发 AI 请求、不计费（P12：同一锚点再点开）
+ │
  └─▶ GET /api/dict?word=bank ──▶ ECDICT（<5ms）
           │
           ├ 有结果 → 第 1 层结束（音标 / 中文释义 / 英文释义折叠 / 柯林斯星级）
@@ -474,7 +482,9 @@ maxHeight = min(vh - top - 16, 560)              // 硬约束：永不溢出视�
                             → ReadableStream 逐块 enqueue
                             → 前端 res.body.getReader() + TextDecoder 逐块 setState
                             → MarkdownText 逐帧重解析 + 内容区自动滚动
-                            → 完成且不是降级文案 → PATCH /api/contexts/{id} 写回 ai_gloss
+                            → 完成且不是降级文案
+                            → POST /api/contexts/gloss {textId, paragraphId, start, end, quote, prefix, suffix, word, aiGloss}
+                                 → 服务端按锚点找 context：命中更新 ai_gloss / 未命中补建词条 + context
 ```
 
 追问（Ask AI）与「改按词答」复用同一个 `triggerAI()`，只是多带 `prompt` 或把 `repeatCount` 覆写为 0。
@@ -572,14 +582,68 @@ AI 全文
 
 **成分标注行的判据是「≥2 处标注」，不是「出现过一次」**：P11 的浏览器验证里真调模型，老师在第一段顺手写了一句「（主语 The tradition 是单数）」，旧规则只要看到「（主语」就删整行，卡片背面于是只剩第二段的「dates back to 整体作谓语…」——比不提炼更没用。改成数标注个数后主体段保住了，另有单测锁这个回归。
 
-两个写入口都走它：
+三个写入口都走它，规则统一收口在 `lib/word-store.ts`：
 
 | 入口 | 规则 |
 |---|---|
 | `POST /api/words` | 词典查得到 → 用词典释义；查不到 → `cardGloss(aiGloss)` → `(待补充释义)` |
 | `PATCH /api/contexts/[id]` | 短语覆盖为短释义；单词只在还是占位符时才补 |
+| `POST /api/contexts/ensure` | 只补批注、不带 AI 释义；走同一份 `saveWordAndContext()`，词典释义照常填 `translation` |
+| `POST /api/contexts/gloss` | 已有 context → update `ai_gloss` + 同一套词条回填；没有 → 走 `/api/words` 的同一份 upsert 逻辑补建 |
 
 `cardgen.ts` 无需改动：它拿到的 `translation` 本来就该是一行短文本（`translationLines()` 会按行拆成卡片列表项）。`tests/unit/card-gloss.test.ts` 用控制变量断言「地图不进卡片、主体仍在、全文不等于短释义」。
+
+### 5.6 AI 释义写回：为什么不交给前端找 contextId（P12）
+
+**用户实测的 bug**：点词 A（不查 AI）→ 点新词 B 并生成 AI 释义 → 点回 A → B 的词还在「已存批注」里，但 `ai_gloss` 是 `NULL`，翻回去还得重新问一次模型。真实浏览器复现显示：B 的 430 字答案已经流式输出完，却**一次 `PATCH /api/contexts/` 都没发**；数据库里那条 context 存在、`ai_gloss` 为空。
+
+**根因不是模型，也不是流没跑完，而是旧写入链路有一个静默失败口**：
+
+```
+旧：persistGloss(pick, gloss)
+      contextId = pick.contextId ?? annotationsRef 按锚点找
+      if (!contextId) return;        ← 答案在这里被丢掉，前端毫无提示
+```
+
+`contextId` 依赖「自动收词已经落库、批注列表已经刷新回来」这一串异步时序。至少三条路径会让它落空：
+
+| 触发条件 | 为什么没有 context |
+|---|---|
+| 词在别的文章里收过 | `savedWords` 是**全量词库**，`savedMap` 命中后点词直接 `return`，不会为本文这一处新建 context |
+| 自动收词关闭 | 点词只出卡片，不落库 |
+| 连续点两个词 | 两次 `loadAnnotations()` 并发，旧响应晚到会覆盖含新批注的列表（偶发） |
+
+**修法是把「存得下」变成服务端契约，而不是前端时序**：新增 `POST /api/contexts/gloss`，客户端只送锚点 + 释义全文；`lib/word-store.ts` 的 `persistGlossByAnchor()` 按 `(textId, paragraphId, start, end)` 找 context，命中就 update，没命中就按 `/api/words` 的同一套规则补建词条 + context。同一个锚点重复写（重试、追问）只覆盖，不堆重复批注；`isNotAGloss()` 在服务端再挡一次降级文案。
+
+配套三处前端修正：
+
+- `loadAnnotations()` 加请求序号，丢弃过期响应，消除上面第三条竞态。
+- `glossCacheRef` 按锚点缓存本次会话已生成的答案，抹掉「刚写完、列表还没刷新回来」的窗口；删词 / 删批注时 `forgetGloss()` 同步清除。
+- 点词 / 拖选时先查 `savedGlossFor(pid, start, end)`，命中即把答案作为 `initialGloss` 摊开并打上 `fromAnnotation`，`shouldAutoExplain()` 返回 `false` —— **同一锚点再点开不再重新请求模型**。
+
+`onAIGloss` 传的仍是弹层打开那一帧的 `pick`，锚点稳定：流式答案迟到、用户已经切到别的词时，只会写回它自己那次选区，不会串到新词上。
+
+### 5.7 「已收词」不等于「本文这一处有批注」（P12 续）
+
+**用户实测的第二个 bug**：词 `delegate` 在正文里显示绿色 ✓、词典释义正常，却始终不出现在右侧「已存批注」列表里。只读查库确认：`user_words` 里确有 `lemma=delegate / displayForm=delegates`，但它唯一的 `contexts` 落在**另一篇文章**；当前文章只有 `delegation`。`/api/annotations?textId=...` 返回 97 条，没有 `delegate`。
+
+根因和 5.6 是同一个概念混淆，只是发生在**点词自动收词**这条路径上：
+
+```
+旧：onClick(词)
+      if (savedMap.get(key)) return;   ← savedWords 是全量词库，不是本文批注
+      于是：不建 context、不调 loadAnnotations()、列表数字也不刷新
+```
+
+`savedWords` 由 `src/app/texts/[id]/page.tsx` 查出**全量 `user_words`**（对齐 Readlang：任何文本里收过的词都要高亮）。它被误当成「本文这一处已经批注过」。而「已存批注」查的是 `contexts`，按 `textId` 过滤并按 `wordId` 去重——两者根本不是一张表。
+
+**修法**：新增 `POST /api/contexts/ensure` + `lib/word-store.ts` 的 `ensureContextByAnchor()`。点词 / 拖选自动收词统一走它，服务端按锚点裁决：已有 context 原样返回（`contextCreated: false`），没有就复用 `saveWordAndContext()` 补建词条 + context。`persistGlossByAnchor()` 也改为复用它，避免两份「找 / 补 context」逻辑漂移。重复点同一位置只多一次 SELECT，不会堆重复批注（E2E 用只读 SQLite 断言 `count(*) = 1`）。
+
+**前端不再拿 `annotations` 快照做「已有批注就跳过」的乐观判断**。第一版修完曾加过 `hasAnnotationAt()`，结果完整 E2E 的 C3 / E 两项回归失败：delete-on-deselect 刚删掉词条后，前端快照里那条批注还是旧的，第三次点词被判定「已有批注」而跳过 ensure，于是 `justSaved` 拿不到、撤销按钮消失，后续点击反而把卡片收起。`loadAnnotations()` 是异步的，收起即撤销、并发刷新、别处补建 context 都会让快照过期。删掉这个判断后由服务端幂等裁决，53/53 恢复全绿。**这和 5.6 是同一条教训：落库决策不要建立在前端的异步快照上。**
+
+`justSaved` 现在由 `ensure` 返回的 `created`（本次是否真新建词条）决定：只有真新建的词条才允许「收起即撤销」，不会误删老词。
+
+历史数据不迁移：P12 之前在别的文章收过、但本文没有 context 的老词，要在正文里**再点一次**才会补上批注。
 
 ---
 
@@ -605,7 +669,11 @@ POST /api/words { word, textId, paragraphId, start, end, quote, prefix, suffix, 
 前端：setSavedSet(add lemma + displayForm) → 立即高亮 + celebrate("+1 词") + 进度条 +1
 ```
 
-**幂等性**：重复收同一个词 → `user_words` 仍 1 行，`contexts` 多 1 行。这是设计意图（同一个词在不同文章里出现，每处上下文都值得保留），实测已验证。
+**手动收词（弹层「+」）与自动收词（点词 / 拖选）是两条路径**：前者走 `/api/words`，每次新插一条 context；后者走 `/api/contexts/ensure`，按锚点幂等。两者最终都调用 `lib/word-store.ts` 的 `saveWordAndContext()`，词典 / 短释义规则不漂移。
+
+**幂等性**：手动重复收同一个词 → `user_words` 仍 1 行，`contexts` 多 1 行。这是设计意图（同一个词在不同文章里出现，每处上下文都值得保留），实测已验证。自动收词与 `/api/contexts/gloss` 写回释义则按锚点幂等，不会重复插 context。
+
+**别把 `savedWords` 当成「本文的批注」**：阅读页传的是**全量词库**（对齐 Readlang，任何文本收过的词都高亮）。所以「词已收过」不等于「本文这一处有 context」——这正是 P12 两个 bug 踩空的地方，详见 5.7。要判断本文有没有批注，以服务端的 `contexts` / `ensureContextByAnchor()` 为准，不要用 `savedMap` 或前端 `annotations` 快照代替。
 
 **高亮**：`Para` 用 `savedLemmas.has(text.toLowerCase())` 判断。这里按**显示形式**匹配而非 lemma——因为前端不做词形还原（那是词典层的事）。所以收 `rained` 后，文章里的 `rain` 不会立刻高亮。接受这个精度损失，换取「前端零依赖」。
 
@@ -988,15 +1056,17 @@ API / SSR 回归（可在 dev 跑）与交互验证（**必须在生产 3000 跑
 
 所有 E2E 脚本都在 `finally` 里删掉自己创建的文本与词，不污染用户库。
 
-### 12.6 AI 释义专项（P10 / P11）
+### 12.6 AI 释义专项（P10 / P11 / P12）
 
-改 `lib/ai.ts` / `lib/sentence.ts` / `lib/explain-policy.ts` / `lib/gloss.ts` / `Reader.tsx` 的选区链路时，按顺序验：
+改 `lib/ai.ts` / `lib/sentence.ts` / `lib/explain-policy.ts` / `lib/gloss.ts` / `lib/word-store.ts` / `Reader.tsx` 的选区链路时，按顺序验：
 
 ```bash
-npm test                    # 含 ai-prompt / sentence / card-gloss / explain-policy 的控制变量测试
+npm test                       # 含 ai-prompt / sentence / card-gloss / explain-policy 的控制变量测试
 npm run typecheck
-npm run build               # 交互验证前必须重建，并重启生产 3000
-npm run test:auto-explain   # 真实浏览器：见下方 P11 段
+npm run build                  # 交互验证前必须重建，并重启生产 3000
+npm run test:auto-explain      # 真实浏览器：见下方 P11 段
+npm run test:gloss-persist     # 真实浏览器：见下方 P12 段
+BASE=http://127.0.0.1:3000 npm run test:e2e   # 全量回归：删词/撤销/收词按钮等基础链路
 ```
 
 单测管的是**契约**，不是模型输出质量：
@@ -1017,7 +1087,13 @@ npm run test:auto-explain   # 真实浏览器：见下方 P11 段
 
 **P11 的四个浏览器控制变量**（`npm run test:auto-explain`）：脚本自己造一篇临时文本，先断言已 hydrate，再验 ① 点词典命中的 `tradition` 不发 `/api/explain`；② 拖选 `dates back to` 完全不点按钮就自动发请求并流式出答案；③ AI 全文写回 `contexts.ai_gloss`，而 `user_words.translation` 不含句子地图 / 成分标注；④ reload 后回看一条没有 AI 释义的旧批注，不重复发请求且手动入口仍在。`finally` 里删掉自己造的文本与词。
 
-没配模型时自动请求返回 `NO_MODEL_NOTICE`，弹层显示「配置好模型后重试」——这是预期降级，不是坏掉；`isNotAGloss()` 保证这段引导文案既不写回批注也不进词库。
+没配模型时自动请求返回 `NO_MODEL_NOTICE`，弹层显示「配置好模型后重试」——这是预期降级，不是坏掉；`isNotAGloss()` 保证这段引导文案既不写回批注也不进词库（服务端新写入口再挡一次）。
+
+**P12 的浏览器控制变量**（`npm run test:gloss-persist`）：脚本自造四篇临时文本，先断言已 hydrate，再验 ① 词典命中的 A 不发 `/api/explain`；② 词典未命中的 B 自动出答案并落到 `contexts.ai_gloss`；③ 点回 A 后 B 的释义仍在，且点回 A / 再点 B 都不再发 `/api/explain`，卡片直接摊开已存答案，列表出现「已存 AI 释义」；④ 同一个 B 出现在**另一篇文章**（全局词库已有、本文无 context）时服务端补建批注并写入释义；⑤ 自动收词关闭时点 D，释义仍被保存；⑥ **delegate 场景**：已在全局词库、但在新文章第一次点开的词，词典命中不发 AI，本文「已存批注」里仍要出现它，且同一锚点连续 `ensure` 两次只有 1 条 context（只读 SQLite 校验）。`finally` 里删掉自己造的文本与词。
+
+**全量 E2E 不能省**：`BASE=http://127.0.0.1:3000 npm run test:e2e` 覆盖 delete-on-deselect、撤销按钮、批注卡按钮等基础链路。P12 第一版加 `hasAnnotationAt()` 时，三套专项脚本都过，只有全量 E2E 的 C3「首次自动收词出现撤销按钮」/ E「批注卡内含 AI 释义入口与收词按钮」失败，才暴露出前端快照在删词后过期的问题（5.7）。当前基线：`npm test` 144/144、`test:gloss-persist` 全通过、`test:auto-explain` 12/12、`test:e2e` 53/53。
+
+历史数据说明：P12 之前丢失的 `ai_gloss` 无法追回（答案当时就没落库），在别的文章收过但本文没有 context 的老词也不会自动补批注。在正文里再点那个词会重新请教一次 / 补上批注，这次会存下来；从「已存批注」列表回看仍不自动发起请求。
 
 ---
 
@@ -1054,7 +1130,10 @@ npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
 |---|---|---|
 | 换 AI 供应商 | 设置页 / `lib/config.ts` 的 `resolveProvider()` | 保持 OpenAI 兼容即可，`lib/ai.ts` 不用动 |
 | 改 prompt | `lib/ai.ts` 的 `buildSystemPrompt` / `buildUserMessage` / `observations()` | 中文与 monolingual 两套人设同步；默认释义与追问必须共用同一 system（单测有控制变量断言） |
-| 改卡片背面释义 | `lib/gloss.ts` 的 `cardGloss()` | `/api/words` 与 `/api/contexts/[id]` 两个写入口都依赖它；改完跑 `tests/unit/card-gloss.test.ts` |
+| 改卡片背面释义 | `lib/gloss.ts` 的 `cardGloss()` | `/api/words`、`/api/contexts/[id]`、`/api/contexts/gloss` 三个写入口都依赖它（统一在 `word-store.ts`）；改完跑 `tests/unit/card-gloss.test.ts` |
+| 改 AI 释义落库 | `lib/word-store.ts` 的 `persistGlossByAnchor()` / `applyGlossToContext()` + `Reader.tsx` 的 `persistGloss()` | 别把写回重新绑回 `contextId`：按锚点幂等是「答案一定存得下」的保证；改完跑 `npm run test:gloss-persist` |
+| 改自动收词 / 已存批注 | `lib/word-store.ts` 的 `ensureContextByAnchor()` + `POST /api/contexts/ensure` + `Reader.tsx` 的 `ensureAnnotation()` | `savedMap` 是全量词库、`annotations` 是异步快照，两者都不能用来裁决「本文这一处有没有 context」；改完必须跑全量 `test:e2e`（撤销按钮那条会抓到快照过期） |
+| 改「再点开不重问」 | `Reader.tsx` 的 `savedGlossFor()` / `glossCacheRef` / `forgetGloss()` | 缓存键是 `${paragraphId}:${start}:${end}`，跨文章不算同一个锚点；删词删批注要同步清 |
 | 改阅读器证据 | `lib/sentence.ts` 的 `selectionSignals()` + `/api/explain` 的 `narrowSignals()` | 只送证据不送结论；新字段要同步白名单裁剪 |
 | 改「何时自动问 AI」 | `lib/explain-policy.ts` 的 `shouldAutoExplain()` + `Reader.tsx` 词典 fetch 回调 | 自动触发必须挂在请求回调里（state 会残留上一次结果）；改完跑 `npm run test:auto-explain` |
 | 改无模型提示文案 | `lib/explain-policy.ts` 的 `NO_MODEL_NOTICE` / `NO_MODEL_MARKER` | `lib/ai.ts` 只 re-export；前端识别与词库过滤共用同一标记，别复制字符串 |

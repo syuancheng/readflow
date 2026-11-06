@@ -470,13 +470,40 @@ export default function Reader({
   const [showAnnotations, setShowAnnotations] = useState(true);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // AI 释义是流式的，写回发生在几秒后；那时自动收词才刚把新批注加载进来。
-  // 用 ref 拿最新的批注列表，避免 persistGloss 闭包停在弹层打开时的快照。
-  // 查找按 (段落, start, end) 精确匹配，中途切换选区也不会写错批注。
+  // 用 ref 拿最新的批注列表，避免回看 / 复用释义时闭包停在弹层打开时的快照。
   const annotationsRef = useRef<Annotation[]>(annotations);
+  // 本次会话里「这个锚点已经生成过 AI 释义」的内存索引。
+  // 服务端落库是唯一事实来源，这里只负责消除「刚写完、列表还没刷新回来」的窗口，
+  // 让紧接着点回同一个词也能立刻看到答案、不会又发一次 /api/explain。
+  const glossCacheRef = useRef<Map<string, string>>(new Map());
+  const anchorKey = (pid: string, start: number, end: number) => `${pid}:${start}:${end}`;
   useEffect(() => {
     annotationsRef.current = annotations;
+    for (const a of annotations) {
+      if (a.aiGloss) glossCacheRef.current.set(anchorKey(a.paragraphId, a.start, a.end), a.aiGloss);
+    }
   }, [annotations]);
+
+  /** 这个锚点是否已经存过 AI 释义（内存索引优先，批次列表兜底） */
+  function savedGlossFor(pid: string, start: number, end: number): string | undefined {
+    return (
+      glossCacheRef.current.get(anchorKey(pid, start, end)) ??
+      annotationsRef.current.find(
+        (a) => a.paragraphId === pid && a.start === start && a.end === end,
+      )?.aiGloss ??
+      undefined
+    );
+  }
+
+  /** 删词 / 删批注后抹掉内存索引，避免「已经删掉的词」还摊开旧答案 */
+  function forgetGloss(opts: { wordId?: string; quote?: string }) {
+    for (const a of annotationsRef.current) {
+      const hit =
+        (opts.wordId ? a.wordId === opts.wordId : false) ||
+        (opts.quote ? a.quote.trim().toLowerCase() === opts.quote.toLowerCase() : false);
+      if (hit) glossCacheRef.current.delete(anchorKey(a.paragraphId, a.start, a.end));
+    }
+  }
 
   // 场景 4：同一句里连续请教的次数。只放内存、不落库——「这句卡了三次」是
   // 阅读会话内的瞬时状态，不该变成被永久记住的用户数据。
@@ -604,11 +631,16 @@ export default function Reader({
   }
 
   /** 拉取本文已保存的句子/短语批注（回看列表） */
+  // 连续点两个词会并发发两次请求；旧的响应晚到会覆盖掉含新批注的列表，
+  // 于是「AI 释义找不到该写回哪条」变成偶发问题。用序号丢弃过期响应。
+  const annotSeq = useRef(0);
   const loadAnnotations = useCallback(async () => {
+    const seq = ++annotSeq.current;
     try {
       const res = await fetch(`/api/annotations?textId=${encodeURIComponent(textId)}`);
       if (!res.ok) return;
       const data = await res.json();
+      if (seq !== annotSeq.current) return;
       setAnnotations(data.annotations ?? []);
     } catch {
       /* 静默失败：批注列表是增强功能，不影响正文阅读 */
@@ -713,29 +745,28 @@ export default function Reader({
       source: "word",
       signals: { ...sig, repeatCount: noteSelection(sig, pid) },
     };
+    // 同一个锚点之前问过 AI：直接把答案摊开，不再重新请求模型。
+    // 这也是「点回已经变绿的词」时能立刻看到那次解释的依据。
+    const cached = savedGlossFor(pid, pickData.anchor.start, pickData.anchor.end);
+    if (cached) {
+      pickData.initialGloss = cached;
+      pickData.fromAnnotation = true;
+    }
     markActiveAnchor([wordEl]);
     setPick(pickData);
 
-    // 已收过的词：右栏直接展示已存释义，不再请求
-    const saved = savedMap.get(key) ?? null;
-    if (saved) return;
     if (!autoSave) return;
-
-    // 自动收词：落库后回填 justSaved（收起批注时可撤销）与 contextId；
-    // 后者让随后自动生成的 AI 释义能写回这条批注（词典查不到的词尤其需要）。
-    // 并刷新批注列表——单词那次出现的持久绿虚线（w-annotated）由此而来
-    void saveWord(pickData).then((info) => {
-      setPick((cur) =>
-        cur && cur.source === "word" && cur.anchor.quote.toLowerCase() === key
-          ? {
-              ...cur,
-              justSaved: info?.created === true,
-              contextId: info?.contextId ?? cur.contextId,
-            }
-          : cur,
-      );
-      if (info) void loadAnnotations();
-    });
+    // ⚠️ savedMap 是**全量词库**，不是「本文这一处有没有批注」。
+    // 以前这里写 `if (savedMap.get(key)) return`，结果一个词在别的文章收过，
+    // 在当前文章再点就既不建 context 也不刷新列表 —— 绿色 ✓ 有了，
+    // 「已存批注」里却永远找不到它。
+    //
+    // 也别拿前端 annotations 快照做「这一处已有批注就跳过」的乐观判断：
+    // delete-on-deselect 刚删过词、并发刷新、别处补建 context 都会让快照过期，
+    // 一跳过就既拿不到 justSaved（撤销按钮消失），也漏掉这一处的 context。
+    // /api/contexts/ensure 本身按锚点幂等，重复点只是多一次 SELECT，
+    // 落库裁决统一交给服务端，前端不猜。
+    void ensureAnnotation(pickData);
   }
 
   function onMouseUp(e: React.MouseEvent) {
@@ -776,12 +807,17 @@ export default function Reader({
       source: "select",
       signals: { ...sig, repeatCount: noteSelection(sig, pid) },
     };
+    const cached = savedGlossFor(pid, pickData.anchor.start, pickData.anchor.end);
+    if (cached) {
+      pickData.initialGloss = cached;
+      pickData.fromAnnotation = true;
+    }
     setPick(pickData);
 
     // 与点词一致：自动收词开时，拖选的句子/短语也自动入库。
     // 关掉批注后仍能从「已存批注」翻回去看，不用重新选中。
     if (autoSave && /\s/.test(pickData.anchor.quote.trim())) {
-      void autoSaveSelection(pickData);
+      void ensureAnnotation(pickData);
     }
   }
 
@@ -835,47 +871,146 @@ export default function Reader({
     }
   }
 
-  /** 拖选自动入库：落库后把 contextId 挂到当前 pick，并刷新回看列表 */
-  async function autoSaveSelection(pickData: Pick) {
-    const info = await saveWord(pickData);
-    if (!info?.contextId) return;
-    setPick((cur) =>
-      cur &&
-      cur.source === "select" &&
-      cur.paragraphId === pickData.paragraphId &&
-      cur.anchor.start === pickData.anchor.start &&
-      cur.anchor.end === pickData.anchor.end
-        ? { ...cur, contextId: info.contextId, justSaved: info.created === true }
-        : cur,
-    );
-    await loadAnnotations();
+  /**
+   * 自动批注：确保「本文这一处」有一条 context（按锚点幂等）。
+   *
+   * 与手动收词 saveWord() 不同：后者总是新插一条 context，这里由服务端
+   * `ensureContextByAnchor()` 裁决，重复点同一个位置不会堆重复批注。
+   * 词在别的文章收过时 user_words 只是 upsert，不会新建一个词条，
+   * 但当前文章这一处仍会得到自己的批注 —— 「已收词」和「已存批注」终于对齐。
+   */
+  async function ensureAnnotation(pickData: Pick): Promise<SavedWordInfo | null> {
+    const { anchor, paragraphId } = pickData;
+    try {
+      const res = await fetch("/api/contexts/ensure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          word: anchor.quote,
+          quote: anchor.quote,
+          textId,
+          paragraphId,
+          start: anchor.start,
+          end: anchor.end,
+          prefix: anchor.prefix || "",
+          suffix: anchor.suffix || "",
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const info: SavedWordInfo = {
+        id: data.wordId,
+        lemma: data.lemma ?? "",
+        displayForm: data.displayForm ?? anchor.quote,
+        translation: data.translation ?? "",
+        status: data.status ?? "learning",
+        starred: data.starred ?? 0,
+        created: data.created === true,
+        contextId: data.contextId,
+      };
+      if (data.created) {
+        setSavedMap((prev) => {
+          const next = new Map(prev);
+          next.set(info.displayForm.toLowerCase(), info);
+          if (info.lemma) next.set(info.lemma.toLowerCase(), info);
+          return next;
+        });
+      }
+      setPick((cur) =>
+        cur &&
+        cur.paragraphId === paragraphId &&
+        cur.anchor.start === anchor.start &&
+        cur.anchor.end === anchor.end
+          ? {
+              ...cur,
+              // 只有本次真新建了词条才允许「收起即撤销」，别误删老词
+              justSaved: data.created === true,
+              contextId: data.contextId ?? cur.contextId,
+            }
+          : cur,
+      );
+      if (data.contextCreated) {
+        celebrate(
+          pickData.x,
+          pickData.y - 20,
+          data.created && !/\s/.test(anchor.quote.trim()) ? "+1 词" : "+1 批注",
+        );
+      }
+      await loadAnnotations();
+      return info;
+    } catch {
+      return null;
+    }
   }
 
-  /** AI 释义生成完成后回填到批注，翻回去看时不用重新请求 AI */
+  /**
+   * AI 释义生成完成后回填到批注，翻回去看时不用重新请求 AI。
+   *
+   * 关键改动：只把「锚点 + 释义全文」交给服务端，不再要求前端先拿到 contextId。
+   * 旧实现在找不到 context 时静默 return —— 自动收词关闭、词在别的文章里收过、
+   * 或两次并发请求竞态时，答案就「看得见、存不下」。现在由 /api/contexts/gloss
+   * 按锚点更新或补建，把「点了 AI 就一定能查到」变成服务端保证的契约。
+   *
+   * pickData 用弹层打开那一帧的对象（锚点稳定），即使中途切到别的词，
+   * 迟到的流式结果也只会写回它自己那次选区。
+   */
   async function persistGloss(pickData: Pick, gloss: string) {
-    // 已收过的词、或点词自动入库还没回填 contextId 时，用锚点从批注列表里补一次。
-    // 词典查不到的选区现在会自动生成释义，写不回去就等于「只能看一遍」。
-    const contextId =
-      pickData.contextId ??
-      annotationsRef.current.find(
-        (a) =>
-          a.paragraphId === pickData.paragraphId &&
-          a.start === pickData.anchor.start &&
-          a.end === pickData.anchor.end,
-      )?.id;
-    if (!contextId) return;
+    const { anchor, paragraphId } = pickData;
     try {
-      const res = await fetch(`/api/contexts/${contextId}`, {
-        method: "PATCH",
+      const res = await fetch("/api/contexts/gloss", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ aiGloss: gloss }),
+        body: JSON.stringify({
+          word: anchor.quote,
+          quote: anchor.quote,
+          textId,
+          paragraphId,
+          start: anchor.start,
+          end: anchor.end,
+          prefix: anchor.prefix || "",
+          suffix: anchor.suffix || "",
+          aiGloss: gloss,
+        }),
       });
       if (!res.ok) return;
-      setAnnotations((prev) =>
-        prev.map((a) => (a.id === contextId ? { ...a, aiGloss: gloss } : a)),
+      const data = await res.json();
+
+      // 先把结果放进内存索引：紧接着点回同一个词也能立刻看到，不必等列表刷新。
+      glossCacheRef.current.set(
+        anchorKey(paragraphId, anchor.start, anchor.end),
+        gloss,
       );
+      // 服务端补建了词条（例如词在别的文章收过、自动收词关闭），同步 ✓/+ 状态
+      if (data.created) {
+        const info: SavedWordInfo = {
+          id: data.wordId,
+          lemma: data.lemma ?? "",
+          displayForm: data.displayForm ?? anchor.quote,
+          translation: data.translation ?? "",
+          status: data.status ?? "learning",
+          starred: data.starred ?? 0,
+        };
+        setSavedMap((prev) => {
+          const next = new Map(prev);
+          next.set(info.displayForm.toLowerCase(), info);
+          if (info.lemma) next.set(info.lemma.toLowerCase(), info);
+          return next;
+        });
+      }
+      // 当前仍停在同一锚点时把 contextId 挂回去，供收词按钮 / 高亮使用
+      if (data.contextId) {
+        setPick((cur) =>
+          cur &&
+          cur.paragraphId === paragraphId &&
+          cur.anchor.start === anchor.start &&
+          cur.anchor.end === anchor.end
+            ? { ...cur, contextId: data.contextId }
+            : cur,
+        );
+      }
+      await loadAnnotations();
     } catch {
-      /* 静默失败 */
+      /* 静默失败：释义已经在卡片上展示，不影响继续阅读 */
     }
   }
 
@@ -899,7 +1034,7 @@ export default function Reader({
       source: "select",
       contextId: a.id,
       fromAnnotation: true,
-      initialGloss: a.aiGloss ?? undefined,
+      initialGloss: savedGlossFor(a.paragraphId, a.start, a.end) ?? a.aiGloss ?? undefined,
     };
     const pEl = document.querySelector<HTMLElement>(`[data-pid="${a.paragraphId}"]`);
     if (pEl) {
@@ -929,6 +1064,7 @@ export default function Reader({
     } catch {
       return;
     }
+    forgetGloss({ wordId: a.wordId });
     setAnnotations((prev) => prev.filter((x) => x.wordId !== a.wordId));
     if (prunedWord) {
       // 占位词条已被服务端删除：从 savedMap 移除，保持 ✓/+ 状态一致
@@ -955,6 +1091,7 @@ export default function Reader({
     } catch {
       return;
     }
+    forgetGloss({ quote: key });
     setSavedMap((prev) => {
       const next = new Map(prev);
       next.delete(key);
@@ -971,6 +1108,7 @@ export default function Reader({
     } catch {
       /* 静默失败 */
     }
+    forgetGloss({ wordId: id });
     setSavedMap((prev) => {
       const next = new Map(prev);
       for (const [k, v] of next) {

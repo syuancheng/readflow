@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { userWords, contexts, texts, paragraphs, LOCAL_USER } from "@/db/schema";
-import { lookup } from "@/lib/dict";
-import { cardGloss } from "@/lib/gloss";
+import { userWords, contexts, LOCAL_USER } from "@/db/schema";
+import { InvalidAnchorError, saveWordAndContext, type WordAnchor } from "@/lib/word-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,17 +73,7 @@ function dedup<T extends { id: string }>(rows: T[]): T[] {
  *               句子地图 / 成分标注不进词库与墨墨卡片背面（P10）。
  */
 export async function POST(req: Request) {
-  let body: {
-    word: string;
-    textId: string;
-    paragraphId: string;
-    start: number;
-    end: number;
-    quote: string;
-    prefix: string;
-    suffix: string;
-    aiGloss?: string;
-  };
+  let body: WordAnchor & { aiGloss?: string };
 
   try {
     body = await req.json();
@@ -93,127 +81,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "请求格式错误" }, { status: 400 });
   }
 
-  const { word, textId, paragraphId, start, end, quote, prefix, suffix, aiGloss } = body;
-
-  if (!word?.trim() || !textId || !paragraphId || !quote) {
+  if (!body.word?.trim() || !body.textId || !body.paragraphId || !body.quote) {
     return NextResponse.json({ error: "缺少必填字段" }, { status: 400 });
   }
 
-  // 验证 textId 和 paragraphId 存在
-  const text = db.select().from(texts).where(eq(texts.id, textId)).get();
-  if (!text) {
-    return NextResponse.json({ error: "文本不存在" }, { status: 404 });
-  }
-
-  const para = db.select().from(paragraphs).where(eq(paragraphs.id, paragraphId)).get();
-  if (!para) {
-    return NextResponse.json({ error: "段落不存在" }, { status: 404 });
-  }
-
-  // 查词典获取 lemma / phonetic / translation / pos
-  const dictResult = lookup(word.trim());
-
-  const lemmaForm = dictResult.lemmaForm || word.trim();
-  const displayForm = word.trim();
-  const phonetic = dictResult.entry?.phonetic ?? null;
-  // 词典释义优先；词典查不到时只取 AI 主体段的短释义，绝不把整段贴语境的
-  // 句子地图写进卡片背面。AI 全文仍然原样落在 contexts.ai_gloss。
-  const translation = dictResult.entry?.translation ?? cardGloss(aiGloss) ?? "(待补充释义)";
-  const pos = dictResult.entry?.pos ?? null;
-
-  const now = Date.now();
-  const wordId = randomUUID();
-  const contextId = randomUUID();
-  const isPhrase = /\s/.test(displayForm) ? 1 : 0;
-
-  let finalWordId: string = wordId;
-  let finalStatus = "learning";
-  let finalStarred = 0;
-  // 本次是否为「新建词条」。已存在的词再点一次只是补一条 context，
-  // 不该被「取消翻译即删除」误删（老词可能已标记已掌握/星标）。
-  let created = true;
-
-  // 同步事务：upsert user_words + insert context
-  db.transaction((tx) => {
-    // 按 (userId, lemma) 去重：已存在则更新，不存在则插入
-    const existing = tx
-      .select()
-      .from(userWords)
-      .where(eq(userWords.lemma, lemmaForm))
-      .get() as typeof userWords.$inferSelect | undefined;
-
-    let resolvedWordId: string;
-
-    if (existing) {
-      resolvedWordId = existing.id;
-      // 更新：如果新词典查到了更好的数据，覆盖。
-      // 删除一律是彻底删除，能走到这里的 existing 一定还在词库里，
-      // 保留它原有的学习状态（可能已被手动标记已掌握）。
-      tx.update(userWords)
-        .set({
-          displayForm,
-          phonetic: phonetic ?? existing.phonetic,
-          translation: translation !== "(待补充释义)" ? translation : existing.translation,
-          pos: pos ?? existing.pos,
-          isPhrase,
-          status: existing.status,
-        })
-        .where(eq(userWords.id, existing.id))
-        .run();
-      finalStatus = existing.status;
-      finalStarred = existing.starred;
-      created = false;
-    } else {
-      resolvedWordId = wordId;
-      tx.insert(userWords)
-        .values({
-          id: wordId,
-          userId: LOCAL_USER,
-          lemma: lemmaForm,
-          displayForm,
-          pos,
-          phonetic,
-          translation,
-          note: null,
-          createdAt: now,
-          isPhrase,
-        })
-        .run();
+  // 落库规则统一收口在 lib/word-store.ts（/api/contexts/gloss 也用它补建批注），
+  // 避免「收词」和「AI 释义补建」两条路径各写一份 upsert 逻辑后行为漂移。
+  try {
+    return NextResponse.json(saveWordAndContext(body));
+  } catch (err) {
+    if (err instanceof InvalidAnchorError) {
+      return NextResponse.json({ error: err.message }, { status: 404 });
     }
-
-    finalWordId = resolvedWordId;
-
-    // 插入 context（不去重：同一个词在不同位置/不同文本出现，各记一条）
-    tx.insert(contexts)
-      .values({
-        id: contextId,
-        userWordId: resolvedWordId,
-        textId,
-        paragraphId,
-        start,
-        end,
-        quote,
-        prefix,
-        suffix,
-        aiGloss: aiGloss ?? null,
-        createdAt: now,
-      })
-      .run();
-  });
-
-  return NextResponse.json({
-    ok: true,
-    // 注意：必须返回真正落库的那条记录 id（existing 时 ≠ 新生成的 wordId）
-    wordId: finalWordId,
-    contextId,
-    lemma: lemmaForm,
-    displayForm,
-    translation,
-    phonetic,
-    pos,
-    status: finalStatus,
-    starred: finalStarred,
-    isPhrase: isPhrase === 1,
-    created,
-  });
+    throw err;
+  }
 }

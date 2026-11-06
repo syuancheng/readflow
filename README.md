@@ -240,6 +240,7 @@ readflow/
 │       ├── ai.ts                 DeepSeek prompt 与流式生成
 │       ├── explain-policy.ts     自动问 AI 的边界判定 + 降级文案识别（前后端共用）
 │       ├── gloss.ts              插件短释义 / 卡片背面提炼（shortGloss / cardGloss）
+│       ├── word-store.ts         收词 / 批注写回的服务端唯一落库入口：saveWordAndContext / ensureContextByAnchor / persistGlossByAnchor（按锚点幂等）
 │       ├── cardgen.ts            Markji 卡片模板（三种）+ 发送前语法自检
 │       ├── markji.ts             墨墨开放 API 客户端（读牌组/章节、写卡片、限速）
 │       ├── text.ts               释义清洗（ECDICT 的字面量 `\n` 还原）
@@ -250,6 +251,7 @@ readflow/
 │   ├── verify-markji.ts          只读联调：用自研客户端列牌组/章节
 │   ├── backfill-cefr.ts          给老文本补 CEFR（默认 DRY-RUN，--apply 写入）
 │   ├── e2e-auto-explain.mjs      真实浏览器验证：词典命中不自动 / 未命中自动问 AI / 写回批注 / 回看不重复请求
+│   ├── e2e-gloss-persist.mjs     真实浏览器验证：AI 释义必落库 / 再点开不重问 / 全局已收词 / 自动收词关闭 / delegate 案例与 ensure 幂等
 │   ├── service.sh                launchd 常驻服务（install / restart / status / logs）
 │   └── ...                        另有 E2E、性能基准、扩展打包等脚本
 ├── tests/unit/                     node:test 单测（npm test）
@@ -301,6 +303,10 @@ readflow/
 
 AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**：它贴死在原句上，脱离语境就失去意义。词典未收录时，`cardGloss()` 只从主体段提炼一行短释义填 `user_words.translation`；句子地图、成分标注、无模型提示都不会进卡片（技术文档 5.5）。
 
+**只要点了 AI 释义，结果就一定存得下来**（P12）：流式答案生成完，前端只把「锚点 + 释义全文」交给 `POST /api/contexts/gloss`，由服务端按 `(textId, paragraphId, start, end)` 更新已有批注；没有批注就补建词条 + 批注。旧实现要求前端先拿到 `contextId`，找不到就静默丢弃——自动收词关闭、这个词在别的文章收过、或两次并发请求竞态时，答案就「看得见、查不到」。现在落库由服务端保证，与前端闭包时序无关。同一个锚点再次点开直接摊开已存答案，**不会重新请求模型**；换一个位置（不同锚点）才算新的一次请教。落库规则统一收口在 `lib/word-store.ts`，`/api/words`、`/api/contexts/[id]`、`/api/contexts/gloss` 共用。
+
+**「已收词」和「已存批注」是两件事**（P12 续）：`user_words` 是全局词库，一个词在任意文章收过就存在；`contexts` 是「某篇文章某一处」的批注，右侧「已存批注」列表按 `textId` 查它。阅读页为了高亮拿到的是**全量词库** `savedWords`，旧版点词时却用 `if (savedMap.get(key)) return` 把它当成「本文这一处已批注」——于是一个在别的文章收过的词（如 `delegate`）在当前文章显示绿色 ✓，却永远建不出 context，也进不了列表。现在点词 / 拖选统一走 `POST /api/contexts/ensure`，服务端 `ensureContextByAnchor()` 按锚点幂等补建，重复点同一位置不会堆重复批注。前端也不再拿 `annotations` 快照做「已有批注就跳过」的判断：收起即撤销、并发刷新、别处补建都会让快照过期，一跳过就会漏掉这一处的 context；裁决只在服务端做一次。P12 之前已经收过、但本文没有 context 的老词，需要在正文里**再点一次**才会补上批注（不做历史迁移）。
+
 ### 7.4 单用户今天，多用户明天
 
 所有表都有 `user_id`，单机模式固定写 `'local'`（`LOCAL_USER` 常量）。将来加登录时，把常量换成真实用户 id 即可，**不需要改表结构、不需要数据迁移**。这是第一天就付的「架构保险费」，几乎零成本。
@@ -320,6 +326,10 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 | `POST` | `/api/explain` | AI 流式释义（推荐）：`{word, prefix?, suffix?, withPrevSentence?, language?, monolingual?, prompt?, signals?}`。`signals` 为阅读器采集的客观信号，只含证据不含结论；服务端白名单提取并裁剪数值 |
 | `GET` | `/api/words` | 词库列表（`?textId=` 过滤某篇文章） |
 | `POST` | `/api/words` | 收词：写 `user_words`（按 lemma upsert）+ `contexts` |
+| `POST` | `/api/contexts/ensure` | 按锚点确保本文这一处有批注（点词 / 拖选自动收词走这里）：入参同 `gloss` 但不必带 `aiGloss`。已有 context 原样返回，没有则补建；重复调用幂等 |
+| `POST` | `/api/contexts/gloss` | AI 释义按锚点幂等写回：`{textId, paragraphId, start, end, quote, prefix, suffix, word, aiGloss}`。已有批注更新 `ai_gloss`，没有则补建；降级文案拒绝入库 |
+| `PATCH` | `/api/contexts/{id}` | 已知 id 时回填 `aiGloss`（旧客户端 / 其他调用方兼容） |
+| `GET` | `/api/annotations?textId=` | 本文已存批注（含 `aiGloss`），按词条去重 |
 | `DELETE` | `/api/words/{id}` | 删词；带 `?contextId=` 时只删单条上下文 |
 | `GET` | `/api/export` | 导出状态：token 是否就绪、目标牌组/章节、各类已推数量、今日已推 |
 | `POST` | `/api/export` | 生成并写入卡片；`{deckId, chapterId, types, dryRun}`，`dryRun` 只返回卡片原文 |
@@ -351,6 +361,7 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 | **P9** | **结构化导入**：Markdown / HTML → Block IR，标题·列表·表格·代码块·callout 原样渲染，URL 优先官方 `.md`，锚点契约不变 | ✅ |
 | **P10** | **AI 释义重构**：取消三段式 → 老师人设 + 阅读连续性优先 + 符号化句子地图；客观信号透传、同句连续请教累计、单测与文档同步 | ✅ |
 | **P11** | **词典未命中自动问 AI**：成本闸门改为词典命中率，短语不再多点一次按钮；自动释义写回批注、降级文案不入库、回看旧批注不烧请求 | ✅ |
+| **P12** | **AI 释义持久化 + 批注锚点修复**：按锚点服务端幂等写回 / 补建；同锚点再点开直接复用答案、不重复计费；`ensure` 让全局已收过的词在本文也能进「已存批注」；落库规则收口到 `word-store.ts` | ✅ |
 | **P5** | **长文性能：实测基准，决定不做虚拟滚动**（见 [`docs/PERF.md`](docs/PERF.md)） | ✅ |
 | P7 | 多用户 + 云端同步（表结构已预留） | 待定 |
 
@@ -367,8 +378,8 @@ P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节�
 - **无鉴权**：单机 `local` 用户，同一台机器上任何访问 3000 端口的人都能读写数据。
 - **无虚拟滚动（实测后决定不做）**：全部段落一次性渲染进 DOM。实测（[`docs/PERF.md`](docs/PERF.md)）：4 千词的真实文章在 4 倍 CPU 降速下 TTFI 0.8s、交互满帧；4 万词才在弱设备出现可感知劣化（TTFI 2.5s），瓶颈是 SSR HTML 体积与水合，不是交互渲染。将来若常态读 2 万词以上的文本，改做分段懒渲染而不是虚拟滚动。
 - **`/api/explain` 的 Content-Type 是 `text/event-stream`，但 body 是纯文本分块**（没有 `data:` 帧）。前端直接读 `res.body` 所以能工作，但如果将来要接标准 EventSource，需要补 SSE 帧格式。
-- **AI 层无缓存**：同一个词重复点会重复计费。Readlang 用内存 + 服务端缓存规避，我们还没做。P11 之后词典未命中的每个选区（短语 / 生僻词）都会自动发一次请求，重复点同一短语会重复计费；词典命中的点击不受影响。
-- **回看旧批注不会自动补释义**：P11 之前收的批注若当时没点过「AI 释义」，`contexts.ai_gloss` 就是空的；从「已存批注」列表打开只显示词典结果 + 手动入口，不会自动发请求（避免翻看旧内容时悄悄烧钱）。
+- **AI 层没有跨位置的语义缓存**：同一个锚点（同一篇文章、同一处选区）再点开会直接读已存的 `ai_gloss`，不再计费；但同一个词出现在**另一个位置**会当成新的一次请教，重新请求模型。Readlang 用内存 + 服务端按词缓存规避，我们还没做。P11 之后词典未命中的每个新选区（短语 / 生僻词）都会自动发一次请求；词典命中的点击不受影响。
+- **回看旧批注不会自动补释义**：P12 之前收的批注若当时没存下 AI 释义，`contexts.ai_gloss` 就是空的，历史答案无法追回；从「已存批注」列表打开只显示词典结果 + 手动入口，不会自动发请求（避免翻看旧内容时悄悄烧钱）。在正文里直接点那个词则会重新请教一次，这次的答案会被保存下来。
 - **句子地图是模型判断，不是语法解析器**：轻答 / 中答 / 重答没有可解释的分类器，也没有句法树；prompt 要求「没把握标（存疑）、整句拿不准就整块不写」，但成分标注仍可能出错，且 temperature 0.3 下同一输入也可能略有波动。它是阅读脚手架，不是权威语法结论。
 - **同句连续请教次数只在当前页面内存**：`repeatCount` 不落库，刷新 / 换页 / 组件重挂载清零；只影响这一次的答案深度，不形成长期学习画像。
 - **AI 全文不进卡片背面**：完整释义只存在 `contexts.ai_gloss` 供回看；词典未收录的词/短语，卡片背面只有 `cardGloss()` 提炼的一行短释义，看不到句子地图。
@@ -377,7 +388,7 @@ P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节�
 - **CEFR 是启发式估算，不是标注模型**：没有用带 CEFR 标签的语料训练，阈值是拿 ECDICT 词频在真实文本上校准出来的。专有名词 / 术语 / 公式会被当成生僻词而高估难度（置信度会自动降级）；短文本（<150 词）的句法统计波动很大。将来可以用 `user_words` / `contexts` 里的个人收词行为做个性化校准。
 - **旧文章的结构补不回来**：P9 之前入库的文本，表格换行已被压成空格，无法从压平结果反推行列。按约定不做迁移工具，需要重新粘贴原始 Markdown 重新导入；旧文章的锚点、词库、CEFR 都不受影响，仍可正常阅读。
 - **结构化导入不是全保真**：支持 GFM 表格、多级列表、代码块、引用/callout、行内链接与强调；`colspan`/`rowspan`、嵌套表格、脚注、LaTeX 公式、语法高亮配色、图片本身不还原（图片保留占位文字）。MDX 的 info string（如 `text theme={null}`）只取合法语言名。链接里的词可以点（不会跳走），代码块里的词刻意不可点。
-- **端到端靠脚本回归**：`npm test` 跑 `node:test` 单测（含 CEFR 的控制变量测试），`npm run typecheck` 查类型；E2E 与导出验证另有 `npm run test:e2e` / `npm run test:auto-explain` / `npm run verify:cards` / `npm run verify:markji`。
+- **端到端靠脚本回归**：`npm test` 跑 `node:test` 单测（含 CEFR 的控制变量测试），`npm run typecheck` 查类型；E2E 与导出验证另有 `npm run test:e2e` / `npm run test:auto-explain` / `npm run test:gloss-persist` / `npm run verify:cards` / `npm run verify:markji`。
 - **词形还原受 ECDICT 数据限制**：`leaves` 的 exchange 指向 `leave`（离开），但阅读中更常见的意思是「树叶」。我们优先展示变形词自己的释义（树叶），lemma 仍按 exchange 落库，所以 `leaves` 和 `leaf` 在词库里可能是两条。`was → be`、`went → go` 这类规则变形还原正常。
 - **音标是 ECDICT 原文的近似写法**：多数条目用 `'`/`,` 表示主/次重音（`'glisn`），我们统一显示成 `ˈ`/`ˌ`，但音值本身仍是 ECDICT 的记音，不保证是标准 IPA。
 - **导出不可逆**：墨墨没有删除接口，推错的卡片只能在 App 里手删。幂等只保证「不重复推」，不保证「推对了」——所以写入前必须先看预览。
