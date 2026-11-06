@@ -80,6 +80,18 @@ test("旧版三段式 / 字面量 \\n / 代码块也能收敛成一行", () => {
   assert.equal(cardGloss(FULL, 200)?.includes("\n"), false, "卡片背面应是一行，避免 cardgen 拆成多个列表项");
 });
 
+test("P13：句子地图的 ==主干== 记号不进卡片背面或插件小标签", () => {
+  const raw = `over rich states and artifacts 在这里是「对丰富的状态与产物（的控制）」，不是「在…之上」。
+
+🧩 主系表 · 表语带介词短语
+==A recurring pattern== ==is== ==simple control== over rich states and artifacts.`;
+  const card = cardGloss(raw, 200) ?? "";
+  assert.match(card, /对丰富的状态与产物/, "第一屏的选区译法才是卡片要的内容");
+  assert.doesNotMatch(card, /==/, "下划线记号不能裸着进卡片");
+  assert.doesNotMatch(card, /🧩/);
+  assert.equal(shortGloss("==受益于==\\n下一行"), "受益于");
+});
+
 test("回归：插件用的 shortGloss 不受影响", () => {
   assert.equal(shortGloss("n. 提示\\nvt. 提示，暗示"), "n. 提示");
   assert.equal(shortGloss(null), "");

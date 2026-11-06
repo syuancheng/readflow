@@ -13,7 +13,7 @@ export function shortGloss(raw: string | null | undefined, cap = 24): string {
   const first = lines
     // AI 释义里的 `**本句中的意思**` 这类纯小标题不是释义，跳过
     .filter((s) => !/^\*\*[^*]{1,24}\*\*$/.test(s) && !/^\[?\s*(phonetic|音标)/i.test(s))
-    .map((s) => s.replace(/[#*>`_]/g, " ").replace(/\s+/g, " ").replace(/^\d+\.\s*/, "").trim())
+    .map((s) => s.replace(/==/g, " ").replace(/[#*>`_]/g, " ").replace(/\s+/g, " ").replace(/^\d+\.\s*/, "").trim())
     .find(Boolean) ?? "";
   return first.length > cap ? `${first.slice(0, cap)}…` : first;
 }
@@ -21,7 +21,7 @@ export function shortGloss(raw: string | null | undefined, cap = 24): string {
 /** 句子地图的起始标记：emoji 句型标签 / 易错点 / 指代提示 / 显式标题 */
 const SENTENCE_MAP = /^\s*(?:🧩|⚠️|🔗|📐|句子地图|Sentence map)/i;
 
-/** 成分标注记号（句子地图里的原句行会把主谓宾挨个标出来） */
+/** 成分标注记号。P13 起地图改用 ==主干== 下划线，这里主要兼容 P13 之前存的历史释义 */
 const CONSTITUENT_MARK =
   /[（(]\s*(?:主语|谓语|宾语|表语|定语|状语|补语|系动词|存疑|subject|object|predicate|linking verb|uncertain)/gi;
 
@@ -40,9 +40,9 @@ function isLabelledSentence(line: string): boolean {
  * 从 AI 释义全文里提炼**可脱离原句**的短释义，用于 `user_words.translation`
  * 和墨墨卡片背面（P10）。
  *
- * 新版 AI 释义贴死在语境上：第一段帮学生把句子读顺，殿后的「句子地图」把原句
- * 放出来做成分标注。整段塞进卡片背面，复习时看到的是一堆脱离原文的 emoji 和
- * 英文标注行，既没意义也误导。因此：
+ * 新版 AI 释义第一屏给的是「选区在这句话里的中文意思」，殿后的「句子地图」把原句
+ * 放出来、只给主干加 ==下划线==。整段塞进卡片背面，复习时看到的是一堆脱离原文的
+ * emoji 和英文标注行，既没意义也误导。因此：
  * - `contexts.ai_gloss` 仍存全文，回看批注时原样展示；
  * - 词库 / 卡片只取主体段，剔除句子地图、成分标注行、降级提示与 Markdown 记号；
  * - 词典查得到时优先用词典释义，本函数只在词典未收录时兜底（见 /api/words）。
@@ -72,6 +72,7 @@ export function cardGloss(raw: string | null | undefined, cap = 100): string | u
     .filter((l) => !/^#{1,6}\s/.test(l))
     .map((l) =>
       l
+        .replace(/==/g, "")
         .replace(/[#*>`_]/g, "")
         .replace(/^\s*[-•]\s*/, "")
         .replace(/^\d+\.\s*/, "")

@@ -1,13 +1,16 @@
 import type { ReactNode } from "react";
+import { stripUnclosedSpine } from "@/lib/markdown-inline";
 
 // ====== 轻量 Markdown 渲染（AI 释义用，Reader 批注卡与词库页共用）======
-// 只覆盖 AI 输出常用语法：# 标题 / **加粗** / *斜体* / `行内代码` / 列表 / 引用。
+// 只覆盖 AI 输出常用语法：# 标题 / **加粗** / *斜体* / `行内代码` / ==主干下划线== / 列表 / 引用。
+// `==...==` 是 P13 句子地图专用的主干标记，渲染成下划线而不是加粗/高亮，
+// 这样原句能整句照抄，只有主干被强调，不退化成逐个成分挂括号的语法表。
 // 解析为 React 元素而非 dangerouslySetInnerHTML，天然免疫 XSS。
 // 流式输出时每帧整体重解析，AI 释义篇幅短，无性能问题。
 
 function renderMdInline(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`)/g;
+  const re = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|==[^=]+==)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -15,7 +18,26 @@ function renderMdInline(text: string): ReactNode[] {
     if (m.index > last) nodes.push(text.slice(last, m.index));
     const t = m[0];
     const key = `md-${i++}`;
-    if (t.startsWith("**")) nodes.push(<strong key={key} className="font-bold">{t.slice(2, -2)}</strong>);
+    // 下划线样式内联在这里，而不是放 globals.css：全局 CSS 走增量构建缓存，
+    // 曾出现过「类名已经渲染、新规则却没进 CSS 产物」的漂移。渲染器和样式放同一处，
+    // 只要组件变了，样式就一定跟着变。className 保留给 E2E 定位。
+    if (t.startsWith("=="))
+      nodes.push(
+        <span
+          key={key}
+          className="rf-md-spine"
+          style={{
+            textDecorationLine: "underline",
+            textDecorationColor: "var(--duo-green, currentColor)",
+            textDecorationThickness: "2px",
+            textUnderlineOffset: "3px",
+            fontWeight: 600,
+          }}
+        >
+          {t.slice(2, -2)}
+        </span>,
+      );
+    else if (t.startsWith("**")) nodes.push(<strong key={key} className="font-bold">{t.slice(2, -2)}</strong>);
     else if (t.startsWith("`")) nodes.push(<code key={key} className="rf-md-code">{t.slice(1, -1)}</code>);
     else nodes.push(<em key={key}>{t.slice(1, -1)}</em>);
     last = m.index + t.length;
@@ -63,7 +85,9 @@ export default function MarkdownText({ text }: { text: string }) {
     }
   };
 
-  for (const raw of text.split("\n")) {
+  // 只影响渲染：把流式帧里还没闭合的 ==抹掉，避免半边标记闪一下。
+  // 存进 contexts.ai_gloss 的仍是模型原文，闭合后下一帧自然会带上完整下划线。
+  for (const raw of stripUnclosedSpine(text).split("\n")) {
     const t = raw.trim();
     const h = t.match(/^#{1,4}\s+(.*)$/);
     if (h) {
