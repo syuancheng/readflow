@@ -67,3 +67,6 @@ nohup.out
 
 # 插件打包产物
 /dist/
+
+# IDE 剪贴板截图缓存（无版本管理价值，且是二进制大文件）
+/.qoder-input-images/
