@@ -22,9 +22,10 @@ export type BlockKind =
   | "quote"
   | "code"
   | "hr"
-  | "figure";
+  | "figure"
+  | "math";
 
-export type InlineKind = "strong" | "em" | "delete" | "code" | "link" | "image";
+export type InlineKind = "strong" | "em" | "delete" | "code" | "link" | "image" | "math";
 
 /** 相对 block.text 的 [start, end) 区间。样式与文字解耦，不参与坐标计算。 */
 export type InlineRange = {
@@ -64,6 +65,8 @@ export type BlockMeta = {
   /** 图片占位信息 */
   src?: string;
   alt?: string;
+  /** math 块：displayMode（$$…$$ 为 true，被提升成块的行内公式为 false） */
+  display?: boolean;
 };
 
 export type Block = {
@@ -77,7 +80,7 @@ export type SourceFormat = "plain" | "markdown" | "html";
 export type ImportFormatChoice = "auto" | "plain" | "markdown";
 
 /** 这些块不是自然语言正文：不计入词数、CEFR、分段小结，也不生成可点词 span。 */
-export const NON_PROSE_KINDS: readonly BlockKind[] = ["code", "hr", "figure"];
+export const NON_PROSE_KINDS: readonly BlockKind[] = ["code", "hr", "figure", "math"];
 
 export function isProse(b: Pick<Block, "kind">): boolean {
   return !NON_PROSE_KINDS.includes(b.kind);

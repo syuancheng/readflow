@@ -328,6 +328,41 @@ body {
   color: var(--duo-ink-faint);
   text-align: center;
 }
+.rf-figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto 0.45em;
+  border: 2px solid var(--duo-border);
+  border-radius: 10px;
+}
+/* 加载失败（防盗链 / 失效链接）：退回占位文字样式 */
+.rf-figure-fallback figcaption {
+  color: var(--duo-purple-dark);
+}
+
+/* 块级公式：KaTeX 渲染产物包一层可横向滚动的容器 */
+.rf-math {
+  margin: 1em 0;
+  padding: 0.3em 0.2em;
+  overflow-x: auto;
+  text-align: center;
+}
+/* 被提升成块的行内公式（display: false）别占一整行 */
+.rf-math-inline-block {
+  display: inline-block;
+  margin: 0 0.2em;
+  vertical-align: middle;
+}
+/* 行内公式的 LaTeX 源文本（第一版不渲染，只去点词 + 降为弱化样式） */
+.rf-i-math {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.86em;
+  color: var(--duo-ink-faint);
+  background: var(--duo-surface);
+  border-radius: 4px;
+  padding: 0.02em 0.18em;
+}
 
 .rf-list { margin: 0 0 1.35em; padding-left: 1.5em; }
 .rf-li { margin-bottom: 0.45em; padding-left: 0.2em; }
@@ -471,6 +506,38 @@ body {
 
 .duo-text-item:active {
   transform: translateY(1px);
+}
+
+/* 文本卡片右上角的删除按钮：平时半隐，悬浮卡片时全显（触屏常显可点） */
+.duo-text-del {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: var(--duo-ink-faint);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.duo-text-del:hover {
+  opacity: 1;
+  background: var(--duo-surface);
+  border-color: var(--duo-orange);
+  color: var(--duo-orange-dark);
+}
+
+.duo-text-del:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* 空状态 */

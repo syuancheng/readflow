@@ -18,7 +18,7 @@ const BODY = `The ${WORD} widget keeps states in sync over a long run.`;
 const GLOSS = `「一丝不苟的」——在这里形容 widget，不是形容人。
 
 🧩 主系表 · 主语带定语
-==The meticulous widget== ==keeps== ==states in sync== over a long run.`;
+==主语：The meticulous widget== ==谓语：keeps== ==表语：states in sync== over a long run.`;
 
 const j = async (r) => {
   try {
@@ -97,15 +97,25 @@ try {
   const dom = await page.evaluate(() => {
     const card = document.querySelector(".reader-note");
     const spineEls = [...(card?.querySelectorAll(".rf-md-spine") ?? [])];
+    const roleEls = [...(card?.querySelectorAll(".rf-md-role") ?? [])];
     return {
       spines: spineEls.map((e) => e.textContent.trim()),
+      roles: roleEls.map((e) => e.textContent.trim()),
       decoration: spineEls.length ? getComputedStyle(spineEls[0]).textDecorationLine : "",
+      roleSize: roleEls.length ? getComputedStyle(roleEls[0]).fontSize : "",
       cardText: card?.innerText ?? "",
       rawMarkers: (card?.innerText.match(/==/g) ?? []).length,
     };
   });
   check("三处主干都被渲染成 .rf-md-spine", dom.spines.length === 3, JSON.stringify(dom.spines));
+  check("主干成分标签渲染成 .rf-md-role", dom.roles.length === 3, JSON.stringify(dom.roles));
+  check(
+    "成分标签内容正确（主语/谓语/表语）",
+    ["主语", "谓语", "表语"].every((r) => dom.roles.includes(r)),
+    JSON.stringify(dom.roles),
+  );
   check("下划线样式真的生效", dom.decoration.includes("underline"), dom.decoration);
+  check("成分标签字号小于主干（小标签）", parseFloat(dom.roleSize) < 13, dom.roleSize);
   check("页面不露出裸 == 记号", dom.rawMarkers === 0, `raw=${dom.rawMarkers}`);
   check("第一屏的选区译法仍在", dom.cardText.includes("一丝不苟的"));
 

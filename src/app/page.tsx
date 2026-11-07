@@ -6,6 +6,7 @@ import { getStats } from "@/lib/stats";
 import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
 import ImportForm from "@/components/ImportForm";
 import CefrBadge from "@/components/CefrBadge";
+import DeleteTextButton from "@/components/DeleteTextButton";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +74,7 @@ export default async function Home() {
                 const style = SOURCE_STYLE[t.sourceType] ?? SOURCE_STYLE.paste;
                 const cefrDetail = parseCefrDetail(t.cefrDetail);
                 return (
-                  <li key={t.id}>
+                  <li key={t.id} className="relative group">
                     <Link href={`/texts/${t.id}`} className="duo-text-item block">
                       <div className="flex items-start gap-4">
                         {/* 关卡序号 */}
@@ -88,7 +89,8 @@ export default async function Home() {
                         </span>
 
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-baseline justify-between gap-4 mb-1.5">
+                          {/* pr-9 给悬浮删除按钮让位，避免盖住词数 */}
+                          <div className="flex items-baseline justify-between gap-4 mb-1.5 pr-9">
                             <h2 className="text-[16.5px] font-bold truncate">{t.title}</h2>
                             <span className="text-[13px] font-bold text-ink-faint shrink-0">
                               {t.wordCount.toLocaleString()} 词
@@ -111,6 +113,7 @@ export default async function Home() {
                         </div>
                       </div>
                     </Link>
+                    <DeleteTextButton id={t.id} title={t.title} />
                   </li>
                 );
               })}

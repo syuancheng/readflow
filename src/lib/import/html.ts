@@ -40,6 +40,52 @@ const IGNORE_TAGS = new Set([
 /** 由外层单独成块，inline 遍历时跳过，避免文字被重复收进父段落 */
 const STRUCTURAL_TAGS = new Set(["ul", "ol", "table", "pre", "blockquote"]);
 
+/**
+ * 把站点已渲染的公式还原成 LaTeX 源标记，让 walk / inlineDom 统一处理。
+ *
+ * 两类来源：
+ * - KaTeX（含部分 MathJax v3）：`<span class="katex">` 内嵌 MathML，
+ *   `<annotation encoding="application/x-tex">` 里是原始 LaTeX；
+ *   块级外套一层 `.katex-display`。
+ * - MathJax v2：`<script type="math/tex">`（inline）/
+ *   `<script type="math/tex; mode=display">`（block）。
+ *
+ * 原地替换成 `<span data-rf-math data-display>` 占位：替换发生在 walk 之前，
+ * 后续遍历只认识占位符，KaTeX 的渲染残影（aria-hidden span + MathML 双份文本）
+ * 不会再混进可见文本。
+ */
+function normalizeMath(doc: Document): void {
+  // 1) MathJax v2 的 script
+  for (const script of Array.from(doc.querySelectorAll('script[type^="math/tex"]'))) {
+    const tex = script.textContent?.trim() ?? "";
+    if (!tex) continue;
+    const display = /mode=display/i.test(script.getAttribute("type") || "");
+    const holder = doc.createElement(display ? "div" : "span");
+    holder.setAttribute("data-rf-math", "");
+    if (display) holder.setAttribute("data-display", "");
+    holder.textContent = tex;
+    script.replaceWith(holder);
+  }
+
+  // 2) KaTeX / MathML annotation。容器找最近的 .katex-display（块级）或
+  //    .katex（行内）；都没有就把 <math> 元素本身换掉。
+  for (const ann of Array.from(doc.querySelectorAll('annotation[encoding="application/x-tex"]'))) {
+    const tex = ann.textContent?.trim() ?? "";
+    if (!tex) continue;
+    const mathEl = ann.closest("math");
+    if (!mathEl) continue;
+    const display =
+      mathEl.getAttribute("display") === "block" ||
+      Boolean(mathEl.closest(".katex-display, .MathJax_Display, [data-display-math]"));
+    const container = mathEl.closest(".katex-display, .MathJax_Display") ?? mathEl.closest(".katex") ?? mathEl;
+    const holder = doc.createElement(display ? "div" : "span");
+    holder.setAttribute("data-rf-math", "");
+    if (display) holder.setAttribute("data-display", "");
+    holder.textContent = tex;
+    container.replaceWith(holder);
+  }
+}
+
 function soft(value: string): string {
   return value.replace(/\s*\n\s*/g, " ");
 }
@@ -62,6 +108,12 @@ function inlineDom(node: Node, b: TextBuilder): void {
   const el = node as Element;
   const tag = el.tagName.toLowerCase();
   if (IGNORE_TAGS.has(tag) || STRUCTURAL_TAGS.has(tag)) return;
+
+  // 公式占位（normalizeMath 替换而来）：行内公式 → math 区间，前端不可点、不进词数
+  if (el.hasAttribute("data-rf-math")) {
+    b.range("math", () => b.add(soft(el.textContent ?? "")));
+    return;
+  }
 
   const children = () => {
     for (const c of Array.from(el.childNodes)) inlineDom(c, b);
@@ -239,6 +291,25 @@ function codeBlock(el: Element): Block {
   return b.build("code", { lang: lang ?? undefined });
 }
 
+/** img 的显示地址：src 优先（jsdom 已解析成绝对地址），懒加载站点退回 data-src */
+function imgSrc(img: Element): string | undefined {
+  return absoluteUrl(img, "src") ?? img.getAttribute("data-src") ?? undefined;
+}
+
+function figureBlock(src: string | undefined, alt: string, caption?: string): Block {
+  const b = makeBuilder();
+  b.add((caption ?? alt).trim());
+  return b.build("figure", { src, alt });
+}
+
+/** 元素里除图片外没有可见文字（<picture>/<source>/空白不算）→ 视为配图专属段落 */
+function isImageOnly(el: Element): boolean {
+  if (el.querySelectorAll("img").length === 0) return false;
+  const clone = el.cloneNode(true) as Element;
+  clone.querySelectorAll("img, picture, source, svg, figure, figcaption").forEach((n) => n.remove());
+  return !(clone.textContent ?? "").trim();
+}
+
 function walk(parent: Element, out: Block[], ctx: Ctx): void {
   let loose = "";
 
@@ -266,7 +337,33 @@ function walk(parent: Element, out: Block[], ctx: Ctx): void {
 
     flushLoose();
 
-    if (/^h[1-6]$/.test(tag)) {
+    // 公式占位（normalizeMath 替换而来）：块级公式独立成块，KaTeX 渲染
+    if (el.hasAttribute("data-rf-math")) {
+      const b = makeBuilder();
+      b.add(el.textContent ?? "");
+      out.push(b.build("math", { display: el.hasAttribute("data-display") }));
+    } else if (tag === "figure") {
+      const imgs = Array.from(el.querySelectorAll("img"));
+      const caption = el.querySelector("figcaption")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      if (imgs.length > 0) {
+        // caption 只挂第一张，避免一图多句时说明重复 N 遍
+        imgs.forEach((img, i) => {
+          out.push(figureBlock(imgSrc(img), img.getAttribute("alt") || "", i === 0 ? caption : undefined));
+        });
+      } else if (caption) {
+        // figure 里没有图片（懒加载占位等）：说明文字退化为普通段落
+        const b = makeBuilder();
+        b.add(caption);
+        out.push(b.build("paragraph"));
+      }
+    } else if (tag === "img") {
+      // 裸 img（没有包在 p / figure 里）也按配图处理
+      out.push(figureBlock(imgSrc(el), el.getAttribute("alt") || ""));
+    } else if (tag === "p" && isImageOnly(el)) {
+      el.querySelectorAll("img").forEach((img) => {
+        out.push(figureBlock(imgSrc(img), img.getAttribute("alt") || ""));
+      });
+    } else if (/^h[1-6]$/.test(tag)) {
       out.push(headingOf(el));
     } else if (tag === "p") {
       out.push(makeInline(el));
@@ -296,11 +393,14 @@ function walk(parent: Element, out: Block[], ctx: Ctx): void {
 
 export function parseHtmlBlocks(html: string, baseUrl?: string): Block[] {
   const dom = new JSDOM(html, { url: baseUrl || "https://localhost/" });
+  // 站点已渲染的公式（KaTeX / MathJax）还原成 LaTeX 占位，必须在 walk 之前
+  normalizeMath(dom.window.document);
   const out: Block[] = [];
   walk(dom.window.document.body, out, { listCounter: 0, tableCounter: 0 });
 
   return out.filter((b) => {
-    if (b.kind === "hr" || b.kind === "code" || b.kind === "table_cell") return true;
+    if (b.kind === "hr" || b.kind === "code" || b.kind === "table_cell" || b.kind === "figure" || b.kind === "math")
+      return true;
     return b.text.trim().length > 0;
   });
 }

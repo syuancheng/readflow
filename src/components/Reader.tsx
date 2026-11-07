@@ -10,6 +10,7 @@ import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
 import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
+import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 
 /**
@@ -140,6 +141,7 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
   const tokens = tokenize(p.content);
   const ranges = p.inlineRanges ?? [];
   const links = ranges.filter((r) => r.kind === "link" && r.href);
+  const mathRanges = ranges.filter((r) => r.kind === "math");
   const annotatedRanges = rangeKey
     .split(",")
     .filter(Boolean)
@@ -150,6 +152,15 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
 
   const one = (t: Token): React.ReactNode => {
     if (!t.word) return <span key={`t${t.start}`}>{t.text}</span>;
+    // 行内公式里的 token：LaTeX 片段不是要背的单词，不生成 .w 可点 span。
+    // 文本仍是公式的 LaTeX 源，DOM 文本与 content 严格一致 → 锚点坐标不变。
+    if (mathRanges.some((r) => t.start >= r.start && t.end <= r.end)) {
+      return (
+        <span key={`t${t.start}`} className="rf-i-math">
+          {t.text}
+        </span>
+      );
+    }
     /* 标记只反映「这次批注」：划选存档的那一次出现（w-annotated）。
        不做词库级全局标记——同一个词在别的句子里可能你是懂的，
        全文铺绿既误导又破坏「单词放在句子语境里解释」的原则 */
@@ -242,12 +253,21 @@ const SingleBlock = memo(function SingleBlock({ p, rangeKey }: { p: Para; rangeK
       );
     case "hr":
       return <hr {...pid} className="rf-hr" />;
-    case "figure":
+    case "math": {
+      // KaTeX 纯函数渲染：SSR 与客户端输出一致，无 hydration 风险。
+      // content 是 LaTeX 源，不生成可点词；innerHTML 由 KaTeX 生成（XSS 安全模式）。
+      const html = renderMath(p.content, meta.display ?? true);
+      if (!html) return <pre {...pid} className="rf-pre" data-label="公式"><code>{p.content}</code></pre>;
       return (
-        <figure {...pid} className="rf-figure">
-          <figcaption>{p.content}</figcaption>
-        </figure>
+        <div
+          {...pid}
+          className={`rf-math${meta.display === false ? " rf-math-inline-block" : ""}`}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       );
+    }
+    case "figure":
+      return <FigureBlock p={p} pid={pid} />;
     case "list_item":
       return (
         <li {...pid} className="rf-li">
@@ -267,6 +287,48 @@ const SingleBlock = memo(function SingleBlock({ p, rangeKey }: { p: Para; rangeK
         </p>
       );
   }
+});
+
+/** 配图块：渲染真图；加载失败（防盗链 / 失效）退回占位文字 + 原图链接 */
+const FigureBlock = memo(function FigureBlock({ p, pid }: { p: Para; pid: ReturnType<typeof pidProps> }) {
+  const meta = p.blockMeta ?? {};
+  const src = typeof meta.src === "string" ? meta.src : undefined;
+  const [broken, setBroken] = useState(false);
+  // 只接受 http(s) 绝对地址：data:/javascript: 之类的地址没有理由进 <img>
+  const safe = Boolean(src && /^https?:\/\//i.test(src));
+
+  if (!safe || broken) {
+    return (
+      <figure {...pid} className="rf-figure rf-figure-fallback">
+        <figcaption>
+          {broken ? "图片未能加载（站点可能限制外链）：" : ""}
+          {p.content || meta.alt || "图片"}
+          {safe && (
+            <>
+              （
+              <a href={src} target="_blank" rel="noreferrer" className="rf-inline-link">
+                查看原图
+              </a>
+              ）
+            </>
+          )}
+        </figcaption>
+      </figure>
+    );
+  }
+
+  return (
+    <figure {...pid} className="rf-figure">
+      <img
+        src={src}
+        alt={p.content || meta.alt || ""}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+      />
+      {p.content.trim() && <figcaption>{p.content}</figcaption>}
+    </figure>
+  );
 });
 
 /** 表格 cell / 列表 item 在库里各占一行，渲染时才重新组装回一个结构。 */
@@ -505,17 +567,33 @@ export default function Reader({
     }
   }
 
-  // 场景 4：同一句里连续请教的次数。只放内存、不落库——「这句卡了三次」是
+  // 场景 4：同一句里连续请教的次数 + 历史。只放内存、不落库——「这句卡了三次」是
   // 阅读会话内的瞬时状态，不该变成被永久记住的用户数据。
   // key 用「段落 + 句子区间」：换句自动归零，翻页/刷新随组件重挂载清零。
-  const sentenceAskRef = useRef<{ key: string; count: number }>({ key: "", count: 0 });
+  // history 记录每次选区的原文（不存 AI 生成内容），让模型判断是并列卡点还是同词复用。
+  const sentenceAskRef = useRef<{
+    key: string;
+    count: number;
+    history: { selection: string }[];
+  }>({ key: "", count: 0, history: [] });
 
-  function noteSelection(sig: SelectionSignals, paragraphId: string): number {
+  function noteSelection(
+    sig: SelectionSignals,
+    paragraphId: string,
+    selection: string,
+  ): { count: number; priorAsks: { selection: string }[] } {
     const key = `${paragraphId}:${sig.sentenceStart}:${sig.sentenceEnd}`;
     const cur = sentenceAskRef.current;
-    if (cur.key === key) cur.count += 1;
-    else sentenceAskRef.current = { key, count: 1 };
-    return sentenceAskRef.current.count;
+    if (cur.key === key) {
+      // 先取 priorAsks（不含本次），再把本次选区推入历史
+      const priorAsks = [...cur.history];
+      cur.history.push({ selection });
+      cur.count += 1;
+      return { count: cur.count, priorAsks };
+    }
+    const history = [{ selection }];
+    sentenceAskRef.current = { key, count: 1, history };
+    return { count: 1, priorAsks: [] };
   }
 
   // 已收词表（含状态），键为小写 displayForm / lemma
@@ -736,6 +814,7 @@ export default function Reader({
     }
 
     const sig = selectionSignals(p.content, s, en, "word");
+    const askInfo = noteSelection(sig, pid, displayForm);
     const pickData: Pick = {
       paragraphId: pid,
       paragraphIdx: p.idx,
@@ -743,7 +822,11 @@ export default function Reader({
       x: rect.left + rect.width / 2,
       y: rect.bottom,
       source: "word",
-      signals: { ...sig, repeatCount: noteSelection(sig, pid) },
+      signals: {
+        ...sig,
+        repeatCount: askInfo.count,
+        ...(askInfo.priorAsks.length > 0 ? { priorAsks: askInfo.priorAsks } : {}),
+      },
     };
     // 同一个锚点之前问过 AI：直接把答案摊开，不再重新请求模型。
     // 这也是「点回已经变绿的词」时能立刻看到那次解释的依据。
@@ -798,6 +881,8 @@ export default function Reader({
     });
     markActiveAnchor(anchors);
     const sig = selectionSignals(p.content, start, end, "select");
+    const selectionText = p.content.slice(start, end).trim();
+    const askInfo = noteSelection(sig, pid, selectionText);
     const pickData: Pick = {
       paragraphId: pid,
       paragraphIdx: p.idx,
@@ -805,7 +890,11 @@ export default function Reader({
       x: e.clientX,
       y: e.clientY,
       source: "select",
-      signals: { ...sig, repeatCount: noteSelection(sig, pid) },
+      signals: {
+        ...sig,
+        repeatCount: askInfo.count,
+        ...(askInfo.priorAsks.length > 0 ? { priorAsks: askInfo.priorAsks } : {}),
+      },
     };
     const cached = savedGlossFor(pid, pickData.anchor.start, pickData.anchor.end);
     if (cached) {
@@ -1381,11 +1470,12 @@ function PickCard({
     setAiText("");
 
     // 客观信号：前端只采集证据，不下结论。词典命中在这里补（构造 Pick 时还没查词典）。
+    // forceWord = 用户点了「改按词答」，把 repeatCount/priorAsks 清零，让模型按第 1 次的深度走。
     const signals = pick.signals
       ? {
           ...pick.signals,
           dictHit: Boolean(dict?.entry),
-          ...(forceWord ? { repeatCount: 0 } : {}),
+          ...(forceWord ? { repeatCount: 0, priorAsks: undefined } : {}),
         }
       : undefined;
 

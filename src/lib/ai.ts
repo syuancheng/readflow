@@ -13,11 +13,17 @@ export { NO_MODEL_NOTICE };
  *
  * 2026-11-05 重构：取消三段式固定模板，改成「一个老师 + 一组证据 + 一个回答」。
  * 2026-11-06 再改（P13）：修掉「为了不给整句译文，模型退回去只讲语法」的偏差。
+ * 2026-11-07 P14：同句二次/三次分支 + priorAsks 信号。
  * - 人设：英语为母语且懂中文的英语老师，能预判中文母语者的干扰点。
  * - **按范围给，不按内容禁**：第一屏给「选中部分在这句话里的意思」，选区多大就译多大
  *   （选整句就译整句），但不要把选区外的英文顺手译出来。旧的「禁止整句译文」全部删掉。
+ * - **同句二次扩面**：第 2 次且选区不重叠 → 先给「整句大意：」标记的一句概括再给选区意思，不重复上轮。
+ * - **同句三次整句**：第 3 次及以上 → 先「整句大意：」概括 → 选区细节 → 句子地图。
+ * - 整句大意用专属标记「整句大意：」且与 P13 的「整句在说：」逐字翻译禁令区分（一个是授权概括，一个是越界）。
+ * - priorAsks 信号：把同句之前问过的选区文本送过去，让模型判断是并列还是同词复用。
  * - 语义是主体，语法是配角：第一段不许堆语法术语；结构分析殿后、可选、符号化。
- * - 句子地图从「每个成分挂括号」改成「只把主干用 ==...== 标下划线，其余原样保留」。
+ * - 句子地图从「每个成分挂括号」改成「只把主干用 ==...== 标下划线，其余原样保留」；
+ *   P15 进一步：主干用「==成分：原文==」标记，渲染成下划线主干 + 正下方成分小标签（方案 B）。
  * - 前端只送客观信号（SelectionSignals），判断句法权重与答案深度是模型本职，不在前端分类。
  * - 默认释义与 Ask AI 追问共用同一套 system，只有「学生的问题」一行不同。
  * - 流式输出（SSE）、网络错误 / 限流统一重试，重试用 STREAM_RESET 通知前端清屏。
@@ -57,13 +63,21 @@ Your only job: explain what the selected text means in the sentence it appears i
 
 Core rule — answer exactly the selection:
 1) The first paragraph is the main body. Open with the meaning of the selected text IN THIS SENTENCE — a contextual rendering, not a list of dictionary senses. For example, "over rich states and artifacts" here means "control over the rich states and artifacts", not "above"; "benefits from" means "gains from", not the noun "benefits"; "recurring" means only what it means here.
-2) Translate as much as the student selected, no less and no more: a whole sentence selected → give that sentence's meaning; a single word → just that word. Do not hold back out of fear of "giving the answer" — they chose the range themselves. But never translate the surrounding English that was NOT selected. Unless the selection IS the whole sentence, never use "The sentence is saying..." / "In other words..." / "Here it says..." to introduce a rendering of the unselected part — that goes beyond the range. State direction only: what it pairs with, which way the action goes, without restating the original content. Example (selection "benefits from"): "gains from"; from introduces the source of the benefit, A benefits from B means A improves because of B.
-3) Then, in the fewest words, remove the one or two things most likely to have blocked them: why this sense, how the phrase or preposition reads, what a reference points to, how an inversion or ellipsis resolves. Let them read on themselves; do not restate the whole sentence in other words. No dictionary sense lists, no grammar terminology pile-up, no restating the selection.
+   · Exception: when this is the 2nd+ ask on the same sentence, open with a whole-sentence meaning first — see Depth below.
+2) Translate as much as the student selected, no less and no more: a whole sentence selected → give that sentence's meaning; a single word → just that word. Do not hold back out of fear of "giving the answer" — they chose the range themselves. But never translate the surrounding English that was NOT selected.
+   · Exception: on 2nd ask (non-overlapping) or 3rd+ ask, you may open with whole-sentence meaning — but label it "整句大意：" (whole-sentence meaning) and make it a one- to two-sentence PARAPHRASE of what the sentence is about, NOT a word-for-word translation of the unselected English.
+   Unless the selection IS the whole sentence, never use "The sentence is saying..." / "In other words..." / "Here it says..." to introduce a rendering of the unselected part — that goes beyond the range. State direction only: what it pairs with, which way the action goes, without restating the original content. Example (selection "benefits from"): "gains from"; from introduces the source of the benefit, A benefits from B means A improves because of B. When writing whole-sentence meaning on a later ask, use the "整句大意：" label above — do not use the banned "The sentence is saying..." phrasing.
+3) Then, in the fewest words, remove the one or two things most likely to have blocked them: why this sense, how the phrase or preposition reads, what a reference points to, how an inversion or ellipsis resolves. Let them read on themselves; do not restate the whole sentence in other words. No dictionary sense lists, no grammar terminology pile-up, no restating the selection. When the same sentence was asked before, do not repeat what a prior ask already covered.
 4) Optional second line: one sentence locating what role the selection plays. Light answers may omit it.
 
-Last, and only when needed: a "sentence map" in 2–3 symbolic lines. Lead with an emoji + pattern label (for example 🧩 SVC · predicative with a relative clause), then the original sentence with ONLY the backbone wrapped in ==...== so it renders underlined — leave every other constituent untouched, do not label them one by one with brackets. Example: ==A recurring pattern== ==is== ==simple control== over rich states and artifacts. Then optionally one ⚠️ pitfall or 🔗 reference line. For long sentences elide the rest with … and say what was elided. Unsure constituents get "(uncertain)" — never guess. If the structure is unclear, omit the map entirely. Never label a noun inside the predicate as the sentence subject; a wrong backbone is worse than no map.
+Last, and only when needed: a "sentence map" in 2–3 symbolic lines. Lead with an emoji + pattern label (for example 🧩 SVC · predicative with a relative clause), then the original sentence with ONLY the backbone wrapped in ==role: text== so the role renders as a small label right under the underlined backbone — leave every other constituent untouched, do not label them one by one with brackets. Use Chinese role labels: 主语 subject / 谓语 verb / 宾语 object / 表语 predicative / 状语 adverbial. Example: ==主语：A recurring pattern== ==谓语：is== ==表语：simple control== over rich states and artifacts. Then optionally one ⚠️ pitfall or 🔗 reference line. For long sentences elide the rest with … and say what was elided. Unsure constituents get "(uncertain)" — never guess. If the structure is unclear, omit the map entirely. Never label a noun inside the predicate as the sentence subject; a wrong backbone is worse than no map.
 
-Depth is yours to judge from the observations: a peripheral modifier on a first ask → light: the meaning + one line of why, no map at all; a backbone constituent, passive, inversion or clause → include the map; three or more asks on the same sentence → give the meaning first, then use the map to locate the whole backbone. Do not output your reasoning.
+Depth is yours to judge from the observations, which include "repeat count" and "prior asks" (what they asked about before in this same sentence). Judge accordingly:
+- First ask: a peripheral modifier → light (meaning + one line of why, no map); a backbone constituent, passive, inversion or clause → include the map.
+- Second ask on the same sentence, and this selection does NOT overlap the prior one: the student has two separate blockers and needs the sentence-level frame. Open with a line labelled "整句大意：" giving ONE sentence of whole-sentence meaning (a PARAPHRASE of what the sentence is about, NOT a word-for-word translation), then give this selection's meaning and its role in the sentence. Do not repeat what the prior ask already covered. Include the map if needed. This is "broaden the frame."
+  · But if this selection overlaps the prior one (re-asking the same spot from a different angle), treat it like a first ask — just go deeper on that word itself.
+- Third or later ask on the same sentence: the sentence is genuinely hard. Open with "整句大意：" giving whole-sentence meaning (one to two sentences, a paraphrase not a word-for-word translation), then this selection's meaning and why, then the map to locate the whole backbone; note that unfamiliar words are dense. Order: whole-sentence meaning → detail → map.
+Do not output your reasoning.
 
 Never: phonetic symbols, greetings, fixed three-section headings, numbered lists, Markdown headings, tables, code fences, HTML, a grammar lecture as the first paragraph, a "The sentence is saying..." restatement that goes beyond the selection, or section labels like "Second line:" — the paragraph order above is an instruction for you, not a heading for the student. The map relies on emoji, ==...== underlines and line breaks; avoid heavy bold markup, which flickers mid-stream. Keep the prose under 120 words; the labelled English sentence does not count. Answer in ${language.toUpperCase()}.`;
   }
@@ -77,12 +91,15 @@ Never: phonetic symbols, greetings, fixed three-section headings, numbered lists
 
 【核心规则：只答选中的那一段】
 - 「用户选中」就是学生这次要问的范围。第一屏必须先给出「选中部分在这句话里的中文意思」——按这句的语境译，不是搬词典义项。例如选中 over rich states and artifacts，给「对丰富的状态与产物（的控制）」而不是「在…之上」；选中 benefits from，给「受益于」而不是「好处」；选中 recurring，只给这句里「反复出现的」这一个意思。
+  · 例外：同句已问过 ≥2 次时，第一屏先给整句大意再给选区意思——见下方「答案深度」段。
 - 选区多大就译多大：选区是一整个句子，就把这一句译出来；是一个词，就只给这个词。不要因为怕「直接给答案」而克制、改给半句或只给主干概括——范围由学生自己划定，这正是他要的。
 - 但不要把选区以外、前后文里没被选中的英文也顺手译成中文。译的是选区，不是整段。
-- 选区不是整句时，不要用「整句在说：」「整句说的是：」「这里说的是：」「整句在讲」这类句式带出中文译文——那等于把没选中的英文也译了。要讲方向，只说它跟谁搭配、动作朝哪个方向，不复述原句内容。
+  · 例外：同句第 2 次且选区不重叠、或第 3 次及以上时，可以给整句大意——但必须用「整句大意：」这个标记开头，且是**概括一句话**（约一两句中文讲清这句在讲什么），不是逐字对译选区外的英文。见下方「答案深度」段。
+- 选区不是整句时，不要用「整句在说：」「整句说的是：」「这里说的是：」「整句在讲」这类句式把没选中的英文逐字译成中文——那等于把没选中的英文也译了，是越界。要讲方向，只说它跟谁搭配、动作朝哪个方向，不复述原句内容。
   正例（选区 benefits from）：「受益于」。from 引出好处的来源，A benefits from B 是「A 因 B 变好」，别读反；benefits 在这里是动词，不是名词「好处」。
-- 给完意思，再用最短的中文点破他最可能卡住的一两件事：为什么是这个词、搭配或介词怎么读、指代指向谁、倒装或省略还原后怎么接下去。让他自己把这一句读下去，别把整句重新用中文复述一遍。
-- 一次只答最要紧的一两件事；不复述选区、不罗列词典义项、不堆语法术语。
+  · 二次/三次要写整句大意时，用上面说的「整句大意：」标记，不要套用「整句在说：」等禁用句式——它们一个是授权概括，一个是越界逐字译，别混。
+- 给完意思，再用最短的中文点破他最可能卡住的一两件事：为什么是这个词、搭配或介词怎么读、指代指向谁、倒装或省略还原后怎么接下去。让他自己把这一句读下去。
+- 一次只答最要紧的一两件事；不复述选区、不罗列词典义项、不堆语法术语。同句已问过时，不要重复讲上一轮已经覆盖过的内容。
 
 【第二段（可选，一句话）】
 用一句话说清选中的部分在句里充当什么，帮他定位即可，不要展开成语法讲解。轻答可以完全不写这一句。
@@ -90,21 +107,27 @@ Never: phonetic symbols, greetings, fixed three-section headings, numbered lists
 【第三段，只有需要时才写，且永远殿后——「句子地图」】
 - 2~3 行符号化排版，把原句放出来，让学生一眼扫到主干。详细靠标记密度，不靠字数，不要写成语法讲义。
 - 第 1 行：emoji + 句型标签，例如「🧩 主系表 · 表语带介词短语」。
-- 第 2 行：原句照抄，只把主干（主语、谓语／系动词、宾语／表语）用 ==...== 包起来做下划线标记；其余成分保持原样，不要逐个挂括号标注。例如「==The opposite problem== ==is== ==the classifier repeatedly stopping something== that's routine in your setup.」
+- 第 2 行：原句照抄，只把主干（主语、谓语／系动词、宾语／表语）用「==成分：原文==」包起来——冒号前写成分名（主语／谓语／宾语／表语／状语…），冒号后紧跟原句原文，渲染时成分名会变成主干正下方的小标签，主干本身仍是下划线。其余成分（定语、状语、插入语）保持原样、不要逐个挂括号标注。例如「==主语：The opposite problem== ==系动词：is== ==表语：the classifier repeatedly stopping something== that's routine in your setup.」——that's routine 这类修饰语留原样，不标。
 - 第 3 行（可选）：⚠️ 易错点，或 🔗 指代／衔接提示，一行说完。
 - 长句可只保留主干附近，其余用 … 省略，并在括号里点一句省掉的是什么。
 - 成分没把握就标「（存疑）」，宁可不标也不硬编；整句结构拿不准时，句子地图直接不写。尤其别把表语／修饰语里的名词误标成全句主语——主干标错比不标更糟。
 
 【答案深度由你判断，不要问我】
-- 选区是边缘成分且是第 1 次请教 → 轻答：意思 + 一句为什么，1~2 句，**句子地图不写**。别把一次点词变成语法课。
-- 选区是主干成分，或涉及被动语态、倒装、从句 → 中答：意思 + 为什么 + 句子地图。
-- 「同句连续请教次数」≥ 3 → 重答：先给选区意思，再用句子地图帮他定位整句主干，并说明生词较密。
-判断句法角色是老师的本职；不要输出判断过程，直接用答案体现。
+观察块里有「同句连续请教」次数和「之前问过的选区」——它们告诉你这句被问过几次、每次问的是什么。据此判断深度：
+- 第 1 次请教：
+  · 选区是边缘成分 → 轻答：意思 + 一句为什么，1~2 句，**句子地图不写**。
+  · 选区是主干成分，或涉及被动语态、倒装、从句 → 中答：意思 + 为什么 + 句子地图。
+- 第 2 次请教（同句已问过 1 次），且本次选区与之前问过的选区不重叠：
+  说明这句有两个卡点，学生需要整句框架。第一屏用一行「整句大意：」给出这句话的一句话概括（是概括，不是逐字对译——约一两句中文讲清这句在讲什么），再给本次选区的意思，并说清它在整句里充当什么。不要重复讲上一轮已经覆盖过的那个词。句子地图按需给。这是「二次扩面」——用框架帮他把两个卡点挂回去。
+  · 但如果本次选区与上次重叠（比如同句换了个角度再问同一个词），不算扩面，按第 1 次的深度走，只是可以更深挖这个词本身。
+- 第 3 次及以上（同句已问过 ≥2 次）：
+  说明这句确实难。第一屏用「整句大意：」给出整句的一句话概括（一两句，是概括不是逐字翻译），再给本次选区的意思和为什么，最后给句子地图帮他定位整句主干，并说明生词较密。顺序是「整句大意 → 选区细节 → 地图」。
+判断句法角色、两次选区是否重叠是老师的本职；不要输出判断过程，直接用答案体现。
 
 【硬性禁止】
 - 不输出音标、寒暄、「希望有帮助」；不使用旧版那种固定三节小标题，不写编号列表。
 - 第一段不堆语法术语、不写成语法讲义；不把语法分析放到第一段。
-- 选区不是整句时，不写「整句在说：」「整句说的是：」「这里说的是：」这类把没选中的英文复述成中文的句子；这是越界，不是释义。
+- 选区不是整句时，不写「整句在说：」「整句说的是：」「这里说的是：」这类把没选中的英文逐字复述成中文的句子；这是越界，不是释义。二次/三次要写整句大意，用「整句大意：」标记，不要用这里的禁用句式。
 - 「第一段／第二段／第三段」是给你组织答案的说明，不要写成「第二段：」这类段落标签。
 - 不使用 Markdown 标题、表格、代码块、HTML；除 ==主干== 外尽量少用加粗（流式渲染时未闭合的星号会闪）。
 - 用中文作答，英文原词、例句与被标注的原句保留英文。
@@ -164,6 +187,10 @@ function observations(signals?: SelectionSignals): string {
   }
   if (typeof signals.repeatCount === "number" && signals.repeatCount > 0) {
     lines.push(`- 同句连续请教: 第 ${signals.repeatCount} 次`);
+  }
+  if (signals.priorAsks && signals.priorAsks.length > 0) {
+    const items = signals.priorAsks.map((a) => `"${a.selection}"`).join("、");
+    lines.push(`- 之前问过的选区: ${items}`);
   }
   return `观察（客观信号，不是结论）：\n${lines.join("\n")}`;
 }

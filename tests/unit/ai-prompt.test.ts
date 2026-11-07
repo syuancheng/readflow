@@ -4,10 +4,12 @@ import { buildSummaryPrompt, buildSystemPrompt, buildUserMessage } from "../../s
 import type { SelectionSignals } from "../../src/lib/sentence";
 
 /**
- * AI 释义新契约（2026-11-05 讨论收敛，2026-11-06 P13 修正）：
+ * AI 释义新契约（2026-11-05 讨论收敛，2026-11-06 P13 修正，2026-11-07 P14 二次/三次分支）：
  * - 取消三段式固定模板，改成「一个老师 + 一组证据 + 一个回答」
  * - **按范围给，不按内容禁**：第一屏给选中部分在这句话里的意思，选区多大就译多大；
  *   旧的「禁止整句译文」被删掉——它逼得模型为了避险只写语法（用户实测偏差）。
+ * - **P14 同句二次/三次分支**：第 2 次且选区不重叠 → 先给整句大意再给选区意思；
+ *   第 3 次及以上 → 先整句大意 → 选区细节 → 句子地图。priorAsks 把之前问过的选区送过去。
  * - 语义是主体、语法是配角：第一段不许堆术语；结构分析殿后、可选、符号化
  * - 句子地图只把主干用 ==...== 标下划线，不再逐个成分挂括号
  * - 前端只送客观信号，判断句法权重与答案深度是模型本职
@@ -72,12 +74,14 @@ test("答案顺序：第一屏给选区意思，语法结构永远殿后且可�
   assert.ok(p.includes("第一段不堆语法术语"));
 });
 
-test("句子地图：只突主干下划线，不再逐成分挂括号", () => {
+test("句子地图：主干用 ==成分：原文== 标下划线 + 成分小标签，仍只突主干", () => {
   const p = buildSystemPrompt("en", false, LONG_SELECTION);
   assert.ok(p.includes("句子地图"));
   assert.ok(p.includes("2~3 行") || p.includes("2~3 行符号化"));
   assert.ok(p.includes("把原句放出来"));
-  assert.ok(p.includes("=="), "主干用 ==...== 标记，渲染成下划线");
+  // P15：主干用「==成分：原文==」标记，渲染成下划线主干 + 正下方成分小标签
+  assert.ok(p.includes("==成分：原文=="), "主干带成分标签的标记格式");
+  assert.ok(p.includes("正下方的小标签") || p.includes("小标签"), "明确渲染为下方成分标签");
   assert.ok(p.includes("只把主干") && p.includes("不要逐个挂括号标注"));
   assert.ok(p.includes("🧩") && p.includes("⚠️") && p.includes("🔗"), "要有 emoji 标志，不是只有一段文字");
   assert.ok(!p.includes("（主语） is（系动词）"), "旧版逐个成分标注的示例已移除");
@@ -114,9 +118,53 @@ test("深度判断交给模型，且只依据客观信号，不向用户提问",
   const p = buildSystemPrompt("en", false, "steer");
   assert.ok(p.includes("边缘成分") && p.includes("主干成分"));
   assert.ok(p.includes("同句连续"));
-  assert.ok(p.includes("≥ 3"));
+  // P14：二次不重叠扩面 + 三次整句，取代旧版「≥3」单一阈值
+  assert.ok(p.includes("第 2 次请教") && p.includes("不重叠"));
+  assert.ok(p.includes("第 3 次及以上"));
   assert.ok(p.includes("不要问我"));
   assert.ok(p.includes("不要输出判断过程"));
+});
+
+test("P14 二次扩面：不重叠时先整句大意、不重复上轮", () => {
+  const zh = buildSystemPrompt("en", false, "routine");
+  assert.ok(zh.includes("第 2 次请教") && zh.includes("本次选区与之前问过的选区不重叠"));
+  assert.ok(zh.includes("整句大意"), "二次扩面要先给整句大意");
+  assert.ok(zh.includes("不要重复讲上一轮已经覆盖过的"));
+  assert.ok(zh.includes("二次扩面"));
+  // 重叠（同词换个角度）不算扩面，按第 1 次深度走
+  assert.ok(zh.includes("本次选区与上次重叠") && zh.includes("按第 1 次的深度走"));
+
+  const en = buildSystemPrompt("en", true, "routine");
+  assert.ok(en.includes("Second ask on the same sentence") && en.includes("does NOT overlap"));
+  assert.ok(en.includes("whole-sentence meaning"), "英文人设同样先给整句大意");
+  assert.ok(en.includes("Do not repeat what the prior ask already covered"));
+  assert.ok(en.includes("broaden the frame"));
+});
+
+test("P14 三次整句：先整句大意，再细节，再地图", () => {
+  const zh = buildSystemPrompt("en", false, "routine");
+  assert.ok(zh.includes("第 3 次及以上"));
+  assert.ok(zh.includes("先给整句大意"));
+  assert.ok(zh.includes("顺序是「整句大意 → 选区细节 → 地图」"), "顺序明确为 整句大意→细节→地图");
+
+  const en = buildSystemPrompt("en", true, "routine");
+  assert.ok(en.includes("Third or later ask"));
+  assert.ok(en.includes("Open with") && en.includes("whole-sentence meaning"), "英文人设同样先给整句大意");
+  assert.ok(en.includes("Order: whole-sentence meaning → detail → map"));
+});
+
+test("P14 核心规则例外：二次/三次可以给整句大意，不算越界", () => {
+  const zh = buildSystemPrompt("en", false, "routine");
+  // 核心规则段的「选区范围」和「只译选区」都要给二次/三次的例外，否则模型仍会卡在只译选区
+  assert.ok(zh.includes("同句已问过 ≥2 次时") && zh.includes("第一屏先给整句大意"));
+  assert.ok(zh.includes("讲清这句在讲什么") && zh.includes("不是逐字对译选区外的英文"));
+  // 关键：整句大意必须用专属标记，不能套用 P13 禁用的「整句在说：」——否则授权和越界混淆
+  assert.ok(zh.includes("整句大意：") && zh.includes("不要套用") && zh.includes("禁用句式"), "整句大意用专属标记，与越界句式区分");
+  assert.ok(zh.includes("不要重复讲上一轮已经覆盖过的内容"));
+
+  const en = buildSystemPrompt("en", true, "routine");
+  assert.ok(en.includes("2nd+ ask") && en.includes("whole-sentence meaning"));
+  assert.ok(en.includes("PARAPHRASE of what the sentence is about") && en.includes("word-for-word translation of the unselected English"));
 });
 
 /**
@@ -151,7 +199,7 @@ test("真实样本回归：旧「禁止整句译文」已移除，段落标签/�
   assert.ok(!en.includes("a full fluent translation is not"), "旧的整句译文禁令不该残留");
   assert.ok(en.includes('never use "The sentence is saying..."'), "英文人设同步挡越界复述");
   assert.ok(en.includes("section labels"));
-  assert.ok(en.includes("no map at all"));
+  assert.ok(en.includes("no map"));
   assert.ok(en.includes("wrong backbone"));
 });
 
@@ -191,7 +239,7 @@ test("monolingual 是可人设的英文版，同样带主体优先与句子地�
   assert.ok(p.includes("first paragraph"));
   assert.ok(p.includes("sentence map"));
   assert.ok(p.includes("🧩") && p.includes("⚠️"));
-  assert.ok(p.includes("==...=="), "英文人设的句子地图也用下划线主干");
+  assert.ok(p.includes("==role: text==") || p.includes("==主语："), "英文人设的句子地图也用 ==成分：主干== 标记");
   assert.ok(p.includes("do not label them one by one"), "不再逐成分挂括号");
   assert.ok(p.includes("(uncertain)"));
   assert.ok(/Answer in EN/.test(p));
@@ -225,6 +273,15 @@ test("观察块只摆客观证据，不下结论；不带 signals 时与旧调�
   assert.ok(withSignals.includes("覆盖约 20%"));
   assert.ok(!withSignals.includes("这是主干"), "不能把结论写进观察");
   assert.ok(!withSignals.includes("应该给"), "不能把结论写进观察");
+
+  // P14：priorAsks 是客观事实（之前问过什么），不是结论
+  const withPrior = buildUserMessage({
+    ...BASE,
+    signals: { ...SIG, priorAsks: [{ selection: "context collapse" }, { selection: "brevity bias" }] },
+  });
+  assert.ok(withPrior.includes("之前问过的选区:"));
+  assert.ok(withPrior.includes('"context collapse"') && withPrior.includes('"brevity bias"'));
+  assert.ok(!withPrior.includes("很生僻") && !withPrior.includes("应该"), "priorAsks 不带结论性判断");
 
   const legacy = buildUserMessage(BASE);
   assert.ok(!legacy.includes("观察（"));

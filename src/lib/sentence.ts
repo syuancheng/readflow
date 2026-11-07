@@ -194,8 +194,12 @@ export type SelectionSignals = {
   /** 所在句在段落内的字符区间 */
   sentenceStart: number;
   sentenceEnd: number;
-  /** 同一句内连续请教的次数（会话内累计，不落库） */
+  /** 同一句内连续请教的次数（会话内累计，不落库；含词典命中与 AI 释义，只要选了就算） */
   repeatCount?: number;
+  /** 同一句之前问过的选区文本（会话内累计，不落库）。
+   *  只存选区原文，不存 AI 生成内容——模型需要的是「他问过什么」这个事实，
+   *  不是上一轮的完整释义文本。priorAsks.length = repeatCount - 1（不含本次）。 */
+  priorAsks?: { selection: string }[];
   /** 词典是否收录选区（短语通常查不到） */
   dictHit?: boolean;
 };

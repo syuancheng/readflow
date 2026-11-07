@@ -36,6 +36,22 @@ function narrowSignals(v: unknown): SelectionSignals | undefined {
   if (!source || !position) return undefined;
 
   const repeat = clamp(o.repeatCount, 0, 99);
+
+  // priorAsks：同句历史，只存选区文本（截断防滥用），不含 AI 生成内容
+  let priorAsks: { selection: string }[] | undefined;
+  if (Array.isArray(o.priorAsks)) {
+    const cleaned = o.priorAsks
+      .filter((item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null &&
+        typeof (item as Record<string, unknown>).selection === "string",
+      )
+      .map((item) => ({
+        selection: String((item as Record<string, unknown>).selection).slice(0, 500),
+      }))
+      .slice(0, 20);
+    if (cleaned.length > 0) priorAsks = cleaned;
+  }
+
   return {
     source,
     position,
@@ -47,6 +63,7 @@ function narrowSignals(v: unknown): SelectionSignals | undefined {
     sentenceEnd: clamp(o.sentenceEnd, 0, 10_000_000) ?? 0,
     ...(typeof o.dictHit === "boolean" ? { dictHit: o.dictHit } : {}),
     ...(repeat !== undefined ? { repeatCount: repeat } : {}),
+    ...(priorAsks ? { priorAsks } : {}),
   };
 }
 

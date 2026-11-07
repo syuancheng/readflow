@@ -21,22 +21,69 @@ function renderMdInline(text: string): ReactNode[] {
     // 下划线样式内联在这里，而不是放 globals.css：全局 CSS 走增量构建缓存，
     // 曾出现过「类名已经渲染、新规则却没进 CSS 产物」的漂移。渲染器和样式放同一处，
     // 只要组件变了，样式就一定跟着变。className 保留给 E2E 定位。
-    if (t.startsWith("=="))
-      nodes.push(
-        <span
-          key={key}
-          className="rf-md-spine"
-          style={{
-            textDecorationLine: "underline",
-            textDecorationColor: "var(--duo-green, currentColor)",
-            textDecorationThickness: "2px",
-            textUnderlineOffset: "3px",
-            fontWeight: 600,
-          }}
-        >
-          {t.slice(2, -2)}
-        </span>,
-      );
+    if (t.startsWith("==")) {
+      // P15：==成分：主干== → 主干下划线 + 正下方成分小标签（flex 列，不需空格对齐、流式不闪）
+      const inner = t.slice(2, -2);
+      const roleMatch = inner.match(/^([^：\n]+)：(.+)$/);
+      if (roleMatch) {
+        const role = roleMatch[1].trim();
+        const spine = roleMatch[2];
+        nodes.push(
+          <span
+            key={key}
+            className="rf-md-spine-wrap"
+            style={{
+              display: "inline-flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              verticalAlign: "text-bottom",
+            }}
+          >
+            <span
+              className="rf-md-spine"
+              style={{
+                textDecorationLine: "underline",
+                textDecorationColor: "var(--duo-green, currentColor)",
+                textDecorationThickness: "2px",
+                textUnderlineOffset: "3px",
+                fontWeight: 600,
+              }}
+            >
+              {spine}
+            </span>
+            <span
+              className="rf-md-role"
+              style={{
+                fontSize: "0.68em",
+                lineHeight: 1,
+                color: "var(--duo-ink-soft, #888)",
+                marginTop: "1px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {role}
+            </span>
+          </span>,
+        );
+      } else {
+        // 兼容旧格式 ==主干==（无成分标签）
+        nodes.push(
+          <span
+            key={key}
+            className="rf-md-spine"
+            style={{
+              textDecorationLine: "underline",
+              textDecorationColor: "var(--duo-green, currentColor)",
+              textDecorationThickness: "2px",
+              textUnderlineOffset: "3px",
+              fontWeight: 600,
+            }}
+          >
+            {inner}
+          </span>,
+        );
+      }
+    }
     else if (t.startsWith("**")) nodes.push(<strong key={key} className="font-bold">{t.slice(2, -2)}</strong>);
     else if (t.startsWith("`")) nodes.push(<code key={key} className="rf-md-code">{t.slice(1, -1)}</code>);
     else nodes.push(<em key={key}>{t.slice(1, -1)}</em>);

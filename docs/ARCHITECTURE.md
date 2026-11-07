@@ -324,7 +324,7 @@ type Block = {
 
 **渲染（`Reader.tsx`）。** `renderTokens()` 仍以 `tokenize(p.content)` 为骨架，词 span 带 `data-s/data-e`，`ranges` 只叠加 `.rf-i-strong` / `.rf-i-em` / `.rf-i-code` 等 class；链接跨多个 token 时用单个 `<a class="rf-inline-link">` 包住它们，点击时 `e.preventDefault()`，保证**点词优先弹释义而不是跳走**。`SingleBlock` 按 `blockType` 渲染 `h2–h6` / `blockquote` / `pre` / `hr` / `figure` / `li` / `p`，`GroupView` 负责表格与列表重组。代码块**不生成 `.w` span**：`pnpm`、`__init__`、`settings.json` 不是要背的单词。
 
-**非正文过滤。** `NON_PROSE_KINDS = ["code","hr","figure"]`，`isProse()` 同时被三处使用：导入时的 `proseTexts()`（词数 / CEFR）、`/api/summarize` 的分段小结、`Reader.planSections()`。三处规则必须一致，否则 `startIdx/endIdx` 会指向错误的段。
+**非正文过滤。** `NON_PROSE_KINDS = ["code","hr","figure","math"]`，`isProse()` 同时被三处使用：导入时的 `proseTexts()`（词数 / CEFR）、`/api/summarize` 的分段小结、`Reader.planSections()`。三处规则必须一致，否则 `startIdx/endIdx` 会指向错误的段。
 
 **控制变量实验：同一篇文档，只换解析器。** 拿 `https://code.claude.com/docs/en/best-practices.md`（52,515 bytes / 635 行）分别强制 `plain` 与 `markdown` 导入：
 
@@ -341,7 +341,19 @@ type Block = {
 
 **验证结果。** `tests/unit/import.test.ts` 21 个单测（含上述两个控制变量、range 不越界、`tokenize()` 坐标严格对齐、`parsePlain()` 与 `splitParagraphs()` 逐字一致、JSON 解析失败降级）。官方 Markdown 离线解析出 306 个 Block（28 heading / 20 quote / 103 paragraph / 100 list_item / 40 table_cell / 15 code），range 越界 0、可见文本残留 Markdown 标记 0；真实 HTML 路径 355 个 Block，table_cell 40 / code 15 / list_item 100 与 Markdown 路径对齐。真实浏览器 DOM 检查：3 张 `<table>`（首表 6 行、3 表头 cell、15 表体 cell、可横向滚动）、15 个 `<pre>`（10 个多行、最长 13 行）、19 个 callout、28 个列表 / 100 个 item、79 个链接、306 个 `data-pid` 容器，代码块内 `.w` 为 0，可见文本里管道行与代码围栏均为 0。E2E 覆盖粘贴自动识别、详情 API、SSR 标签、表格 cell 内点词收词后 `content.slice(start,end) === quote`、导出 dryRun 卡片无 Markdown 残留、纯文本零回归、URL 官方 Markdown 优先、旧文章仍可打开。
 
-**已知边界（故意不做）。** `colspan`/`rowspan`、嵌套表格、脚注、LaTeX 数学、语法高亮配色、图片本身不还原（图片保留占位文字）；给 agent 看的隐藏 `llms.txt` 索引块会被过滤；旧文章不迁移。
+**已知边界（故意不做）。** `colspan`/`rowspan`、嵌套表格、脚注、语法高亮配色不还原；给 agent 看的隐藏 `llms.txt` 索引块会被过滤；旧文章不迁移。
+
+### 3.6 数学公式与配图（P14）
+
+**公式分两级，分界线是锚点安全。** 块级 `$$…$$` 独立成段 → 新增 `math` 块（`NON_PROSE_KINDS` 追加 `"math"`，与 `code` 同待遇：不计词数 / CEFR / 小结，不生成可点词）；`content` 存 LaTeX 源、保留换行，`Reader` 用 KaTeX `renderToString()`（`throwOnError: false`）渲染成 `dangerouslySetInnerHTML` —— KaTeX 是纯函数、无环境依赖，SSR 与客户端输出逐字节一致，不踩 9.1 节的 hydration 坑；它默认转义所有输入（不开 `trust` 选项），XSS 面可控。`remark-math` 的 flow 语法要求 `$$` 独占一行，而实际文档大量 `$$J=r$$` 单行写法（mdast 里是「只含一个 inlineMath 的段落」），`displayMathFromParagraph()` 把这种段落提升成 `math` 块。
+
+行内 `$s \in \mathcal{S}$` → `InlineKind: "math"` 区间：`content` 仍存 LaTeX 源，DOM 文本与坐标基准不变；`renderTokens()` 对区间内 token 不生成 `.w`（`\rho`、`\arg\max` 不是要背的单词），样式降为 `.rf-i-math` 弱化等宽；`proseTexts()` 的 `stripInlineMath()` 在统计前把区间替换成空格（倒序替换防错位）——与 3.5 节「代码标识符虚高难度」同一个坑的第二次预防。**刻意不用 KaTeX 渲染行内公式**：渲染后 DOM 文本长度 ≠ `content` 长度，`offsetIn()` 靠 `Range.toString()` 数字符，拖选跨公式偏移必错；将来做成「原子化 span + snapRange 改造」再开。
+
+HTML 路径在 walk 之前跑 `normalizeMath()`：KaTeX / MathJax v3 读 `<annotation encoding="application/x-tex">`（容器找最近的 `.katex-display` / `.katex`，连 MathML 一起换掉，双份渲染文本不进可见文本）；MathJax v2 读 `<script type="math/tex">`（`mode=display` 判块级）。替换产物是 `data-rf-math`（行内）/ `data-rf-math` + `data-display`（块级）占位元素，`inlineDom` / `walk` 各自识别。
+
+**配图只对「独占一段的图片」渲染真图。** Markdown：`figureBlocks()` 检测段落 children 全是 image（兼容 `[![alt](img)](link)` 包链写法）或空白 → 每张图一个 `figure` 块，`meta.src` 存地址（`parseMarkdown(src, baseUrl)` 把 `/img/a.png` 按站点解析成绝对地址），`content` = alt 当 figcaption。HTML：`<figure>`（caption 取 `figcaption`）、纯图 `<p>`（`isImageOnly()` 把 img/picture/source 剔除后无可见文字）、裸 `<img>` 三种形态都提升。`FigureBlock` 渲染 `<img loading="lazy" referrerPolicy="no-referrer">`，`onError`（防盗链 / 失效）回退占位文字 +「查看原图」链接；只接受 `^https?://` 地址，`data:`/`javascript:` 按无图处理。**夹在句子中间的行内小图仍是占位文字**：真图必然改变 DOM 文本长度、破坏 `contexts` 坐标，不为边缘场景冒险。
+
+验证：`tests/unit/import.test.ts` 追加 10 个单测（块级/行内公式、单行 `$$` 提升、KaTeX/MathJax HTML 还原、figure 三形态、相对路径解析、含公式文档的 range 不越界 + tokenize 对齐）；真实浏览器冒烟：hydration 无错、`katex-display` 在场、`<img>` 渲染、行内公式无 `data-s`、点普通词仍弹批注卡。
 
 ---
 

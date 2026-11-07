@@ -82,7 +82,7 @@ ReadFlow 把这个流程压成一条链，只做三个动作：
 | 模块 | 能力 | 状态 |
 |---|---|---|
 | **导入** | 粘贴文本 / 上传 `.txt`·`.md` / 贴 URL；URL 优先抓站点官方 Markdown，否则 Readability 正文 HTML | ✅ |
-| **结构化排版** | Markdown / HTML → Block IR：标题、有序/无序列表、GFM 表格、代码块、引用与 callout、行内链接与强调都按原结构渲染；格式自动识别，可手动覆盖 | ✅ |
+| **结构化排版** | Markdown / HTML → Block IR：标题、有序/无序列表、GFM 表格、代码块、引用与 callout、行内链接与强调都按原结构渲染；块级公式（`$$…$$`）用 KaTeX 渲染，行内公式降为不可点的弱化样式且不进词数/CEFR；独立配图渲染真图（防盗链失败自动回退占位文字）；格式自动识别，可手动覆盖 | ✅ |
 | **阅读器** | 按 Block 渲染 + 确定性分词、点词命中、拖选短语、Esc 关闭、已收词绿色高亮 | ✅ |
 | **词典层** | ECDICT 77 万词条本地查询（<5ms）、`exchange` 字段反查词形还原（went → go） | ✅ |
 | **AI 层** | DeepSeek 流式释义：老师人设 + 段落级上下文 + 阅读器客观信号；第一屏给选区在这句里的中文意思，句子地图只把主干标下划线、殿后可选；支持「追问」；无 key 时优雅降级 | ✅ |
@@ -128,6 +128,16 @@ CEFR 原本是描述**人**的能力框架，不是文本标准。「分级读�
 - 同一篇技术文档，**按 Markdown 导入可能比按纯文本导入判低一级**。实测 Claude Code 官方最佳实践：强制纯文本 B2 / 66.65 分，Markdown B1 / 47.55 分。差的那 1425 个「词」是代码标识符、URL 和表格语法——旧路径把它们当成 ECDICT 查不到的生僻英文词（未登录词 16.4% → 9.5%，生僻词 22.3% → 14.3%），难度被虚高。新值更真实，不是回归。
 
 **旧文章不做迁移工具**：改造前 `content` 里的表格换行已经被压平，无法从压平结果反推原来的行列，只能重新粘贴官方 Markdown 重新导入。新导入的文本会把 `source_format` 和 `source_raw` 一并存下，以后换解析器可以无损重跑。
+
+### 3.3 关于数学公式与配图（P14）
+
+**公式分两级处理，锚点安全是分界线**：
+
+- **块级公式（`$$…$$` 独立成段）→ 新增 `math` 块**：`content` 存 LaTeX 源（保留换行），前端用 KaTeX `renderToString()` 渲染。KaTeX 是纯函数，SSR 与客户端输出逐字节一致，不引入 hydration 风险；`math` 与 `code` 同等待遇——不计词数、不进 CEFR、不生成可点词。remark-math 的 flow 语法要求 `$$` 独占一行，但实际文档大量使用 `$$J=r$$` 单行写法（会被解析成「只含一个 inlineMath 的段落」），导入时把这种段落提升成 `math` 块。
+- **行内公式（`$s \in \mathcal{S}$`）→ `math` 行内区间**：`content` 仍存 LaTeX 源，DOM 文本与坐标基准完全不变；区间内的 token 不生成 `.w` 可点 span（`\rho`、`\arg\max` 不是要背的单词），样式降为弱化等宽。词数 / CEFR 统计时 `stripInlineMath()` 把整段区间替换成空格——同一个 bug 预防了两次（README 3.2 节的代码标识符问题是先例）。用 KaTeX 渲染行内公式会让 DOM 文本长度 ≠ `content` 长度，拖选跨公式的偏移必错，所以第一版刻意不渲染，将来做成「原子化 span」再开。
+- **HTML 路径**：`normalizeMath()` 在 walk 之前把站点已渲染的公式还原成 LaTeX 源——KaTeX 读 `<annotation encoding="application/x-tex">`，MathJax v2 读 `<script type="math/tex">`；块级/行内分别替换成占位元素。KaTeX 渲染残影（aria-hidden span + MathML 双份文本）不会再混进可见文本。
+
+**配图只对「独占一段的图片」渲染真图**：`![alt](url)` 单独成段（或 HTML 的 `<figure>` / 纯图 `<p>` / 裸 `<img>`）→ 提升为 `figure` 块，`meta.src` 存地址（URL 导入时按站点地址解析相对路径），前端渲染 `<img loading="lazy" referrerPolicy="no-referrer">`；加载失败（防盗链 / 失效）自动回退为占位文字 +「查看原图」链接。`figure` 在 `NON_PROSE_KINDS` 里——alt 说明不算词数。夹在句子中间的行内小图仍是占位文字：渲染真图必然改变 DOM 文本长度、破坏锚点，不值得为边缘场景冒险。`<img>` 只接受 `http(s)` 绝对地址，`data:`/`javascript:` 一律按无图处理。
 
 实现见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 3.5 节。
 
@@ -325,7 +335,7 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 | `GET` | `/api/texts` | 文本列表 |
 | `POST` | `/api/texts` | 导入文本，body `{title?, text?, url?, format?: "auto"\|"plain"\|"markdown", sourceType?: "paste"\|"file"}`。带 `url` 时优先抓站点官方 `.md`，拿不到才降级 Readability HTML；粘贴/上传走格式探测 → Block IR。导入时同步算 CEFR，返回 `sourceFormat / blockKinds / cefrLevel / cefrScore / cefrConfidence` |
 | `GET` | `/api/texts/{id}` | 文本（含 `sourceFormat` / `sourceRaw`）+ 全部段落（含 `blockType` / `blockMeta` / `inlineRanges`） |
-| `DELETE` | `/api/texts/{id}` | 删文本（段落级联） |
+| `DELETE` | `/api/texts/{id}` | 删文本（段落与分段小结级联；**词库、原句、AI 释义记录保留**，词库页标注「来自已删除的文章」） |
 | `GET` | `/api/dict?word=went` | 词典查询，返回 `{entry, originalForm, lemmaForm}` |
 | `GET` | `/api/explain?word=&context=&language=&monolingual=&prompt=` | AI 流式释义（兼容旧调用，纯文本分块，不带 signals） |
 | `POST` | `/api/explain` | AI 流式释义（推荐）：`{word, prefix?, suffix?, withPrevSentence?, language?, monolingual?, prompt?, signals?}`。`signals` 为阅读器采集的客观信号，只含证据不含结论；服务端白名单提取并裁剪数值 |
@@ -368,6 +378,7 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 | **P11** | **词典未命中自动问 AI**：成本闸门改为词典命中率，短语不再多点一次按钮；自动释义写回批注、降级文案不入库、回看旧批注不烧请求 | ✅ |
 | **P12** | **AI 释义持久化 + 批注锚点修复**：按锚点服务端幂等写回 / 补建；同锚点再点开直接复用答案、不重复计费；`ensure` 让全局已收过的词在本文也能进「已存批注」；落库规则收口到 `word-store.ts` | ✅ |
 | **P13** | **AI 释义语义回归**：删掉「禁整句译文」的内容禁令，改成「只译选区、不越界」的范围规则；第一屏给选区在这句里的意思，语法术语退到配角；句子地图只把主干标下划线；真模型 A/B + 渲染 E2E | ✅ |
+| **P14** | **公式与配图**：块级公式 KaTeX 渲染、行内公式不可点且不进统计（`math` 块 / math 区间）；HTML 路径还原 KaTeX/MathJax 公式源；独立配图渲染真图 + 失败回退（`figure` 块）；锚点契约不变 | ✅ |
 | **P5** | **长文性能：实测基准，决定不做虚拟滚动**（见 [`docs/PERF.md`](docs/PERF.md)） | ✅ |
 | P7 | 多用户 + 云端同步（表结构已预留） | 待定 |
 
@@ -393,7 +404,7 @@ P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节�
 - **移动端未适配**：弹层宽度固定 360px，小屏靠 `max-height` 兜底，没有专门的移动布局。
 - **CEFR 是启发式估算，不是标注模型**：没有用带 CEFR 标签的语料训练，阈值是拿 ECDICT 词频在真实文本上校准出来的。专有名词 / 术语 / 公式会被当成生僻词而高估难度（置信度会自动降级）；短文本（<150 词）的句法统计波动很大。将来可以用 `user_words` / `contexts` 里的个人收词行为做个性化校准。
 - **旧文章的结构补不回来**：P9 之前入库的文本，表格换行已被压成空格，无法从压平结果反推行列。按约定不做迁移工具，需要重新粘贴原始 Markdown 重新导入；旧文章的锚点、词库、CEFR 都不受影响，仍可正常阅读。
-- **结构化导入不是全保真**：支持 GFM 表格、多级列表、代码块、引用/callout、行内链接与强调；`colspan`/`rowspan`、嵌套表格、脚注、LaTeX 公式、语法高亮配色、图片本身不还原（图片保留占位文字）。MDX 的 info string（如 `text theme={null}`）只取合法语言名。链接里的词可以点（不会跳走），代码块里的词刻意不可点。
+- **结构化导入不是全保真**：支持 GFM 表格、多级列表、代码块、引用/callout、行内链接与强调；块级公式（KaTeX）与独立配图正常渲染，但行内公式只显示 LaTeX 源的弱化样式（不做 KaTeX 渲染，锚点安全优先）、夹在句子中间的小图仍是占位文字；`colspan`/`rowspan`、嵌套表格、脚注、语法高亮配色不还原（图片之外上述已支持）。MDX 的 info string（如 `text theme={null}`）只取合法语言名。链接里的词可以点（不会跳走），代码块里的词刻意不可点。公式是模型渲染（KaTeX），`throwOnError: false` 下坏公式显示红色错误提示而不是崩溃。
 - **端到端靠脚本回归**：`npm test` 跑 `node:test` 单测（含 CEFR 的控制变量测试），`npm run typecheck` 查类型；E2E 与导出验证另有 `npm run test:e2e` / `npm run test:auto-explain` / `npm run test:gloss-persist` / `npm run test:spine-render` / `npm run verify:cards` / `npm run verify:markji`。
 - **词形还原受 ECDICT 数据限制**：`leaves` 的 exchange 指向 `leave`（离开），但阅读中更常见的意思是「树叶」。我们优先展示变形词自己的释义（树叶），lemma 仍按 exchange 落库，所以 `leaves` 和 `leaf` 在词库里可能是两条。`was → be`、`went → go` 这类规则变形还原正常。
 - **音标是 ECDICT 原文的近似写法**：多数条目用 `'`/`,` 表示主/次重音（`'glisn`），我们统一显示成 `ˈ`/`ˌ`，但音值本身仍是 ECDICT 的记音，不保证是标准 IPA。

@@ -13,7 +13,16 @@ export function shortGloss(raw: string | null | undefined, cap = 24): string {
   const first = lines
     // AI 释义里的 `**本句中的意思**` 这类纯小标题不是释义，跳过
     .filter((s) => !/^\*\*[^*]{1,24}\*\*$/.test(s) && !/^\[?\s*(phonetic|音标)/i.test(s))
-    .map((s) => s.replace(/==/g, " ").replace(/[#*>`_]/g, " ").replace(/\s+/g, " ").replace(/^\d+\.\s*/, "").trim())
+    .map((s) =>
+      s
+        // P15：==成分：主干== → 主干（去掉成分标签，避免卡片背面残留「主语：」）
+        .replace(/==[^：\n]*：([^==]+)==/g, "$1")
+        .replace(/==/g, " ")
+        .replace(/[#*>`_]/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/^\d+\.\s*/, "")
+        .trim(),
+    )
     .find(Boolean) ?? "";
   return first.length > cap ? `${first.slice(0, cap)}…` : first;
 }
@@ -72,6 +81,8 @@ export function cardGloss(raw: string | null | undefined, cap = 100): string | u
     .filter((l) => !/^#{1,6}\s/.test(l))
     .map((l) =>
       l
+        // P15：==成分：主干== → 主干（去掉成分标签）
+        .replace(/==[^：\n]*：([^==]+)==/g, "$1")
         .replace(/==/g, "")
         .replace(/[#*>`_]/g, "")
         .replace(/^\s*[-•]\s*/, "")

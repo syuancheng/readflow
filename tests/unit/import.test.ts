@@ -260,3 +260,156 @@ test("JSON 元数据解析失败时降级为空，不让阅读页崩", () => {
   assert.deepEqual(parseInlineRanges("[]"), []);
   assert.deepEqual(parseInlineRanges("{oops"), []);
 });
+
+// ===== 数学公式（remark-math）=====
+
+test("parseMarkdown：块级公式 $$…$$ 独立成 math 块，不进词数 / CEFR", () => {
+  const src = [
+    "Consider the objective:",
+    "",
+    "$$J_\\theta(\\phi) = \\mathbb{E}[r]$$",
+    "",
+    "And then more text.",
+  ].join("\n");
+  const blocks = pruneBlocks(parseMarkdown(src));
+  const math = blocks.find((b) => b.kind === "math")!;
+  assert.ok(math, "应有 math 块");
+  assert.equal(math.text, "J_\\theta(\\phi) = \\mathbb{E}[r]");
+  assert.equal(math.meta.display, true);
+  assert.equal(isProse({ kind: "math" }), false);
+  assert.ok(!proseTexts(blocks).some((p) => p.includes("\\mathbb")), "公式不该进 prose 统计");
+});
+
+test("parseMarkdown：行内公式保留 LaTeX 源文本并标成 math 区间，统计时剔除", () => {
+  const blocks = parseMarkdown("The state $s \\in \\mathcal{S}$ is discrete.");
+  const p = blocks[0];
+  assert.equal(p.kind, "paragraph");
+  assert.equal(p.text, "The state s \\in \\mathcal{S} is discrete.");
+  const m = p.ranges.find((r) => r.kind === "math")!;
+  assert.ok(m, "应有 math 区间");
+  assert.equal(p.text.slice(m.start, m.end), "s \\in \\mathcal{S}");
+  const parts = proseTexts(blocks);
+  assert.ok(!parts.some((t) => t.includes("\\in")), "行内公式不该进词数 / CEFR");
+  assert.ok(parts.some((t) => t.includes("The state")), "公式外的正文照常计入");
+});
+
+test("控制变量三：加不加公式，公式外正文的可见文本与坐标不动", () => {
+  const withMath = parseMarkdown("Value $x + 1$ end.")[0];
+  const noMath = parseMarkdown("Value placeholder end.")[0];
+  assert.equal(withMath.text.startsWith("Value "), true);
+  assert.equal(withMath.text.endsWith(" end."), true);
+  // 公式只替换中间一段，前缀 "Value " 与后缀 " end." 的坐标完全一致
+  assert.equal(withMath.text.indexOf("Value"), noMath.text.indexOf("Value"));
+});
+
+// ===== 配图（figure）=====
+
+test("parseMarkdown：配图独占一段 → figure 块；混有文字的图片仍是行内占位", () => {
+  const src = [
+    "Intro text.",
+    "",
+    "![Pipeline overview](https://example.com/pipeline.png)",
+    "",
+    "See ![inline icon](https://example.com/icon.png) here.",
+  ].join("\n");
+  const blocks = pruneBlocks(parseMarkdown(src));
+  const fig = blocks.find((b) => b.kind === "figure")!;
+  assert.ok(fig, "应有 figure 块");
+  assert.equal(fig.meta.src, "https://example.com/pipeline.png");
+  assert.equal(fig.text, "Pipeline overview");
+  assert.equal(isProse({ kind: "figure" }), false);
+  const para = blocks.find((b) => b.text.startsWith("See "))!;
+  const img = para.ranges.find((r) => r.kind === "image");
+  assert.ok(img, "行内图片仍是 image 区间占位");
+  assert.equal(para.text.slice(img!.start, img!.end), "inline icon");
+});
+
+test("parseMarkdown：相对路径图片按 baseUrl 解析成绝对地址", () => {
+  const blocks = parseMarkdown("![a](/img/a.png)", "https://example.com/posts/1");
+  assert.equal(blocks[0].kind, "figure");
+  assert.equal(blocks[0].meta.src, "https://example.com/img/a.png");
+});
+
+test("parseMarkdown：带链接的配图 [![alt](img)](link) 也提升为 figure", () => {
+  const blocks = parseMarkdown("[![logo](https://example.com/logo.png)](https://example.com/)");
+  assert.equal(blocks[0].kind, "figure");
+  assert.equal(blocks[0].meta.src, "https://example.com/logo.png");
+  assert.equal(blocks[0].text, "logo");
+});
+
+// ===== HTML 路径：公式与配图 =====
+
+test("parseHtmlBlocks：KaTeX 渲染产物还原成 LaTeX（块级 math 块 + 行内 math 区间）", () => {
+  const html = [
+    '<p>State <span class="katex"><math><semantics><mrow><mi>s</mi></mrow><annotation encoding="application/x-tex">s</annotation></semantics></math></span> matters.</p>',
+    '<div><span class="katex-display"><span class="katex"><math display="block"><semantics><mrow><mi>J</mi></mrow><annotation encoding="application/x-tex">J = r</annotation></semantics></math></span></span></div>',
+  ].join("");
+  const blocks = parseHtmlBlocks(html);
+  const mathBlock = blocks.find((b) => b.kind === "math")!;
+  assert.ok(mathBlock, "应有块级 math");
+  assert.equal(mathBlock.text, "J = r");
+  assert.equal(mathBlock.meta.display, true);
+  const p = blocks.find((b) => b.kind === "paragraph")!;
+  const mr = p.ranges.find((r) => r.kind === "math");
+  assert.ok(mr, "行内 KaTeX 应还原成 math 区间");
+  assert.equal(p.text.slice(mr!.start, mr!.end), "s");
+  assert.ok(!p.text.includes("annotation"), "MathML 内部标记不该混进可见文本");
+});
+
+test("parseHtmlBlocks：MathJax v2 的 math/tex script 还原成公式", () => {
+  const html = [
+    '<p>Inline <script type="math/tex">x^2</script> here.</p>',
+    '<script type="math/tex; mode=display">y = f(x)</script>',
+  ].join("");
+  const blocks = parseHtmlBlocks(html);
+  const p = blocks.find((b) => b.kind === "paragraph")!;
+  const mr = p.ranges.find((r) => r.kind === "math");
+  assert.ok(mr, "行内 math/tex 应还原成 math 区间");
+  assert.equal(p.text.slice(mr!.start, mr!.end), "x^2");
+  const mathBlock = blocks.find((b) => b.kind === "math")!;
+  assert.ok(mathBlock, "mode=display 应独立成 math 块");
+  assert.equal(mathBlock.text, "y = f(x)");
+  assert.equal(mathBlock.meta.display, true);
+});
+
+test("parseHtmlBlocks：figure / 纯图段落 → figure 块，figcaption 与绝对地址都在", () => {
+  const html = [
+    '<figure><img src="/img/diagram.png" alt="flow"><figcaption>The agent loop</figcaption></figure>',
+    '<p><img src="https://cdn.example.com/a.png" alt="solo"></p>',
+    '<p>Text with <img src="https://cdn.example.com/b.png" alt="tiny"> inside.</p>',
+  ].join("");
+  const blocks = parseHtmlBlocks(html, "https://example.com/page");
+  const figs = blocks.filter((b) => b.kind === "figure");
+  assert.equal(figs.length, 2);
+  assert.equal(figs[0].meta.src, "https://example.com/img/diagram.png");
+  assert.equal(figs[0].text, "The agent loop");
+  assert.equal(figs[1].meta.src, "https://cdn.example.com/a.png");
+  assert.equal(figs[1].text, "solo");
+  const para = blocks.find((b) => b.text.includes("Text with"))!;
+  assert.ok(para.ranges.some((r) => r.kind === "image"), "混有文字的图片仍是行内占位");
+});
+
+test("figure / math 块的坐标契约：inline range 不越界，tokenize 与文本对齐（含公式文档）", () => {
+  const src = [
+    "The loss is $L(\\theta)$ over steps $t = 1, \\dots, T$.",
+    "",
+    "$$\\min_\\theta \\; \\mathbb{E}[L(\\theta)]$$",
+    "",
+    "![curve](https://example.com/curve.png)",
+    "",
+    "Final paragraph.",
+  ].join("\n");
+  const blocks = pruneBlocks(parseMarkdown(src));
+  for (const b of blocks) {
+    for (const r of b.ranges) {
+      assert.ok(r.start >= 0 && r.end <= b.text.length && r.start < r.end, `range 越界：${b.text}`);
+    }
+    if (b.kind !== "math" && b.kind !== "figure") {
+      for (const t of tokenize(b.text)) {
+        assert.equal(b.text.slice(t.start, t.end), t.text);
+      }
+    }
+  }
+  assert.equal(blocks.filter((b) => b.kind === "math").length, 1);
+  assert.equal(blocks.filter((b) => b.kind === "figure").length, 1);
+});

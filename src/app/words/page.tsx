@@ -88,11 +88,15 @@ export default async function WordsPage() {
       isPhrase: w.isPhrase,
       contexts: ctxs.map((c) => ({
         id: c.id,
-        // 回原文按句读扩成整句；定位不到（文本被重新导入过）才退回锚点窗口
+        // 回原文按句读扩成整句；定位不到（文本被重新导入过）才退回锚点窗口。
+        // 文章删除后 paragraphs 也随外键级联没了，sentenceOf 的兜底同样生效。
         sentence: fullSentence(c) ?? sentenceOf(c.prefix, c.quote, c.suffix),
         textId: c.textId,
         paragraphId: c.paragraphId,
         textTitle: c.textTitle ?? "",
+        // leftJoin 拿不到标题即文章已删（texts.title 恒非空）；
+        // 原句与 AI 释义仍展示，只是不再提供跳转
+        textDeleted: !c.textTitle,
       })),
     };
   });

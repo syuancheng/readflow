@@ -12,6 +12,8 @@ export type WordContextRow = {
   textId: string | null;
   paragraphId: string | null;
   textTitle: string;
+  /** 来源文章已被删除：原句和释义仍展示，但不再提供「跳到原文」 */
+  textDeleted?: boolean;
 };
 
 export type WordRow = {
@@ -248,8 +250,10 @@ export default function WordList({ words: initial }: { words: WordRow[] }) {
                     >
                       <p className="text-ink-soft italic">&ldquo;{c.sentence}&rdquo;</p>
                       <p className="text-[11px] font-bold text-ink-faint mt-1 flex items-center gap-2">
-                        <span>{c.textTitle && `← ${c.textTitle}`}</span>
-                        {c.textId && c.paragraphId && (
+                        <span>
+                          {c.textDeleted ? "← 来自已删除的文章" : c.textTitle && `← ${c.textTitle}`}
+                        </span>
+                        {!c.textDeleted && c.textId && c.paragraphId && (
                           <Link
                             href={`/texts/${c.textId}?p=${c.paragraphId}`}
                             className="text-ink-faint hover:text-[var(--duo-green-dark)] underline underline-offset-2"

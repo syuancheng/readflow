@@ -61,8 +61,9 @@ export async function POST(req: Request) {
     try {
       const extracted = await extractFromUrl(url);
       if (extracted.markdown) {
-        // 站点的官方 Markdown 是保真度最高的源，直接进 Markdown 适配器
-        blocks = parseMarkdown(extracted.markdown);
+        // 站点的官方 Markdown 是保真度最高的源，直接进 Markdown 适配器；
+        // baseUrl 用来把 /img/a.png 这类相对图片解析成绝对地址
+        blocks = parseMarkdown(extracted.markdown, url);
         sourceFormat = "markdown";
         sourceRaw = extracted.markdown;
       } else {

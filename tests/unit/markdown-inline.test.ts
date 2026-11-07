@@ -33,3 +33,16 @@ test("没有标记的文本与单个等号不受影响", () => {
   assert.equal(stripUnclosedSpine("普通一行中文说明。"), "普通一行中文说明。");
   assert.equal(stripUnclosedSpine("x = 1, y = 2"), "x = 1, y = 2");
 });
+
+test("P15 ==成分：主干== 与旧 ==主干== 同样受未闭合修补保护", () => {
+  // 成对保持
+  assert.equal(
+    stripUnclosedSpine("==主语：A recurring pattern== ==谓语：is== ==表语：simple control=="),
+    "==主语：A recurring pattern== ==谓语：is== ==表语：simple control==",
+  );
+  // 行尾半边被抹掉，成分名与主干文字都不丢
+  assert.equal(
+    stripUnclosedSpine("==主语：A recurring pattern== ==谓语：is== ==表语：simple"),
+    "==主语：A recurring pattern== ==谓语：is== 表语：simple",
+  );
+});
