@@ -60,15 +60,19 @@
   --color-duo-yellow: var(--duo-yellow);
   --color-duo-red: var(--duo-red);
 
-  --font-sans: var(--font-geist-sans), -apple-system, "PingFang SC", sans-serif;
+  /* 正文与标题：DM Sans；中文回退 PingFang SC（DM Sans 无中文字形） */
+  --font-sans: var(--font-dm-sans), -apple-system, "PingFang SC", sans-serif;
+  /* 站点顶部导航专用：Outfit。阅读页窄条不用它，跟正文同族 */
+  --font-nav: var(--font-outfit), -apple-system, "PingFang SC", sans-serif;
   --font-mono: var(--font-geist-mono);
+  /* 阅读器英文正文刻意保留衬线，长文可读性；不随全站字体切换 */
   --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", serif;
 }
 
 body {
   background: var(--duo-bg);
   color: var(--duo-ink);
-  font-family: var(--font-geist-sans), -apple-system, "PingFang SC", sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -415,6 +419,8 @@ body {
   text-decoration: underline;
   text-decoration-style: dotted;
   text-underline-offset: 3px;
+  /* 长 URL 不换行会把整页撑宽（375px 实测 scrollWidth 449），窄屏必须能断 */
+  overflow-wrap: anywhere;
 }
 .rf-inline-link:hover { text-decoration-style: solid; }
 .rf-i-strong { font-weight: 800; }
@@ -477,10 +483,11 @@ body {
   background: var(--duo-blue-soft);
 }
 
-/* 顶部导航 */
+/* 顶部导航：唯一使用 Outfit 的区域（阅读页 /texts/* 整条隐藏） */
 .duo-nav {
   background: var(--duo-bg);
   border-bottom: 2px solid var(--duo-border);
+  font-family: var(--font-nav);
 }
 
 .duo-nav-link {
@@ -2629,4 +2636,140 @@ body {
 
 @media (max-width: 720px) {
   .cefr-pop { width: 260px; }
+}
+
+/* ====== 阅读页常驻顶栏 + 目录（P19） ====== */
+/* 顶栏用 DM Sans（--font-sans）；Outfit 只给站点级 .duo-nav，阅读页隐藏了它 */
+:root { --rf-bar-h: 54px; }
+
+.rf-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--rf-bar-h);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  background: var(--duo-bg);
+  border-bottom: 1px solid var(--duo-border);
+  font-family: var(--font-sans);
+}
+.rf-tb-left, .rf-tb-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.rf-tb-left { flex: 1; }
+.rf-tb-right { flex-shrink: 0; }
+.rf-tb-sep { width: 1px; height: 18px; background: var(--duo-border); flex-shrink: 0; }
+.rf-icon-btn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--duo-ink-soft); cursor: pointer; flex-shrink: 0;
+}
+.rf-icon-btn:hover:not(:disabled), .rf-icon-btn[aria-expanded="true"] {
+  background: var(--duo-surface); color: var(--duo-ink);
+}
+.rf-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+.rf-icon-btn svg { width: 17px; height: 17px; }
+.rf-back {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--duo-ink-soft); text-decoration: none;
+  font-size: 13px; font-weight: 700; white-space: nowrap; flex-shrink: 0;
+}
+.rf-back:hover { color: var(--duo-blue); }
+.rf-tb-title {
+  margin: 0; font-size: 14px; font-weight: 800; color: var(--duo-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rf-progress {
+  font-size: 12.5px; color: var(--duo-ink-soft);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.rf-progress b { font-size: 13px; color: var(--duo-ink); }
+.rf-done-btn {
+  padding: 5px 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--duo-border); background: var(--duo-surface);
+  color: var(--duo-ink-soft); font-size: 12px; font-weight: 700; white-space: nowrap;
+}
+.rf-done-btn:hover:not(:disabled) { border-color: var(--duo-green); color: var(--duo-green-dark); }
+.rf-done-btn.at-bottom {
+  border-color: var(--duo-green); background: var(--duo-green-soft); color: var(--duo-green-dark);
+}
+.rf-done-btn.done { border-color: var(--duo-green); background: var(--duo-green); color: #fff; }
+.rf-done-btn:disabled { opacity: .6; cursor: wait; }
+.rf-source { font-size: 12.5px; color: var(--duo-blue); text-decoration: none; white-space: nowrap; }
+.rf-source:hover { text-decoration: underline; }
+.rf-tb-progress { position: absolute; left: 0; bottom: -1px; width: 100%; height: 2px; }
+.rf-tb-progress i { display: block; height: 100%; background: var(--duo-green); transition: width .12s linear; }
+
+/* 两列 grid：目录 | 整个 Reader（含它自己的正文+批注栏）。展开只挤压宽度，
+   不改文本内容，data-pid 锚点与字符坐标契约不变。 */
+.rf-reading-layout {
+  display: grid;
+  grid-template-columns: 0px minmax(0, 1fr);
+  transition: grid-template-columns .24s ease;
+  align-items: start;
+}
+.rf-reading-layout.toc-open { grid-template-columns: 244px minmax(0, 1fr); }
+.rf-reading-main { min-width: 0; }
+.rf-toc {
+  position: sticky; top: var(--rf-bar-h);
+  height: calc(100vh - var(--rf-bar-h));
+  overflow: hidden auto;
+  border-right: 1px solid var(--duo-border);
+  background: var(--duo-surface);
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s ease;
+}
+.rf-reading-layout.toc-open .rf-toc { opacity: 1; pointer-events: auto; }
+.rf-toc-inner { width: 244px; padding: 18px 12px 40px; }
+.rf-toc-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 8px 8px; font-size: 11px; font-weight: 800;
+  letter-spacing: .06em; color: var(--duo-ink-faint); text-transform: uppercase;
+}
+.rf-toc-head button {
+  border: 0; background: transparent; color: var(--duo-ink-faint);
+  cursor: pointer; font-size: 17px; line-height: 1;
+}
+.rf-toc-meta {
+  padding: 0 8px 12px; font-size: 11.5px; color: var(--duo-ink-faint);
+  border-bottom: 1px solid var(--duo-border); margin-bottom: 8px;
+}
+.rf-toc-item {
+  display: block; padding: 6px 9px; border-radius: 6px; text-decoration: none;
+  color: var(--duo-ink-soft); font-size: 12.5px; line-height: 1.45;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rf-toc-item:hover { background: var(--duo-bg); color: var(--duo-ink); }
+.rf-toc-item.lv3 { padding-left: 20px; font-size: 12px; color: var(--duo-ink-faint); }
+.rf-toc-item.lv4 { padding-left: 32px; font-size: 11.5px; color: var(--duo-ink-faint); }
+.rf-toc-item.active { background: var(--duo-green-soft); color: var(--duo-green-dark); font-weight: 800; }
+.rf-toc-empty { padding: 8px; font-size: 12px; color: var(--duo-ink-faint); }
+
+/* 顶栏是 sticky stacking context：CEFR 明细浮层要在它内部抬到最上层，
+   否则会被 .rf-reading-main 里的正文盖住（P18 踩过同一个坑） */
+.rf-topbar .cefr-wrap:hover, .rf-topbar .cefr-wrap:focus-within { z-index: 120; }
+.rf-topbar .cefr-pop { z-index: 200; }
+
+@media (max-width: 900px) {
+  .rf-tb-title { max-width: 180px; }
+  .rf-source, .rf-progress { display: none; }
+}
+/* 窄屏：KaTeX 的 MathML（含行内公式）宽度可能远超视口，不能让它把整页撑宽。
+   阅读主区用 clip 裁掉外溢（clip 不创建滚动容器、不影响 sticky），公式自己
+   保留横向滚动以便查看。桌面保持原样。 */
+@media (max-width: 720px) {
+  .rf-reading-main { overflow-x: clip; }
+  .katex-display, .rf-math-inline, .katex { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+}
+
+@media (max-width: 720px) {
+  .rf-tb-title { max-width: 120px; }
+  .rf-back span, .rf-tb-sep:last-of-type { display: none; }
+  .rf-reading-layout, .rf-reading-layout.toc-open { grid-template-columns: minmax(0, 1fr); }
+  .rf-toc {
+    position: fixed; top: var(--rf-bar-h); left: 0; width: 244px; z-index: 90;
+    box-shadow: 8px 0 24px rgba(24, 36, 58, .14);
+  }
+  .rf-reading-layout:not(.toc-open) .rf-toc { display: none; }
 }

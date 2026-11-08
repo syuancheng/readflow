@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { DM_Sans, Geist_Mono, Outfit } from "next/font/google";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import BottomNav from "@/components/BottomNav";
 import SiteHeader from "@/components/SiteHeader";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+/**
+ * 字体分工（2026-11-08）：DM Sans 负责正文与标题，Outfit 只给站点顶部导航
+ * （.duo-nav），阅读器英文正文仍走 --font-serif 衬线以保持长文可读性。
+ * 等宽保留 Geist Mono（代码块 / 公式）。两者都不含中文字形，中文回退 PingFang SC。
+ */
+const dmSans = DM_Sans({ variable: "--font-dm-sans", subsets: ["latin"] });
+const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
@@ -17,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${outfit.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <SiteHeader />

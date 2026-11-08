@@ -265,7 +265,7 @@ vocabScore = 0.75 × logScore + 0.25 × rareScore
 
 词汇路把短篇故事与技术长文分开（4.80 vs 6.0–6.35），复杂度路把技术长文之间再分开（16.5 / 21.3 / 23.1 词/句）——这正是双路设计的预期效果。注意 Best practices 词汇更简单（5.98）但句子更长，两条路互相抵消后落在 B2 上沿：这正是我们保留连续分和明细、而不是只显示一个字母的原因。单测里用「控制变量」锁住这个性质：只改词汇难度时复杂度分必须完全不动，只改断句时词汇分必须完全不动。
 
-**展示。** 首页列表与阅读页标题下各一个低调徽章；悬停（或键盘聚焦）用纯 CSS 展开明细。不用 click 是因为列表整行是一个 `<Link>`，嵌套可点击元素会互相打架；组件也因此不需要 `"use client"`。文案明确写「粗略估计」「不是 CEFR 官方评级」。
+**展示。** 首页列表与阅读页常驻顶栏各一个低调徽章（P19 前阅读页放在标题行下方）；悬停（或键盘聚焦）用纯 CSS 展开明细。不用 click 是因为列表整行是一个 `<Link>`，嵌套可点击元素会互相打架；组件也因此不需要 `"use client"`。文案明确写「粗略估计」「不是 CEFR 官方评级」。
 
 **回填与重算。** `npm run backfill:cefr` 默认 DRY-RUN；`node .verify/scripts/backfill-cefr.js --apply` 写入，加 `--force` 用当前算法重算全部（`cefr_overridden = 1` 的行永远跳过）。脚本加载 `src/db/ensure-cefr.ts` 自行补列，不依赖服务已重启。改完代码记得 `npm run build && bash scripts/service.sh restart` —— 本机跑的是 `next start` 生产构建。
 
@@ -750,15 +750,27 @@ POST /api/words { word, textId, paragraphId, start, end, quote, prefix, suffix, 
 
 **阅读进度与「已读完」（P6b / P18 重写）**：两条互相独立的轨道。
 
-- **进度 = 滚动位置**：`src/lib/read-progress.ts` 的 `scrollProgress()` 用 `scrollY / (scrollHeight - innerHeight)` 算 0–1，一屏能看完的文章算 1、滚到底算 1、往回翻会下降。`ReadProgressPill` 对 `scroll` / `resize` 做 **350ms debounce**，停止滚动就 `measure()` + 立即 PATCH 覆盖写（2s interval 仅兜底）——「滚完就退出」是最常见路径，不能干等定时器；`visibilitychange` / `pagehide` / 卸载用 **`navigator.sendBeacon`** 投递，`fetch keepalive` 仅作降级（实测关标签页时 keepalive 会丢，见下）。`currentBlockIdx()` 按视口 75% 深度取「读到线」以上的最大块 idx 作续读书签，不再把全 DOM 的最大 idx 当已读位置。
-- **已读完 = 用户显式断言**：只有点「标记已读完」才写 `completed_at` 时间戳，再点一次传 `null` 取消。滚到 100% 只给轻提示、**绝不自动写完成状态**；按钮请求顺手带上当前进度，消除「滚到底 → 立刻标记 → 立刻返回」的落库不一致。列表「继续回味 →」与「✓ 已读完」徽章只由 `completed_at` 决定；「已读 N%」始终是紫色位置徽章，两者可并存。不设重置按钮：进度可下降、完成状态可取消，已覆盖全部修正路径。
+- **进度 = 滚动位置**：`src/lib/read-progress.ts` 的 `scrollProgress()` 用 `scrollY / (scrollHeight - innerHeight)` 算 0–1，一屏能看完的文章算 1、滚到底算 1、往回翻会下降。`useReadProgress()` hook（P19 从 `ReadProgressPill` 抽出）对 `scroll` / `resize` 做 **350ms debounce**，停止滚动就 `measure()` + 立即 PATCH 覆盖写（2s interval 仅兜底）——「滚完就退出」是最常见路径，不能干等定时器；`visibilitychange` / `pagehide` / 卸载用 **`navigator.sendBeacon`** 投递，`fetch keepalive` 仅作降级（实测关标签页时 keepalive 会丢，见下）。`currentBlockIdx()` 按视口 75% 深度取「读到线」以上的最大块 idx 作续读书签，不再把全 DOM 的最大 idx 当已读位置。
+- **已读完 = 用户显式断言**：只有点「标记已读完」才写 `completed_at` 时间戳，再点一次传 `null` 取消。滚到 100% 只给轻提示、**绝不自动写完成状态**；按钮请求顺手带上当前进度，消除「滚到底 → 立刻标记 → 立刻返回」的落库不一致。列表「继续回味 →」与「✓ 已读完」徽章只由 `completed_at` 决定；「已读 N%」是顶栏文字 + 底边 2px 进度条（P19 前是紫色徽章），两者可并存。不设重置按钮：进度可下降、完成状态可取消，已覆盖全部修正路径。
 - **续读有边界**：`shouldAutoResume()` 在「已读完 / 没读过 / `read_idx` 是最后一块 / `readRatio ≥ 0.999`」时**不**自动定位。否则滚到底记下的文末书签会让每次打开都跳到文末 → 一上来 100% → 又写回 100%，进度被锁死且无法从头重读。
 
 **旧版 bug 与修复代价**：旧 `observe()` 用 `querySelectorAll("[data-idx]")` 遍历全 DOM 取最大 idx，注释写着「进入过视口」却没有任何视口判断；Reader 又不做虚拟滚动，于是打开页面就把 `read_ratio` 写成 1，服务端单调合并让错误值永远降不回来。P18 除改算法外，还把旧版写下的 `read_idx` / `read_ratio` 一次性清成 NULL；`completed_at` 补列默认 NULL 不需要迁移。
 
-**P18 上线后用户实测又抓到四个问题**（都已修）：① 滚动后直接关标签页，进度停在旧值 —— `pagehide` 的 `fetch keepalive` 在页面销毁时丢失，改 `sendBeacon` + 停止滚动即上报；② 文末书签让打开即 100%，加 `shouldAutoResume()` 拦截；③ 「标记已读完」按钮在标题行，用户滚到底够不着，为点它滚回顶部会让进度按设计掉回 0% —— 滚到底时改为浮出视口内的小提示（只提示、不自动改状态），点它不触发滚动。抓包可见旧链路 `REQ 1/270 → 点标记 → REQ 0/2`，正是滚动回顶部引起的合法但反直觉的覆盖；④ 自动续读 / `?p=` 跳转时目标段落整块标绿 2.4 秒又消失，观感突兀 —— 删掉 `.para-flash` 的 class 调用与 CSS 动画，只保留 `scrollIntoView` 定位（滚动到位本身就是反馈）。
+**P18 上线后用户实测又抓到四个问题**（都已修）：① 滚动后直接关标签页，进度停在旧值 —— `pagehide` 的 `fetch keepalive` 在页面销毁时丢失，改 `sendBeacon` + 停止滚动即上报；② 文末书签让打开即 100%，加 `shouldAutoResume()` 拦截；③ 「标记已读完」按钮在标题行，用户滚到底够不着，为点它滚回顶部会让进度按设计掉回 0% —— 当时先加了浮出视口内的小提示（只提示、不自动改状态），P19 常驻顶栏后按钮永远可见，该浮动提示已删除。抓包可见旧链路 `REQ 1/270 → 点标记 → REQ 0/2`，正是滚动回顶部引起的合法但反直觉的覆盖；④ 自动续读 / `?p=` 跳转时目标段落整块标绿 2.4 秒又消失，观感突兀 —— 删掉 `.para-flash` 的 class 调用与 CSS 动画，只保留 `scrollIntoView` 定位（滚动到位本身就是反馈）。
 
 已知边界：`read_idx` 是段落序号，与正文绑定——本方案不支持编辑正文（会牵动全部锚点，另一个量级的工程），所以不会失配。放弃单调合并后，两个标签页同时开同一篇是「最后一次写入胜出」，单用户场景可接受；进度是位置估算，不代表真实理解程度。
+
+### 7.2 字体与阅读页外壳（P19）
+
+**字体分工**：`layout.tsx` 用 `next/font/google` 加载 DM Sans（`--font-dm-sans`）、Outfit（`--font-outfit`）与 Geist Mono（`--font-geist-mono`）。`globals.css` 里 `--font-sans` 指向 DM Sans、body 与标题全局继承；`--font-nav` 指向 Outfit，只应用在站点级 `.duo-nav`（`SiteHeader`），而 `SiteHeader` 在 `/texts/*` 整条隐藏，所以阅读页顶栏用的是 DM Sans。阅读器英文正文仍走 `--font-serif`（Iowan / Palatino / Georgia，19px）—— 长文可读性的有意设计，不随全站字体切换。DM Sans / Outfit 都不含中文字形，中文回退 PingFang SC，实际变化只在英文与数字。`next/font/google` 在 build 时下载、运行时自托管到 `.next/static/media`，离线可用。
+
+**阅读页外壳 `ReadingChrome`**（客户端组件，包在 `ReaderShell` 外层）：54px sticky 顶栏含目录开关、返回、标题、CEFR 徽章、进度数字、标记按钮、原文链接与底边 2px 进度条；下方两列 grid（目录 | 整个 Reader）。目录默认收起，从 `paragraphs` 筛 `blockType === "heading"` + `blockMeta.depth` 生成树，点击用 `window.scrollTo` 手动减去顶栏高度（不用 `scroll-margin-top`，免得影响 Reader 的 `focusParaId` 续读定位），滚动时高亮最后一个越过读线的章节。
+
+**为什么包在 Reader 外面**：右侧批注栏是 `Reader.tsx` 内部 `.reader-split` 的一部分，页面层做不了「目录 | 正文 | 批注栏」三栏。两列 grid 挤压的是 Reader 整体宽度，文本内容不变，`data-pid` 锚点与字符坐标契约不受影响；点词、批注、ReaderShell 一行未改。进度上报逻辑从 `ReadProgressPill` 抽成 `src/lib/use-read-progress.ts` hook，组件本身删除；P18 那套 sendBeacon / debounce / `shouldAutoResume` 逻辑一行未动。
+
+**窄屏**：<900px 隐藏原文链接与进度数字；<720px 目录变 fixed 抽屉、阅读主区 `overflow-x: clip`。顺手修了两处既有内容溢出：长链接 `overflow-wrap: anywhere`、KaTeX 公式容器允许横向滚动。这些由文章里的长 URL / 长公式造成，与 P19 布局无关（P19 前后都存在），375px 实测 `scrollWidth` 从 449 降到 375。
+
+**构建注意**：`globals.css` 的增量构建会漏新加的 CSS 规则（本项目踩过多次）。改动 CSS 后若浏览器里没生效，先 `rm -rf .next && npm run build && bash scripts/service.sh restart` 全量重建，别急着怀疑选择器写错。
 
 ---
 

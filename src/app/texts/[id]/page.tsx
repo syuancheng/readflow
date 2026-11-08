@@ -1,11 +1,9 @@
 import { asc, eq } from "drizzle-orm";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { paragraphs, texts, userWords, LOCAL_USER } from "@/db/schema";
 import ReaderShell from "@/components/ReaderShell";
-import CefrBadge from "@/components/CefrBadge";
-import ReadProgressPill from "@/components/ReadProgressPill";
+import ReadingChrome from "@/components/ReadingChrome";
 import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
 import { parseBlockMeta, parseInlineRanges } from "@/lib/import/types";
 import { shouldAutoResume } from "@/lib/read-progress";
@@ -73,50 +71,40 @@ export default async function TextPage({
     inlineRanges: parseInlineRanges(r.inlineRanges),
   }));
 
-  return (
-    <div className="max-w-[1440px] mx-auto px-6 py-7">
-      <div className="mb-6">
-        <Link href="/" className="duo-nav-link inline-block">
-          ← 返回我的文本
-        </Link>
-        <h1 className="text-[28px] font-extrabold tracking-tight mt-3 mb-2">{text.title}</h1>
-        <p className="text-[14px] font-medium text-ink-faint flex items-center gap-2 flex-wrap">
-          <span className="duo-badge duo-badge-green">{text.wordCount.toLocaleString()} 词</span>
-          <span className="duo-badge duo-badge-blue">{rows.length} 块</span>
-          <CefrBadge
-            level={asCefrLevel(text.cefrLevel)}
-            score={text.cefrScore ?? null}
-            detail={parseCefrDetail(text.cefrDetail)}
-          />
-          {text.category && <span className="duo-badge duo-badge-purple">{text.category}</span>}
-          <ReadProgressPill
-            textId={id}
-            initialRatio={text.readRatio}
-            initialCompletedAt={text.completedAt}
-          />
-          {text.sourceUrl && (
-            <a
-              href={text.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-ink-faint hover:text-ink-soft underline underline-offset-2"
-            >
-              查看原文
-            </a>
-          )}
-        </p>
-      </div>
+  // 目录树：Block IR 里已有 heading 块与 blockMeta.depth，直接筛出来即可，
+  // 不需要额外算法、模型调用或新增字段。id 就是 Reader 渲染的 data-pid。
+  const headings = rows
+    .filter((r) => r.blockType === "heading")
+    .map((r) => ({
+      id: r.id,
+      depth: parseBlockMeta(r.blockMeta)?.depth ?? 2,
+      text: r.content,
+    }));
 
+  return (
+    <ReadingChrome
+      textId={id}
+      title={text.title}
+      wordCount={text.wordCount}
+      blockCount={rows.length}
+      category={text.category}
+      sourceUrl={text.sourceUrl}
+      cefrLevel={asCefrLevel(text.cefrLevel)}
+      cefrScore={text.cefrScore ?? null}
+      cefrDetail={parseCefrDetail(text.cefrDetail)}
+      initialRatio={text.readRatio}
+      initialCompletedAt={text.completedAt}
+      headings={headings}
+    >
       <ReaderShell
         textId={id}
         paragraphs={paraList}
         savedWords={savedWords}
         focusParaId={resumeParaId}
       />
-
       <p className="text-center text-[13px] font-bold text-ink-faint mt-6">
         点单词或拖选一句话 · 释义显示在右侧批注栏 · 再点一次收起 · Esc 关闭
       </p>
-    </div>
+    </ReadingChrome>
   );
 }
