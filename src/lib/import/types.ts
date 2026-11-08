@@ -34,6 +34,8 @@ export type InlineRange = {
   kind: InlineKind;
   /** link / image 的目标地址 */
   href?: string;
+  /** math 区间是否来自块级定界符（$$…$$ / \[…\]）：供「整段提升成 math 块」判定用 */
+  display?: boolean;
 };
 
 export type CalloutKind = "NOTE" | "TIP" | "WARNING" | "IMPORTANT" | "CAUTION";

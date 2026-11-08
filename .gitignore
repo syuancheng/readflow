@@ -70,3 +70,6 @@ nohup.out
 
 # IDE 剪贴板截图缓存（无版本管理价值，且是二进制大文件）
 /.qoder-input-images/
+
+# 图片代理的运行时缓存（可重新抓取，无版本管理价值）
+/data/img-cache/

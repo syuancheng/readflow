@@ -135,9 +135,16 @@ function inline(srcNodes: PhrasingContent[], b: TextBuilder, base?: string): voi
         // 「别静默丢正文」的兜底
         const rest = node as unknown as { type?: string; children?: unknown; value?: unknown };
         if (rest.type === "inlineMath" && typeof rest.value === "string") {
-          // 行内公式：文本保留 LaTeX 源（坐标基准），但标成 math 区间——
-          // 前端不生成可点词、不参与收词；词数 / CEFR 统计时整段剔除。
-          b.range("math", () => b.add(soft(rest.value as string)));
+          const v = rest.value;
+          if (/^\s|\s$/.test(v)) {
+            // 货币保护（P17）：remark-math 允许闭 $ 前是空白，"$5 and $10"
+            // 会被捕获成公式 —— 首尾带空白的不是公式，按字面文本还原美元符
+            b.add(`$${v}$`);
+          } else {
+            // 行内公式：文本保留 LaTeX 源（坐标基准），标成 math 区间——
+            // 前端渲染 KaTeX + 隐藏原文；词数 / CEFR 统计时整段剔除。
+            b.range("math", () => b.add(v));
+          }
         } else if (Array.isArray(rest.children)) {
           inline(rest.children as PhrasingContent[], b, base);
         } else if (typeof rest.value === "string") {

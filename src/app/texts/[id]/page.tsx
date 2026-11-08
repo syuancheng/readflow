@@ -5,8 +5,10 @@ import { db } from "@/db";
 import { paragraphs, texts, userWords, LOCAL_USER } from "@/db/schema";
 import ReaderShell from "@/components/ReaderShell";
 import CefrBadge from "@/components/CefrBadge";
+import ReadProgressPill from "@/components/ReadProgressPill";
 import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
 import { parseBlockMeta, parseInlineRanges } from "@/lib/import/types";
+import { shouldAutoResume } from "@/lib/read-progress";
 import type { SavedWordInfo } from "@/components/Reader";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +48,31 @@ export default async function TextPage({
 
   // 每日目标进度条已按用户要求移除
 
+  // 阅读进度（P6b / P18）：优先用词库「跳到原文」的 ?p= 定位；
+  // 没有显式目标时按 read_idx 自动续读。文末书签 / 100% / 已读完都不续读，
+  // 否则打开就跳到文末 → 一上来 100% → 又写回 100%，进度被锁死。
+  const maxIdx = rows.length > 0 ? rows[rows.length - 1].idx : -1;
+  const canResume = shouldAutoResume({
+    completedAt: text.completedAt,
+    readIdx: text.readIdx,
+    readRatio: text.readRatio,
+    maxIdx,
+  });
+  const resumeParaId = p
+    ? p
+    : canResume
+      ? (rows.find((r) => r.idx === text.readIdx)?.id ?? undefined)
+      : undefined;
+
+  const paraList = rows.map((r) => ({
+    id: r.id,
+    idx: r.idx,
+    content: r.content,
+    blockType: r.blockType,
+    blockMeta: parseBlockMeta(r.blockMeta),
+    inlineRanges: parseInlineRanges(r.inlineRanges),
+  }));
+
   return (
     <div className="max-w-[1440px] mx-auto px-6 py-7">
       <div className="mb-6">
@@ -60,6 +87,12 @@ export default async function TextPage({
             level={asCefrLevel(text.cefrLevel)}
             score={text.cefrScore ?? null}
             detail={parseCefrDetail(text.cefrDetail)}
+          />
+          {text.category && <span className="duo-badge duo-badge-purple">{text.category}</span>}
+          <ReadProgressPill
+            textId={id}
+            initialRatio={text.readRatio}
+            initialCompletedAt={text.completedAt}
           />
           {text.sourceUrl && (
             <a
@@ -76,16 +109,9 @@ export default async function TextPage({
 
       <ReaderShell
         textId={id}
-        paragraphs={rows.map((r) => ({
-          id: r.id,
-          idx: r.idx,
-          content: r.content,
-          blockType: r.blockType,
-          blockMeta: parseBlockMeta(r.blockMeta),
-          inlineRanges: parseInlineRanges(r.inlineRanges),
-        }))}
+        paragraphs={paraList}
         savedWords={savedWords}
-        focusParaId={p}
+        focusParaId={resumeParaId}
       />
 
       <p className="text-center text-[13px] font-bold text-ink-faint mt-6">

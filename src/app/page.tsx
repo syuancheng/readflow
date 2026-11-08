@@ -3,18 +3,10 @@ import Link from "next/link";
 import { db } from "@/db";
 import { texts, LOCAL_USER } from "@/db/schema";
 import { getStats } from "@/lib/stats";
-import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
 import ImportForm from "@/components/ImportForm";
-import CefrBadge from "@/components/CefrBadge";
-import DeleteTextButton from "@/components/DeleteTextButton";
+import TextList, { type TextCardRow } from "@/components/TextList";
 
 export const dynamic = "force-dynamic";
-
-const SOURCE_STYLE: Record<string, { label: string; cls: string; color: string }> = {
-  paste: { label: "粘贴", cls: "duo-badge duo-badge-blue", color: "var(--duo-blue)" },
-  file: { label: "文件", cls: "duo-badge duo-badge-orange", color: "var(--duo-orange)" },
-  url: { label: "网页", cls: "duo-badge duo-badge-green", color: "var(--duo-green)" },
-};
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -27,6 +19,20 @@ export default async function Home() {
       .orderBy(desc(texts.createdAt)),
     getStats(7),
   ]);
+
+  const cards: TextCardRow[] = rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    sourceType: t.sourceType,
+    category: t.category,
+    wordCount: t.wordCount,
+    createdAt: t.createdAt,
+    cefrLevel: t.cefrLevel,
+    cefrScore: t.cefrScore,
+    cefrDetail: t.cefrDetail,
+    readRatio: t.readRatio,
+    completedAt: t.completedAt,
+  }));
 
   const maxBar = Math.max(1, ...stats.recent.map((r) => r.count));
 
@@ -52,73 +58,9 @@ export default async function Home() {
       </div>
 
       <div className="grid lg:grid-cols-[1fr_340px] gap-7 items-start">
-        {/* ===== 左：文本列表 ===== */}
+        {/* ===== 左：文本列表（筛选 / 编辑 / 删除在 TextList 内）===== */}
         <div>
-          <div className="duo-section-title mb-3">
-            <span style={{ color: "var(--duo-blue)" }}>📚</span>
-            我的文本
-            <span className="text-[13px] font-bold text-ink-faint">({rows.length})</span>
-          </div>
-
-          {rows.length === 0 ? (
-            <div className="duo-card duo-empty">
-              <div className="duo-empty-icon">🎯</div>
-              <p className="text-[17px] font-bold mb-1.5">开始你的第一关</p>
-              <p className="text-[14px] text-ink-faint">
-                在右边粘贴一段文字，或上传一个 txt 文件
-              </p>
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {rows.map((t, i) => {
-                const style = SOURCE_STYLE[t.sourceType] ?? SOURCE_STYLE.paste;
-                const cefrDetail = parseCefrDetail(t.cefrDetail);
-                return (
-                  <li key={t.id} className="relative group">
-                    <Link href={`/texts/${t.id}`} className="duo-text-item block">
-                      <div className="flex items-start gap-4">
-                        {/* 关卡序号 */}
-                        <span
-                          className="duo-level-dot"
-                          style={{
-                            background: style.color,
-                            borderBottom: "3px solid rgba(0,0,0,0.18)",
-                          }}
-                        >
-                          {i + 1}
-                        </span>
-
-                        <div className="flex-1 min-w-0">
-                          {/* pr-9 给悬浮删除按钮让位，避免盖住词数 */}
-                          <div className="flex items-baseline justify-between gap-4 mb-1.5 pr-9">
-                            <h2 className="text-[16.5px] font-bold truncate">{t.title}</h2>
-                            <span className="text-[13px] font-bold text-ink-faint shrink-0">
-                              {t.wordCount.toLocaleString()} 词
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={style.cls}>{style.label}</span>
-                            <CefrBadge
-                              level={asCefrLevel(t.cefrLevel)}
-                              score={t.cefrScore ?? null}
-                              detail={cefrDetail}
-                            />
-                            <span className="text-[12.5px] font-medium text-ink-faint">
-                              {new Date(t.createdAt).toLocaleDateString("zh-CN")}
-                            </span>
-                            <span className="duo-nav-link !py-0.5 !px-2 !text-[12px] ml-auto">
-                              开始阅读 →
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </Link>
-                    <DeleteTextButton id={t.id} title={t.title} />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <TextList rows={cards} />
 
           {/* 空状态时给点游戏化引导 */}
           {rows.length === 0 && (

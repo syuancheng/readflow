@@ -355,6 +355,23 @@ HTML 路径在 walk 之前跑 `normalizeMath()`：KaTeX / MathJax v3 读 `<annot
 
 验证：`tests/unit/import.test.ts` 追加 10 个单测（块级/行内公式、单行 `$$` 提升、KaTeX/MathJax HTML 还原、figure 三形态、相对路径解析、含公式文档的 range 不越界 + tokenize 对齐）；真实浏览器冒烟：hydration 无错、`katex-display` 在场、`<img>` 渲染、行内公式无 `data-s`、点普通词仍弹批注卡。
 
+### 3.7 裸定界符扫描与「视觉是图、坐标是文本」（P17）
+
+**第三种公式形态。** 3.6 节覆盖了 Markdown 的 `$…$` 和「站点已渲染好」的 KaTeX/MathJax，但漏了中间态：**MathJax 站点在浏览器现场渲染，Readability 抓正文时把渲染 JS 当杂质丢掉**，`source_raw` 里只剩裸 `$…$` 文本（lilianweng.github.io 实测）。`html.ts` 的 `splitMathText()` 在文本节点层面扫描四类定界符：`$…$`（行内）、`$$…$$`（块级）、`\(…\)`（行内）、`\[…\]`（块级）。货币防误伤对齐 Pandoc：开 `$` 后不接空白、闭 `$` 前非空白且后不跟数字/美元（`$5 and $10` 不中招）、`\$` 是字面美元。**remark-math 的判定比 Pandoc 宽**（闭 `$` 前的空白不挡），所以 markdown.ts 对首尾带空白的 inlineMath 做二次过滤、字面还原 `$…$`。整段只剩一个块级公式时 `promoteDisplayMath()` 提升成 math 块（与 markdown 路径的单行 `$$J=r$$` 提升对称）。
+
+**行内公式的「视觉是图、坐标是文本」。** 用户对原站的观感是「公式像图片、复制不了」——那是 MathJax 渲染成 HTML/CSS 的效果，不是真 `<img>`。我们复刻这个观感但保住锚点：
+
+- 视觉层 `.rf-math-view`（标 **`data-rf-skip`**）是 KaTeX 输出；
+- 坐标层 `.rf-math-src` 用 `display:none` 保留 LaTeX 原文。
+
+关键陷阱（实测踩过）：**`Range.toString()` 不受 CSS 影响，但会把 KaTeX 视图里的字符全数计入**——一段 56 字符的 content，DOM 文本被撑到 94（MathML 注解 + 渲染字形 + 隐藏原文三份）。所以光藏原文不够，`offsetIn()` 从 `Range.toString().length` 重写为**手动树遍历计数**：`data-rf-skip` 子树零贡献、隐藏原文照常计数——整段「有效 DOM 文本」与 content 严格等长。终点落进公式复合体（视图或原文）时按原子吸附到 `data-s/data-e`（起点贴公式头、终点贴公式尾）。第二个陷阱：`tokenize` 把非词字符合并成段（`) ` 一个 token），跨公式边界的 token 被整体消费时会把边界外的空格从 DOM 里吞掉——跨界 token 的公式外部分必须拆出来照常渲染。
+
+**公式兼容面**：`lib/math.ts` 挂 mhchem 扩展（`\ce{…}` 化学式）+ 常用宏（`\bm`/`\argmax`/`\norm`/`\abs`/`\E`/`\R`…）；未知命令走 `throwOnError:false` 的红色原文降级，不崩页面。
+
+**图片兼容面**：`imgSrc()` 识别懒加载三件套（`data-src`/`data-original`/`data-lazy-src` 覆盖 1x1 占位 gif）与 `srcset`/`<picture><source>`（取最大档）；`data:image/*` 内联图直接放行。新增 **`GET /api/img?u=`** 服务端图片代理：直连 403（Referer 校验型防盗链）时前端自动换代理重试，代理无 Referer + 浏览器 UA，按 URL 哈希落盘 `data/img-cache/`；只代理 http(s)、content-type 必须 `image/*`、上限 15MB。
+
+验证：单测 175 全过（含四类定界符、货币防误伤、懒加载地址解析、mhchem/宏渲染、坏输入不抛异常）；合成文档 Playwright 11 项全过（含**跨公式拖选的批注 quote 与 content 切片逐字一致**——锚点契约的直接证据）；真实文章（lilianweng 2026-07-04 harness）重导入：38 行内 + 4 块级公式 + 18 配图全部渲染、可见文本零 `$…$` 残留、无运行时错误。
+
 ---
 
 ## 4. 链路二：点词命中与锚定
@@ -720,6 +737,28 @@ POST /api/words { word, textId, paragraphId, start, end, quote, prefix, suffix, 
 - **XP**：`todayCount * 10`，纯展示，没有经济系统。
 
 游戏化只做**反馈**，不做**惩罚**：没有掉命、没有 streak 断签警告。这是产品判断（见 README 2.3），不是没做完。
+
+### 7.1 文本管理：重命名 / 分类 / 删除 / 阅读进度（P16 / P18）
+
+**一个入口收敛所有元数据操作。** 首页列表卡片右上角 ✏️ 打开 `TextManageDialog`：标题输入、分类选择（七个预设 chip + 自定义输入框）、创建时间与词数展示、两段式删除。列表本身抽成客户端组件 `TextList`（服务端查全量传入），分类 / 难度两排筛选 chip 在前端组合过滤——几条到几十条数据量不需要 URL 参数参与。
+
+**表结构**：`texts` 加四列（`ensure-text-meta.ts` 轻量迁移，与 ensure-cefr 同模式）：`category TEXT`（可空 = 未分类；存自由字符串而非外键表，单用户应用换分类体系只改前端映射）、`read_idx INTEGER` + `read_ratio REAL`（可空 = 没读过）、`completed_at INTEGER`（可空 = 未标记读完）。补列后老数据默认 NULL，正好对应「从未手动标记」，**不需要数据迁移脚本**。
+
+**PATCH /api/texts/{id}** 一套入口管四类字段，各字段独立校验：title trim + 非空 + ≤200 字符；category 空串 = 恢复未分类；readIdx/readRatio **覆盖写**（P18 起不再单调合并）；completedAt 显式覆盖（时间戳 = 标记，`null` = 取消）。删除语义不变（词库 / 原句 / AI 释义保留，见 5.7 与该路由的契约注释）。
+
+**删除的两段式确认**：弹窗内点「删除这篇文本」→ 按钮原地变红「再点一次确认删除」+「手滑了，不删」取消入口，5 秒不点自动复原。不用 window.confirm（原生弹窗丑且样式不受控），也不做模态套模态。
+
+**阅读进度与「已读完」（P6b / P18 重写）**：两条互相独立的轨道。
+
+- **进度 = 滚动位置**：`src/lib/read-progress.ts` 的 `scrollProgress()` 用 `scrollY / (scrollHeight - innerHeight)` 算 0–1，一屏能看完的文章算 1、滚到底算 1、往回翻会下降。`ReadProgressPill` 对 `scroll` / `resize` 做 **350ms debounce**，停止滚动就 `measure()` + 立即 PATCH 覆盖写（2s interval 仅兜底）——「滚完就退出」是最常见路径，不能干等定时器；`visibilitychange` / `pagehide` / 卸载用 **`navigator.sendBeacon`** 投递，`fetch keepalive` 仅作降级（实测关标签页时 keepalive 会丢，见下）。`currentBlockIdx()` 按视口 75% 深度取「读到线」以上的最大块 idx 作续读书签，不再把全 DOM 的最大 idx 当已读位置。
+- **已读完 = 用户显式断言**：只有点「标记已读完」才写 `completed_at` 时间戳，再点一次传 `null` 取消。滚到 100% 只给轻提示、**绝不自动写完成状态**；按钮请求顺手带上当前进度，消除「滚到底 → 立刻标记 → 立刻返回」的落库不一致。列表「继续回味 →」与「✓ 已读完」徽章只由 `completed_at` 决定；「已读 N%」始终是紫色位置徽章，两者可并存。不设重置按钮：进度可下降、完成状态可取消，已覆盖全部修正路径。
+- **续读有边界**：`shouldAutoResume()` 在「已读完 / 没读过 / `read_idx` 是最后一块 / `readRatio ≥ 0.999`」时**不**自动定位。否则滚到底记下的文末书签会让每次打开都跳到文末 → 一上来 100% → 又写回 100%，进度被锁死且无法从头重读。
+
+**旧版 bug 与修复代价**：旧 `observe()` 用 `querySelectorAll("[data-idx]")` 遍历全 DOM 取最大 idx，注释写着「进入过视口」却没有任何视口判断；Reader 又不做虚拟滚动，于是打开页面就把 `read_ratio` 写成 1，服务端单调合并让错误值永远降不回来。P18 除改算法外，还把旧版写下的 `read_idx` / `read_ratio` 一次性清成 NULL；`completed_at` 补列默认 NULL 不需要迁移。
+
+**P18 上线后用户实测又抓到四个问题**（都已修）：① 滚动后直接关标签页，进度停在旧值 —— `pagehide` 的 `fetch keepalive` 在页面销毁时丢失，改 `sendBeacon` + 停止滚动即上报；② 文末书签让打开即 100%，加 `shouldAutoResume()` 拦截；③ 「标记已读完」按钮在标题行，用户滚到底够不着，为点它滚回顶部会让进度按设计掉回 0% —— 滚到底时改为浮出视口内的小提示（只提示、不自动改状态），点它不触发滚动。抓包可见旧链路 `REQ 1/270 → 点标记 → REQ 0/2`，正是滚动回顶部引起的合法但反直觉的覆盖；④ 自动续读 / `?p=` 跳转时目标段落整块标绿 2.4 秒又消失，观感突兀 —— 删掉 `.para-flash` 的 class 调用与 CSS 动画，只保留 `scrollIntoView` 定位（滚动到位本身就是反馈）。
+
+已知边界：`read_idx` 是段落序号，与正文绑定——本方案不支持编辑正文（会牵动全部锚点，另一个量级的工程），所以不会失配。放弃单调合并后，两个标签页同时开同一篇是「最后一次写入胜出」，单用户场景可接受；进度是位置估算，不代表真实理解程度。
 
 ---
 

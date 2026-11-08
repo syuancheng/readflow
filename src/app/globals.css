@@ -354,7 +354,20 @@ body {
   margin: 0 0.2em;
   vertical-align: middle;
 }
-/* 行内公式的 LaTeX 源文本（第一版不渲染，只去点词 + 降为弱化样式） */
+/* 行内公式（P17）：视觉是图、坐标是文本 */
+.rf-math-inline {
+  /* 行内容器本身零样式：KaTeX 输出自带 inline 排版 */
+}
+/* 渲染视图：只负责好看 */
+.rf-math-view {
+  display: inline;
+}
+/* 隐藏的 LaTeX 原文：Range.toString() 不受 CSS 影响，隐藏字符照样计入
+   offsetIn() 的字符偏移——这是「公式变图、锚点不漂」的全部秘密 */
+.rf-math-src {
+  display: none;
+}
+/* KaTeX 都渲染不出来时的降级样式（保留文本坐标） */
 .rf-i-math {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.86em;
@@ -504,40 +517,226 @@ body {
   transform: translateY(-1px);
 }
 
+/*
+ * 首页文本列表项：hover / 键盘聚焦时把整个 li 抬到兄弟项之上。
+ *
+ * 不这么做的后果：鼠标移到「难度 B2」徽章上时整张卡片也处于 :hover，
+ * 上面的 translateY 会让 <a> 变成 stacking context，把 .cefr-pop 的
+ * z-index 困在卡片内部；下一个 <li> 同样是定位元素且 DOM 顺序靠后，
+ * 就会把浮层上半截盖住 —— 标题和说明整段消失，只从第二张卡片下边缘
+ * 露出中段。单纯调高 .cefr-pop 的 z-index 没用，必须先突破父级 context。
+ */
+.text-list-item:hover,
+.text-list-item:focus-within {
+  z-index: 50;
+}
+
 .duo-text-item:active {
   transform: translateY(1px);
 }
 
-/* 文本卡片右上角的删除按钮：平时半隐，悬浮卡片时全显（触屏常显可点） */
-.duo-text-del {
+/* 文本卡片右上角的编辑按钮：平时半隐，悬浮卡片时全显（触屏常显可点） */
+.duo-text-edit {
   position: absolute;
   top: 10px;
   right: 10px;
   z-index: 1;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 9px;
   border: 2px solid transparent;
   background: transparent;
   color: var(--duo-ink-faint);
-  font-size: 16px;
-  font-weight: 800;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
   opacity: 0.45;
   transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
-.duo-text-del:hover {
+.duo-text-edit:hover {
   opacity: 1;
   background: var(--duo-surface);
-  border-color: var(--duo-orange);
-  color: var(--duo-orange-dark);
+  border-color: var(--duo-blue);
 }
 
-.duo-text-del:disabled {
-  opacity: 0.3;
-  cursor: default;
+/* ===== 文本编辑弹窗（P16）：多邻国风格的小模态 ===== */
+
+.tm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(28, 38, 54, 0.32);
+}
+
+.tm-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 100%);
+  max-height: min(86vh, 720px);
+  background: var(--duo-bg, #fff);
+  border: 2px solid var(--duo-border);
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgba(24, 36, 58, 0.18);
+  overflow: hidden;
+}
+
+.tm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+}
+
+.tm-head h2 {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.tm-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 2px solid var(--duo-border);
+  background: var(--duo-bg, #fff);
+  color: var(--duo-ink-faint);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tm-close:hover {
+  color: var(--duo-ink);
+  border-color: var(--duo-blue);
+}
+
+.tm-body {
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+}
+
+.tm-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--duo-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 14px 0 6px;
+}
+
+.tm-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tm-cat-custom {
+  font-size: 13px;
+}
+
+.tm-meta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--duo-ink-faint);
+}
+
+.tm-error {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--duo-red, #c14848);
+}
+
+.tm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.tm-actions .duo-btn {
+  flex: 1;
+}
+
+/* 危险区：与「保存」拉开视觉距离，避免手滑 */
+.tm-danger {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 2px dashed var(--duo-border);
+}
+
+.tm-danger-note {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--duo-ink-faint);
+  margin-bottom: 8px;
+}
+
+.tm-del-btn {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 2px solid var(--duo-border);
+  border-bottom-width: 3px;
+  background: var(--duo-bg, #fff);
+  color: var(--duo-ink-faint);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.tm-del-btn:hover {
+  color: var(--duo-red, #c14848);
+  border-color: var(--duo-red, #c14848);
+}
+
+/* 两段式确认的第二段：红色实底，一眼可辨 */
+.tm-del-btn.is-armed {
+  background: #d9534f;
+  border-color: #b52b27;
+  border-bottom-color: #8f211e;
+  color: #fff;
+}
+
+.tm-del-cancel {
+  margin-top: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--duo-blue-dark);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* 列表筛选行（分类 / 难度） */
+.tm-filter-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--duo-surface);
+  border: 2px solid var(--duo-border);
+  border-radius: 14px;
+}
+
+.tm-filter-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--duo-ink-faint);
+  margin-right: 2px;
 }
 
 /* 空状态 */
@@ -1193,17 +1392,6 @@ body {
     max-height: none;
     overflow: visible;
   }
-}
-
-/* 词库"跳到原文"后目标段落的短暂高亮 */
-.para-flash {
-  animation: para-flash 2.4s ease;
-  border-radius: 8px;
-}
-
-@keyframes para-flash {
-  0%, 55% { background: var(--duo-green-soft); }
-  100% { background: transparent; }
 }
 
 /* 自动收词开关（阅读页顶栏小药丸，已由右上角菜单的开关取代） */
@@ -2281,6 +2469,18 @@ body {
   position: relative;
   display: inline-flex;
   outline: none;
+}
+
+/*
+ * 只在激活时提升，不能常驻 z-index：否则列表里其它卡片上「未激活」的徽章
+ * 也会一起抬层，反而盖到当前展开的浮层上（实测第二张卡片的「难度 B2」
+ * 会压在浮层说明文字中间）。
+ * 若祖先带 transform（首页卡片 :hover 的 translateY），这里仍会被困在祖先
+ * 的 stacking context 内，还需要 .text-list-item 再抬一层。
+ */
+.cefr-wrap:hover,
+.cefr-wrap:focus-within {
+  z-index: 60;
 }
 
 .cefr-badge {

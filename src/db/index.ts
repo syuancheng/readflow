@@ -3,6 +3,7 @@ import * as schema from "./schema";
 import { sqlite, dbPath } from "./sqlite";
 import { ensureCefrColumns } from "./ensure-cefr";
 import { ensureBlockColumns } from "./ensure-blocks";
+import { ensureTextMetaColumns } from "./ensure-text-meta";
 
 /**
  * 建表语句直接内联：本地单机应用，启动即可用，不依赖 migration 流程。
@@ -27,7 +28,11 @@ CREATE TABLE IF NOT EXISTS texts (
   cefr_method TEXT,
   cefr_overridden INTEGER NOT NULL DEFAULT 0,
   source_format TEXT NOT NULL DEFAULT 'plain',
-  source_raw TEXT
+  source_raw TEXT,
+  category TEXT,
+  read_idx INTEGER,
+  read_ratio REAL,
+  completed_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS paragraphs (
@@ -145,6 +150,8 @@ function migrate(): void {
   ensureCefrColumns(sqlite);
   // 结构化导入：texts.source_* + paragraphs.block_*（与离线脚本共用定义）
   ensureBlockColumns(sqlite);
+  // 分类 + 阅读进度（P16）
+  ensureTextMetaColumns(sqlite);
 
   const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "card_type")) {

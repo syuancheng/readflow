@@ -413,3 +413,80 @@ test("figure / math 块的坐标契约：inline range 不越界，tokenize 与�
   assert.equal(blocks.filter((b) => b.kind === "math").length, 1);
   assert.equal(blocks.filter((b) => b.kind === "figure").length, 1);
 });
+
+// ===== P17：HTML 路径的裸 $ 定界符扫描（Readability 丢掉 MathJax JS 后的形态）=====
+
+test("parseHtmlBlocks：行内 $…$ 识别为 math 区间，定界符不进可见文本", () => {
+  const html = "<p>An MCE skill $s \\in \\mathcal{S}$ defines $c_s=(\\rho_s,F_s)$ and maps.</p>";
+  const blocks = parseHtmlBlocks(html);
+  const p = blocks[0];
+  assert.equal(p.kind, "paragraph");
+  assert.equal(p.text, "An MCE skill s \\in \\mathcal{S} defines c_s=(\\rho_s,F_s) and maps.");
+  const maths = p.ranges.filter((r) => r.kind === "math");
+  assert.equal(maths.length, 2);
+  assert.equal(p.text.slice(maths[0].start, maths[0].end), "s \\in \\mathcal{S}");
+  assert.equal(p.text.slice(maths[1].start, maths[1].end), "c_s=(\\rho_s,F_s)");
+  assert.notEqual(maths[0].display, true, "单美元是行内公式");
+});
+
+test("parseHtmlBlocks：整段 $$…$$ 提升为 math 块（display）", () => {
+  const html = "<p>$$c_s^*=\\arg\\max_{c_s}J_\\text{train}(c_s;s)$$</p>";
+  const blocks = parseHtmlBlocks(html);
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].kind, "math");
+  assert.equal(blocks[0].meta.display, true);
+  assert.ok(blocks[0].text.includes("\\arg\\max"));
+});
+
+test("parseHtmlBlocks：\\(…\\) 行内与 \\[…\\] 块级（LaTeX 原生定界符）", () => {
+  const html = "<p>Value \\(x^2+y^2\\) inline.</p><p>\\[E = mc^2\\]</p>";
+  const blocks = parseHtmlBlocks(html);
+  const p = blocks.find((b) => b.kind === "paragraph")!;
+  const mr = p.ranges.find((r) => r.kind === "math")!;
+  assert.equal(p.text.slice(mr.start, mr.end), "x^2+y^2");
+  const math = blocks.find((b) => b.kind === "math")!;
+  assert.equal(math.meta.display, true);
+  assert.equal(math.text, "E = mc^2");
+});
+
+test("parseHtmlBlocks：货币 $5 and $10 不被误判为公式；\\$ 转义保留字面美元", () => {
+  const html = "<p>It costs $5 and $10 total. He paid \\$20 cash.</p>";
+  const p = parseHtmlBlocks(html)[0];
+  assert.equal(p.ranges.filter((r) => r.kind === "math").length, 0, "货币不是公式");
+  assert.equal(p.text, "It costs $5 and $10 total. He paid $20 cash.");
+});
+
+test("parseHtmlBlocks：真实段落（含列表）里的公式逐条还原", () => {
+  const html = [
+    "<p>An MCE skill $s \\in \\mathcal{S}$ defines a context function $c_s=(\\rho_s,F_s)$, where:</p>",
+    "<ul><li>$\\rho_s = \\{\\rho_1,\\dots,\\rho_m\\}$ are static components.</li>",
+    "<li>$F_s = \\{F_1,\\dots,F_k\\}$ are dynamic operators.</li></ul>",
+  ].join("");
+  const blocks = parseHtmlBlocks(html);
+  const paras = blocks.filter((b) => b.kind === "paragraph" || b.kind === "list_item");
+  const allMaths = paras.flatMap((b) => b.ranges.filter((r) => r.kind === "math"));
+  assert.equal(allMaths.length, 4);
+  const li = blocks.find((b) => b.kind === "list_item")!;
+  const mr = li.ranges.find((r) => r.kind === "math")!;
+  assert.equal(li.text.slice(mr.start, mr.end), "\\rho_s = \\{\\rho_1,\\dots,\\rho_m\\}");
+});
+
+test("parseHtmlBlocks：图片懒加载——data-src / srcset / picture source 都能拿到真地址", () => {
+  const html = [
+    '<p><img src="data:image/gif;base64,R0lGODlhAQABAAAAADs=" data-src="https://cdn.example.com/real.jpg" alt="lazy"></p>',
+    '<img srcset="https://cdn.example.com/a-300.png 300w, https://cdn.example.com/a-800.png 800w" alt="set">',
+    '<picture><source srcset="https://cdn.example.com/b-400.webp 400w"><img src="https://cdn.example.com/b.png" alt="pic"></picture>',
+  ].join("");
+  const blocks = parseHtmlBlocks(html, "https://example.com/page");
+  const figs = blocks.filter((b) => b.kind === "figure");
+  assert.equal(figs.length, 3);
+  assert.equal(figs[0].meta.src, "https://cdn.example.com/real.jpg", "data-src 覆盖 1x1 占位");
+  assert.equal(figs[1].meta.src, "https://cdn.example.com/a-800.png", "srcset 取最大档");
+  assert.equal(figs[2].meta.src, "https://cdn.example.com/b.png", "有真 src 时不用 source 档");
+});
+
+test("parseHtmlBlocks：data:image 内联图地址原样保留（无防盗链问题）", () => {
+  const html = '<img src="data:image/svg+xml;base64,PHN2Zy8+" alt="tiny">';
+  const fig = parseHtmlBlocks(html)[0];
+  assert.equal(fig.meta.src, "data:image/svg+xml;base64,PHN2Zy8+");
+});

@@ -23,6 +23,7 @@
     "src/lib/split.ts",
     "src/lib/tokenize.ts",
     "src/lib/sentence.ts",
+    "src/lib/read-progress.ts",
     "src/lib/import/types.ts",
     "src/lib/import/builder.ts",
     "src/lib/import/detect.ts",

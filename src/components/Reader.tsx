@@ -71,12 +71,69 @@ type Annotation = {
   createdAt: number;
 };
 
-/** 把 DOM 里的 (node, offset) 换算成段落内的字符偏移 */
-function offsetIn(container: HTMLElement, node: Node, offset: number): number {
-  const r = document.createRange();
-  r.selectNodeContents(container);
-  r.setEnd(node, offset);
-  return r.toString().length;
+/**
+ * data-rf-skip 子树（公式渲染视图）对选区坐标零贡献：
+ * KaTeX 输出的字符（MathML 注解 + 渲染字形）不是 content 里的字符，
+ * 只有同层的隐藏 LaTeX 原文（.rf-math-src）按原样计数——它恰好等于
+ * content 里该公式的字符数，所以整段的「有效 DOM 文本」与 content 等长。
+ */
+function countText(n: Node): number {
+  if (n.nodeType === 3) return n.textContent?.length ?? 0;
+  if (n.nodeType === 1 && (n as Element).hasAttribute("data-rf-skip")) return 0;
+  let c = 0;
+  for (const ch of Array.from(n.childNodes)) c += countText(ch);
+  return c;
+}
+
+/** node 之前（不含自身）的兄弟文本 */
+function textBeforeNode(root: Node, node: Node): number {
+  if (node === root) return 0;
+  const parent = node.parentNode;
+  if (!parent || !root.contains(node)) return 0;
+  const idx = Array.prototype.indexOf.call(parent.childNodes, node);
+  let c = textBeforeNode(root, parent);
+  for (let i = 0; i < idx; i++) c += countText(parent.childNodes[i]);
+  return c;
+}
+
+/**
+ * 把 DOM 里的 (node, offset) 换算成段落内的字符偏移。
+ *
+ * 与 Range.toString().length 的区别：跳过 data-rf-skip 子树（公式视图），
+ * 否则 KaTeX 渲染产物的字符会混进计数，公式之后所有词的偏移整体漂移。
+ * 终点落在公式复合体内（视图或隐藏源）时，公式按原子处理：
+ * 起点吸附到公式开头（data-s）、终点吸附到公式结尾（data-e）。
+ */
+function offsetIn(
+  container: HTMLElement,
+  node: Node,
+  offset: number,
+  side: "start" | "end",
+): number {
+  const composite = (
+    node.nodeType === 1 ? (node as Element) : node.parentElement
+  )?.closest<HTMLElement>(".rf-math-inline");
+  if (composite && container.contains(composite)) {
+    return side === "start" ? Number(composite.dataset.s) : Number(composite.dataset.e);
+  }
+
+  if (node === container) {
+    // 终点是容器的 childIndex 形式：前 offset 个孩子的文本全计入
+    let c = 0;
+    for (let i = 0; i < offset && i < container.childNodes.length; i++) {
+      c += countText(container.childNodes[i]);
+    }
+    return c;
+  }
+  if (node.nodeType === 3) {
+    return textBeforeNode(container, node) + offset;
+  }
+  // 元素终点：(node, offset) = 该元素内第 offset 个孩子之前
+  let c = textBeforeNode(container, node);
+  for (let i = 0; i < offset && i < node.childNodes.length; i++) {
+    c += countText(node.childNodes[i]);
+  }
+  return c;
 }
 
 function paraOf(node: Node | null): HTMLElement | null {
@@ -137,6 +194,40 @@ function styleClassesFor(t: { start: number; end: number }, ranges: InlineRange[
   return out.join(" ");
 }
 
+/**
+ * 行内公式（P17）：「视觉是图、坐标是文本」。
+ *
+ * 视觉层 .rf-math-view 是 KaTeX 渲染产物（和原网站 MathJax 同类观感）；
+ * 坐标层 .rf-math-src 用 display:none 保留 LaTeX 原文——Range.toString()
+ * 不受 CSS 影响，隐藏字符照样计入 offsetIn() 的字符偏移，
+ * 所以拖选跨公式、点公式前后的词，锚点坐标与 content 严格一致。
+ * 悬停 title 显示 LaTeX 源，方便核对。
+ */
+function InlineMath({ latex, start, end }: { latex: string; start: number; end: number }) {
+  const html = useMemo(() => renderMath(latex, false), [latex]);
+  if (!html) {
+    // KaTeX 都渲染不出来（极端输入）：退回弱化源码样式，仍保留文本坐标
+    return (
+      <span className="rf-i-math" data-s={start} data-e={end}>
+        {latex}
+      </span>
+    );
+  }
+  return (
+    <span className="rf-math-inline" data-s={start} data-e={end} title={latex}>
+      {/* data-rf-skip：渲染视图对选区坐标零贡献（见 offsetIn），MathML 部分留给屏幕阅读器 */}
+      <span
+        className="rf-math-view"
+        data-rf-skip=""
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <span className="rf-math-src" aria-hidden="true">
+        {latex}
+      </span>
+    </span>
+  );
+}
+
 function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
   const tokens = tokenize(p.content);
   const ranges = p.inlineRanges ?? [];
@@ -152,8 +243,8 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
 
   const one = (t: Token): React.ReactNode => {
     if (!t.word) return <span key={`t${t.start}`}>{t.text}</span>;
-    // 行内公式里的 token：LaTeX 片段不是要背的单词，不生成 .w 可点 span。
-    // 文本仍是公式的 LaTeX 源，DOM 文本与 content 严格一致 → 锚点坐标不变。
+    // 兜底：链接里包住的公式 token（主循环已把公式整体走 InlineMath，
+    // 这里只处理「链接与公式区间重叠」的病理 markup）——不可点、弱化样式
     if (mathRanges.some((r) => t.start >= r.start && t.end <= r.end)) {
       return (
         <span key={`t${t.start}`} className="rf-i-math">
@@ -179,6 +270,28 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
+    // 公式优先于链接：区间整体交给 InlineMath（含隐藏原文，坐标不漂移）
+    const mr = mathRanges.find((r) => t.end > r.start && t.start < r.end);
+    if (mr) {
+      const latex = p.content.slice(mr.start, mr.end);
+      // tokenize 把非词字符合并成段（如 " \"、") "），会跨公式边界：
+      // 跨界 token 的公式外部分必须照常渲染，否则字符从 DOM 里丢掉、
+      // 该公式之后所有词的偏移整体错位
+      if (t.start < mr.start) {
+        out.push(<span key={`mp${t.start}`}>{t.text.slice(0, mr.start - t.start)}</span>);
+      }
+      let j = i;
+      while (j < tokens.length && tokens[j].start < mr.end) j++;
+      out.push(<InlineMath key={`m${mr.start}`} latex={latex} start={mr.start} end={mr.end} />);
+      const lastT = tokens[j - 1];
+      if (lastT && lastT.end > mr.end) {
+        out.push(
+          <span key={`mq${mr.end}`}>{lastT.text.slice(mr.end - lastT.start)}</span>,
+        );
+      }
+      i = j;
+      continue;
+    }
     const lk = links.find((l) => t.start >= l.start && t.end <= l.end);
     if (!lk) {
       out.push(one(t));
@@ -289,21 +402,29 @@ const SingleBlock = memo(function SingleBlock({ p, rangeKey }: { p: Para; rangeK
   }
 });
 
-/** 配图块：渲染真图；加载失败（防盗链 / 失效）退回占位文字 + 原图链接 */
+/** 配图块：渲染真图；加载失败（防盗链 / 失效）先走服务端代理，仍失败才退回占位文字 */
 const FigureBlock = memo(function FigureBlock({ p, pid }: { p: Para; pid: ReturnType<typeof pidProps> }) {
   const meta = p.blockMeta ?? {};
   const src = typeof meta.src === "string" ? meta.src : undefined;
+  const [stage, setStage] = useState<"direct" | "proxy">("direct");
   const [broken, setBroken] = useState(false);
-  // 只接受 http(s) 绝对地址：data:/javascript: 之类的地址没有理由进 <img>
-  const safe = Boolean(src && /^https?:\/\//i.test(src));
+  // 只接受 http(s) 绝对地址与 data:image/ 内联图：javascript: 之类没有理由进 <img>
+  const safe = Boolean(
+    src &&
+      (/^https?:\/\//i.test(src) ||
+        /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml|avif|bmp)/i.test(src)),
+  );
+  // data: 内联图不存在防盗链，不需要代理重试
+  const canProxy = Boolean(src && /^https?:\/\//i.test(src));
+  const shownSrc = stage === "proxy" && src ? `/api/img?u=${encodeURIComponent(src)}` : src;
 
   if (!safe || broken) {
     return (
       <figure {...pid} className="rf-figure rf-figure-fallback">
         <figcaption>
-          {broken ? "图片未能加载（站点可能限制外链）：" : ""}
+          {broken ? "图片未能加载：" : ""}
           {p.content || meta.alt || "图片"}
-          {safe && (
+          {safe && canProxy && (
             <>
               （
               <a href={src} target="_blank" rel="noreferrer" className="rf-inline-link">
@@ -320,11 +441,15 @@ const FigureBlock = memo(function FigureBlock({ p, pid }: { p: Para; pid: Return
   return (
     <figure {...pid} className="rf-figure">
       <img
-        src={src}
+        src={shownSrc}
         alt={p.content || meta.alt || ""}
         loading="lazy"
         referrerPolicy="no-referrer"
-        onError={() => setBroken(true)}
+        onError={() => {
+          // 直连失败（防盗链校验 Referer / 403 / 404）→ 换服务端代理再试一次
+          if (stage === "direct" && canProxy) setStage("proxy");
+          else setBroken(true);
+        }}
       />
       {p.content.trim() && <figcaption>{p.content}</figcaption>}
     </figure>
@@ -755,15 +880,14 @@ export default function Reader({
     return () => document.removeEventListener("keydown", onKey);
   }, [close]);
 
-  // 词库"跳到原文"入口：滚动到目标段落并短暂高亮
+  // 定位到目标段落（词库「跳到原文」的 ?p=，或按 read_idx 自动续读）。
+  // 以前会加 .para-flash 让整段标绿 2.4 秒再消失；那种一闪而过的反馈太突兀，
+  // 按用户要求去掉。滚动到位本身就是定位反馈，不再叠任何颜色动画。
   useEffect(() => {
     if (!focusParaId) return;
     const el = document.querySelector(`[data-pid="${focusParaId}"]`);
     if (!el) return;
     el.scrollIntoView({ block: "center" });
-    el.classList.add("para-flash");
-    const t = setTimeout(() => el.classList.remove("para-flash"), 2600);
-    return () => clearTimeout(t);
   }, [focusParaId]);
 
   // 每段已存批注的字符范围，序列化成字符串传给 memo 化的块（避免长文全量重渲染）
@@ -869,8 +993,8 @@ export default function Reader({
 
     if (paraOf(range.startContainer) !== pEl || paraOf(range.endContainer) !== pEl) return;
 
-    const start = offsetIn(pEl, range.startContainer, range.startOffset);
-    const end = offsetIn(pEl, range.endContainer, range.endOffset);
+    const start = offsetIn(pEl, range.startContainer, range.startOffset, "start");
+    const end = offsetIn(pEl, range.endContainer, range.endOffset, "end");
     if (end <= start) return;
 
     // 拖选：批注卡直接进右栏（不再用鼠标旁浮层）

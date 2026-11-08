@@ -34,6 +34,28 @@ export const texts = sqliteTable("texts", {
    */
   sourceFormat: text("source_format").notNull().default("plain"),
   sourceRaw: text("source_raw"),
+  /**
+   * 用户自定分类（技术文档 / 文学 / 博客 / 新闻 / 论文 / 教程 / 其他，
+   * 或自定义字符串）。可空 = 未分类。存自由字符串而不是外键表：
+   * 单用户应用不需要归一化，将来换分类体系只改前端映射，不动数据。
+   */
+  category: text("category"),
+  /**
+   * 阅读进度（P6b / P18 修订）。
+   * read_idx   = 上次离开时读到的段落 idx（续读书签）；
+   * read_ratio = 0–1 的滚动位置比例（实时、可下降，滚到底＝1；冗余存一份，
+   *   让列表页不 join paragraphs 就能出徽章）。
+   * 两列都是「位置估算」，覆盖写、不再单调合并 —— 否则一旦误写 1.0 就
+   * 永远降不回来（P18 修的正是这个 bug）。可空 = 还没读过。
+   */
+  readIdx: integer("read_idx"),
+  readRatio: real("read_ratio"),
+  /**
+   * 是否已读完（P18）：用户显式点「标记已读完」才写入时间戳，可空＝未标记。
+   * 与 read_ratio 完全解耦：滚到 100% 不等于读完；按钮再点一次传 null 取消。
+   * 不做「重置」按钮 —— 进度可下降 + 完成状态可取消已经覆盖所有修正路径。
+   */
+  completedAt: integer("completed_at"),
 });
 
 export const paragraphs = sqliteTable(

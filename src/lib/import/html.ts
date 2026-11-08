@@ -90,6 +90,112 @@ function soft(value: string): string {
   return value.replace(/\s*\n\s*/g, " ");
 }
 
+// ===== 裸数学定界符扫描（P17） =====
+//
+// 场景：MathJax 站点在浏览器里现场渲染公式，Readability 抓正文时把渲染 JS
+// 当杂质丢掉，source_raw 里只剩未渲染的 `$…$` 裸文本（既不是 KaTeX 的
+// <annotation> 也不是 math/tex script）。normalizeMath 管不到这一形态，
+// 必须在文本节点层面扫描定界符。
+//
+// 判定规则对齐 remark-math / Pandoc，核心是「别把货币当公式」：
+//   - $ 后不接空白、闭合 $ 前不是空白、闭合 $ 后不跟数字（$5 and $10 不误伤）
+//   - \$ 是转义的字面美元
+//   - $$…$$ 与 \[…\] 是块级（display）；$…$ 与 \(…\) 是行内
+
+type MathSeg = { math: boolean; value: string; display: boolean };
+
+/** 把一段文本拆成「普通文字 / 公式内容」序列。只在单个文本节点内匹配，
+ *  跨样式节点的公式（如 $s 在 <em> 外、$ 在内）不识别——属于病理 markup。 */
+export function splitMathText(text: string): MathSeg[] {
+  const out: MathSeg[] = [];
+  let buf = "";
+  const flush = () => {
+    if (buf) {
+      out.push({ math: false, value: buf, display: false });
+      buf = "";
+    }
+  };
+
+  let i = 0;
+  while (i < text.length) {
+    // 转义美元
+    if (text[i] === "\\" && text[i + 1] === "$") {
+      buf += "$";
+      i += 2;
+      continue;
+    }
+    // 块级 $$…$$（内容允许空白，公式里常见）
+    if (text.startsWith("$$", i)) {
+      const end = text.indexOf("$$", i + 2);
+      if (end > i + 2) {
+        flush();
+        out.push({ math: true, value: text.slice(i + 2, end), display: true });
+        i = end + 2;
+        continue;
+      }
+    }
+    // 行内 $…$
+    if (text[i] === "$") {
+      const first = text[i + 1];
+      if (first && !/\s/.test(first)) {
+        let k = i + 1;
+        while (k < text.length && text[k] !== "$") k++;
+        const content = text.slice(i + 1, k);
+        const after = text[k + 1] ?? "";
+        if (
+          k < text.length &&
+          content.length > 0 &&
+          !/\s/.test(content[content.length - 1]) &&
+          !/[\d$]/.test(after)
+        ) {
+          flush();
+          out.push({ math: true, value: content, display: false });
+          i = k + 1;
+          continue;
+        }
+      }
+      buf += "$";
+      i++;
+      continue;
+    }
+    // LaTeX 原生定界符 \(…\) 与 \[…\]
+    if (text.startsWith("\\(", i)) {
+      const end = text.indexOf("\\)", i + 2);
+      if (end > i + 2) {
+        flush();
+        out.push({ math: true, value: text.slice(i + 2, end), display: false });
+        i = end + 2;
+        continue;
+      }
+    }
+    if (text.startsWith("\\[", i)) {
+      const end = text.indexOf("\\]", i + 2);
+      if (end > i + 2) {
+        flush();
+        out.push({ math: true, value: text.slice(i + 2, end), display: true });
+        i = end + 2;
+        continue;
+      }
+    }
+    buf += text[i];
+    i++;
+  }
+  flush();
+  return out;
+}
+
+/** 文本节点 → 数学区间感知地写入 builder（定界符不进可见文本，与 remark-math 一致） */
+function emitText(raw: string, b: TextBuilder): void {
+  const segs = splitMathText(soft(raw));
+  for (const s of segs) {
+    if (!s.math) {
+      b.add(s.value);
+    } else {
+      b.range("math", () => b.add(s.value), undefined, s.display);
+    }
+  }
+}
+
 function absoluteUrl(el: Element, attr: "href" | "src"): string | undefined {
   const raw = el.getAttribute(attr);
   if (!raw) return undefined;
@@ -100,7 +206,7 @@ function absoluteUrl(el: Element, attr: "href" | "src"): string | undefined {
 
 function inlineDom(node: Node, b: TextBuilder): void {
   if (node.nodeType === 3) {
-    b.add(soft(node.textContent ?? ""));
+    emitText(node.textContent ?? "", b);
     return;
   }
   if (node.nodeType !== 1) return;
@@ -291,9 +397,44 @@ function codeBlock(el: Element): Block {
   return b.build("code", { lang: lang ?? undefined });
 }
 
-/** img 的显示地址：src 优先（jsdom 已解析成绝对地址），懒加载站点退回 data-src */
+/** img 的显示地址：src 优先（jsdom 已解析成绝对地址），懒加载站点退回 data-* / srcset */
+function resolveWithDoc(el: Element, v: string): string {
+  try {
+    return new URL(v, el.ownerDocument.URL).href;
+  } catch {
+    return v;
+  }
+}
+
 function imgSrc(img: Element): string | undefined {
-  return absoluteUrl(img, "src") ?? img.getAttribute("data-src") ?? undefined;
+  const raw = absoluteUrl(img, "src");
+  // 懒加载占位：1x1 的 data: gif 是最常见的 placeholder，不算真图
+  const isPlaceholder = Boolean(raw?.startsWith("data:") && raw.length < 200);
+  if (raw && !isPlaceholder) return raw;
+  for (const attr of ["data-src", "data-original", "data-lazy-src"]) {
+    const v = img.getAttribute(attr);
+    if (v) return resolveWithDoc(img, v);
+  }
+  // srcset / <picture><source>：取最后一档（通常最大），拿不到再退回 raw
+  const srcset =
+    img.getAttribute("srcset") ??
+    [...(img.closest("picture")?.querySelectorAll("source") ?? [])]
+      .map((s) => s.getAttribute("srcset"))
+      .filter(Boolean)
+      .pop();
+  const cand = srcset?.split(",").pop()?.trim().split(/\s+/)[0];
+  if (cand) return resolveWithDoc(img, cand);
+  return raw ?? undefined;
+}
+
+/** 整段只是一个块级公式（$$…$$ / \[…\]）→ 提升成 math 块，前端居中渲染 */
+function promoteDisplayMath(b: Block): Block {
+  const maths = b.ranges.filter((r) => r.kind === "math");
+  if (maths.length !== 1 || !maths[0].display) return b;
+  const { start, end } = maths[0];
+  const content = b.text.slice(start, end);
+  if (b.text.trim() !== content.trim()) return b;
+  return { kind: "math", text: content, ranges: [], meta: { display: true } };
 }
 
 function figureBlock(src: string | undefined, alt: string, caption?: string): Block {
@@ -318,8 +459,8 @@ function walk(parent: Element, out: Block[], ctx: Ctx): void {
     loose = "";
     if (!t) return;
     const b = makeBuilder();
-    b.add(t);
-    out.push(b.build("paragraph"));
+    emitText(t, b);
+    out.push(promoteDisplayMath(b.build("paragraph")));
   };
 
   for (const child of Array.from(parent.childNodes)) {
@@ -356,9 +497,10 @@ function walk(parent: Element, out: Block[], ctx: Ctx): void {
         b.add(caption);
         out.push(b.build("paragraph"));
       }
-    } else if (tag === "img") {
-      // 裸 img（没有包在 p / figure 里）也按配图处理
-      out.push(figureBlock(imgSrc(el), el.getAttribute("alt") || ""));
+    } else if (tag === "img" || tag === "picture") {
+      // 裸 img / picture（没包在 p / figure 里）也按配图处理
+      const img = tag === "picture" ? el.querySelector("img") : el;
+      if (img) out.push(figureBlock(imgSrc(img), img.getAttribute("alt") || ""));
     } else if (tag === "p" && isImageOnly(el)) {
       el.querySelectorAll("img").forEach((img) => {
         out.push(figureBlock(imgSrc(img), img.getAttribute("alt") || ""));
@@ -366,7 +508,7 @@ function walk(parent: Element, out: Block[], ctx: Ctx): void {
     } else if (/^h[1-6]$/.test(tag)) {
       out.push(headingOf(el));
     } else if (tag === "p") {
-      out.push(makeInline(el));
+      out.push(promoteDisplayMath(makeInline(el)));
     } else if (LIST_TAGS.has(tag)) {
       out.push(...listBlocks(el, ctx, 0));
     } else if (tag === "table") {
