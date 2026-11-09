@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isNotAGloss } from "@/lib/explain-policy";
 import { InvalidAnchorError, persistGlossByAnchor, type WordAnchor } from "@/lib/word-store";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,18 +43,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "不是有效的释义内容" }, { status: 400 });
   }
 
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+
   try {
-    const result = persistGlossByAnchor({
-      word: body.word,
-      textId: body.textId,
-      paragraphId: body.paragraphId,
-      start: body.start,
-      end: body.end,
-      quote: body.quote,
-      prefix: body.prefix ?? "",
-      suffix: body.suffix ?? "",
-      aiGloss: body.aiGloss,
-    });
+    const result = persistGlossByAnchor(
+      {
+        word: body.word,
+        textId: body.textId,
+        paragraphId: body.paragraphId,
+        start: body.start,
+        end: body.end,
+        quote: body.quote,
+        prefix: body.prefix ?? "",
+        suffix: body.suffix ?? "",
+        aiGloss: body.aiGloss,
+      },
+      user.id,
+    );
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof InvalidAnchorError) {

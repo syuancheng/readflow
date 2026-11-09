@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { userWords, contexts, LOCAL_USER } from "@/db/schema";
+import { userWords, contexts } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 import { InvalidAnchorError, saveWordAndContext, type WordAnchor } from "@/lib/word-store";
 
 export const runtime = "nodejs";
@@ -13,6 +14,8 @@ export const dynamic = "force-dynamic";
  * 可选 ?textId=xxx 只列某篇文章里收的词。
  */
 export async function GET(req: Request) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   const url = new URL(req.url);
   const textId = url.searchParams.get("textId");
 
@@ -40,7 +43,7 @@ export async function GET(req: Request) {
   const rows = db
     .select()
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, user.id))
     .orderBy(desc(userWords.createdAt))
     .all();
 
@@ -85,10 +88,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "缺少必填字段" }, { status: 400 });
   }
 
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+
   // 落库规则统一收口在 lib/word-store.ts（/api/contexts/gloss 也用它补建批注），
   // 避免「收词」和「AI 释义补建」两条路径各写一份 upsert 逻辑后行为漂移。
   try {
-    return NextResponse.json(saveWordAndContext(body));
+    return NextResponse.json(saveWordAndContext(body, user.id));
   } catch (err) {
     if (err instanceof InvalidAnchorError) {
       return NextResponse.json({ error: err.message }, { status: 404 });

@@ -92,10 +92,29 @@ CREATE TABLE IF NOT EXISTS exports (
 -- 唯一索引不写在这里：老库的 exports 还没有 card_type 列，
 -- 要先 ALTER 加列再建索引，统一放到下面的 migrate() 里做。
 
+-- settings / users / sessions 由 db/ensure-auth.ts 在连接层创建（需要重建老表）。
+-- 这里保留 IF NOT EXISTS 定义只为让本文件仍然是完整的结构快照，重复执行无害。
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  display_name TEXT,
+  is_owner INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'local',
+  key TEXT NOT NULL,
   value TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS section_summaries (

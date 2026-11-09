@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { InvalidAnchorError, ensureContextByAnchor, type WordAnchor } from "@/lib/word-store";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,8 @@ export const dynamic = "force-dynamic";
  * Body: WordAnchor & { aiGloss?: string }
  */
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   let body: WordAnchor & { aiGloss?: string };
   try {
     body = await req.json();
@@ -38,17 +41,20 @@ export async function POST(req: Request) {
 
   try {
     return NextResponse.json(
-      ensureContextByAnchor({
-        word: body.word,
-        textId: body.textId,
-        paragraphId: body.paragraphId,
-        start: body.start,
-        end: body.end,
-        quote: body.quote,
-        prefix: body.prefix ?? "",
-        suffix: body.suffix ?? "",
-        ...(typeof body.aiGloss === "string" ? { aiGloss: body.aiGloss } : {}),
-      }),
+      ensureContextByAnchor(
+        {
+          word: body.word,
+          textId: body.textId,
+          paragraphId: body.paragraphId,
+          start: body.start,
+          end: body.end,
+          quote: body.quote,
+          prefix: body.prefix ?? "",
+          suffix: body.suffix ?? "",
+          ...(typeof body.aiGloss === "string" ? { aiGloss: body.aiGloss } : {}),
+        },
+        user.id,
+      ),
     );
   } catch (err) {
     if (err instanceof InvalidAnchorError) {

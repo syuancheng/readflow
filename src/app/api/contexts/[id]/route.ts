@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { contexts, userWords } from "@/db/schema";
 import { InvalidAnchorError, applyGlossToContext } from "@/lib/word-store";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +23,18 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   const { id } = await params;
+
+  // 归属校验：这条 context 必须属于当前用户，否则任意登录用户能改别人的批注
+  const ctx = db.select().from(contexts).where(eq(contexts.id, id)).get();
+  if (ctx) {
+    const word = db.select().from(userWords).where(eq(userWords.id, ctx.userWordId)).get();
+    if (!word || word.userId !== user.id) {
+      return NextResponse.json({ error: "无权操作" }, { status: 403 });
+    }
+  }
 
   let body: { aiGloss?: unknown };
   try {

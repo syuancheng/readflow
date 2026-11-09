@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { paragraphs, texts, LOCAL_USER } from "@/db/schema";
+import { paragraphs, texts } from "@/db/schema";
 import { countWords } from "@/lib/split";
 import { extractFromUrl } from "@/lib/readability";
 import { estimateCefrForParts } from "@/lib/cefr-dict";
@@ -15,6 +15,7 @@ import {
   kindCounts,
 } from "@/lib/import";
 import type { Block, ImportFormatChoice, SourceFormat } from "@/lib/import/types";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,15 +24,19 @@ export const dynamic = "force-dynamic";
 const MAX_SOURCE_RAW = 2 * 1024 * 1024;
 
 export async function GET() {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   const rows = await db
     .select()
     .from(texts)
-    .where(eq(texts.userId, LOCAL_USER))
+    .where(eq(texts.userId, user.id))
     .orderBy(desc(texts.createdAt));
   return NextResponse.json({ texts: rows });
 }
 
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   let body: {
     title?: string;
     text?: string;
@@ -111,7 +116,7 @@ export async function POST(req: Request) {
     tx.insert(texts)
       .values({
         id: textId,
-        userId: LOCAL_USER,
+        userId: user.id,
         title,
         sourceType,
         sourceUrl: url || null,

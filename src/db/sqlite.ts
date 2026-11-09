@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { ensureAuthSchema } from "./ensure-auth";
 
 /**
  * 唯一的 SQLite 连接。
@@ -27,14 +28,9 @@ export const sqlite: Database.Database = globalRef.__readflowSqlite ?? openDatab
 
 if (!globalRef.__readflowSqlite) {
   globalRef.__readflowSqlite = sqlite;
-  // 配置表在连接层就保证存在：设置中心可能先于主 schema 初始化被读取
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
+  // 配置表与账户表在连接层就保证存在：登录 API / 设置中心可能先于
+  // 主 schema 初始化被读取。老库的 settings 在这里原地重建为按用户隔离。
+  ensureAuthSchema(sqlite);
   process.on("exit", () => {
     try {
       sqlite.close();

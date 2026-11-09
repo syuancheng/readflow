@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { contexts, paragraphs, texts, userWords, LOCAL_USER } from "@/db/schema";
+import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { lookup } from "@/lib/dict";
 import { cardGloss } from "@/lib/gloss";
 
@@ -62,7 +62,10 @@ export function assertAnchor(input: WordAnchor): void {
  * 收词：按 (userId, lemma) upsert user_words，并插入一条 context。
  * 保持「每次收词一条 context」的原语义（同一个词在不同位置出现各记一条）。
  */
-export function saveWordAndContext(input: WordAnchor & { aiGloss?: string }): SaveResult {
+export function saveWordAndContext(
+  input: WordAnchor & { aiGloss?: string },
+  userId: string,
+): SaveResult {
   assertAnchor(input);
   const { word, textId, paragraphId, start, end, quote, prefix, suffix, aiGloss } = input;
   const dictResult = lookup(word.trim());
@@ -112,7 +115,7 @@ export function saveWordAndContext(input: WordAnchor & { aiGloss?: string }): Sa
       tx.insert(userWords)
         .values({
           id: wordId,
-          userId: LOCAL_USER,
+          userId,
           lemma: lemmaForm,
           displayForm,
           pos,
@@ -209,6 +212,7 @@ export function findContextByAnchor(input: WordAnchor) {
  */
 export function ensureContextByAnchor(
   input: WordAnchor & { aiGloss?: string },
+  userId: string,
 ): SaveResult {
   assertAnchor(input);
   const existing = findContextByAnchor(input);
@@ -238,7 +242,7 @@ export function ensureContextByAnchor(
       contextCreated: false,
     };
   }
-  return saveWordAndContext(input);
+  return saveWordAndContext(input, userId);
 }
 
 /**
@@ -251,8 +255,9 @@ export function ensureContextByAnchor(
  */
 export function persistGlossByAnchor(
   input: WordAnchor & { aiGloss: string },
+  userId: string,
 ): SaveResult {
-  const result = ensureContextByAnchor(input);
+  const result = ensureContextByAnchor(input, userId);
   if (!result.contextCreated) applyGlossToContext(result.contextId, input.aiGloss);
   return result;
 }

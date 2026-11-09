@@ -1,4 +1,12 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  index,
+  uniqueIndex,
+  primaryKey,
+} from "drizzle-orm/sqlite-core";
 
 /**
  * 本地单机版固定使用 "local"。
@@ -155,11 +163,40 @@ export const exports = sqliteTable(
   (t) => [uniqueIndex("uq_exports_word_deck_type").on(t.userWordId, t.deckId, t.cardType)],
 );
 
-/** 键值配置：当前只存墨墨导出的目标牌组 / 章节，将来放任何单值设置 */
-export const settings = sqliteTable("settings", {
-  key: text("key").primaryKey(),
-  value: text("value").notNull(),
-  updatedAt: integer("updated_at").notNull(),
+/**
+ * 键值配置（P20 改为「站级默认 + 用户覆盖」）。
+ * user_id = GLOBAL_USER("local") 是站级密钥（AI / 墨墨 / 插件），不是任何账号；
+ * 真实账号用自己的 id 存同名 key 覆盖。读写规则见 lib/settings-store.ts。
+ */
+export const settings = sqliteTable(
+  "settings",
+  {
+    userId: text("user_id").notNull().default(LOCAL_USER),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
+/** 本地账户。密码是 scrypt 哈希串，绝不存明文；is_owner 只有 /setup 的首个账号为 1。 */
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name"),
+  isOwner: integer("is_owner").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+});
+
+/** 会话。只存 token 的 sha256，DB 泄露也无法冒用；过期由 currentUser() 校验。 */
+export const sessions = sqliteTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull(),
 });
 
 /**

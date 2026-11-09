@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { contexts, texts, userWords, LOCAL_USER } from "@/db/schema";
+import { contexts, texts, userWords } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import {
   buildCalendar,
@@ -28,19 +28,23 @@ export type Stats = StreakResult & {
  *
  * `days` 只影响 recent 柱状图的窗口；streak 和日历走的是**全量**历史。
  */
-export async function getStats(days = 7, calendarWeeks = 18): Promise<Stats> {
+export async function getStats(
+  days = 7,
+  calendarWeeks = 18,
+  userId: string = "",
+): Promise<Stats> {
   const textRows = await db
     .select({
       c: sql<number>`count(*)`,
       w: sql<number>`coalesce(sum(${texts.wordCount}), 0)`,
     })
     .from(texts)
-    .where(eq(texts.userId, LOCAL_USER));
+    .where(eq(texts.userId, userId));
 
   const wordRows = await db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER));
+    .where(eq(userWords.userId, userId));
 
   // 通过 user_words 关联 contexts，按天聚合。
   // 这里没有日期 where —— recent / 日历 / streak 都基于这份全量数据。
@@ -51,7 +55,7 @@ export async function getStats(days = 7, calendarWeeks = 18): Promise<Stats> {
     })
     .from(contexts)
     .innerJoin(userWords, eq(contexts.userWordId, userWords.id))
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, userId))
     .groupBy(sql`date(${contexts.createdAt} / 1000, 'unixepoch', 'localtime')`);
 
   const byDay = new Map(ctxRows.map((r) => [r.d, Number(r.c)]));

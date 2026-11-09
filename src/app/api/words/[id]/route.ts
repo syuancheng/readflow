@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { userWords, contexts, exports, LOCAL_USER } from "@/db/schema";
+import { userWords, contexts, exports } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   const { id } = await params;
 
   let body: { status?: string; starred?: number };
@@ -34,7 +37,7 @@ export async function PATCH(
   if (!word) {
     return NextResponse.json({ error: "词条不存在" }, { status: 404 });
   }
-  if (word.userId !== LOCAL_USER) {
+  if (word.userId !== user.id) {
     return NextResponse.json({ error: "无权操作" }, { status: 403 });
   }
 
@@ -65,6 +68,8 @@ export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   const { id } = await params;
   const url = new URL(req.url);
   const contextId = url.searchParams.get("contextId");
@@ -86,7 +91,7 @@ export async function DELETE(
     if (!word) {
       return NextResponse.json({ error: "词条不存在" }, { status: 404 });
     }
-    if (word.userId !== LOCAL_USER) {
+    if (word.userId !== user.id) {
       return NextResponse.json({ error: "无权操作" }, { status: 403 });
     }
 
@@ -123,7 +128,7 @@ export async function DELETE(
     return NextResponse.json({ error: "词条不存在" }, { status: 404 });
   }
 
-  if (word.userId !== LOCAL_USER) {
+  if (word.userId !== user.id) {
     return NextResponse.json({ error: "无权操作" }, { status: 403 });
   }
 
