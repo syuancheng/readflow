@@ -762,7 +762,7 @@ POST /api/words { word, textId, paragraphId, start, end, quote, prefix, suffix, 
 
 ### 7.2 字体与阅读页外壳（P19）
 
-**字体分工**：`layout.tsx` 用 `next/font/google` 加载 DM Sans（`--font-dm-sans`）、Outfit（`--font-outfit`）与 Geist Mono（`--font-geist-mono`）。`globals.css` 里 `--font-sans` 指向 DM Sans、body 与标题全局继承；`--font-nav` 指向 Outfit，只应用在站点级 `.duo-nav`（`SiteHeader`），而 `SiteHeader` 在 `/texts/*` 整条隐藏，所以阅读页顶栏用的是 DM Sans。阅读器英文正文仍走 `--font-serif`（Iowan / Palatino / Georgia，19px）—— 长文可读性的有意设计，不随全站字体切换。DM Sans / Outfit 都不含中文字形，中文回退 PingFang SC，实际变化只在英文与数字。`next/font/google` 在 build 时下载、运行时自托管到 `.next/static/media`，离线可用。
+**字体分工**：`layout.tsx` 用 `next/font/google` 加载 DM Sans（`--font-dm-sans`）、Outfit（`--font-outfit`）与 Geist Mono（`--font-geist-mono`）。`globals.css` 里 `--font-sans` 指向 DM Sans、body 与标题全局继承；`--font-nav` 指向 Outfit，只应用在站点级 `.duo-nav`（`SiteHeader`），而 `SiteHeader` 在 `/texts/*` 整条隐藏，所以阅读页顶栏用的是 DM Sans。初版按 A① 让阅读器英文正文保留衬线（`--font-serif`，Iowan / Palatino / Georgia），但用户在实际页面里觉得「字体没改」，随后撤回了该决定：`.reading-body` 改为 `--font-sans` 走 DM Sans，`--font-serif` 变量删除；19px / 1.85 行高保留（原本给衬线体调的，换无衬线后略松，用户暂未要求调整）。DM Sans / Outfit 都不含中文字形，中文回退 PingFang SC，实际变化只在英文与数字。`next/font/google` 在 build 时下载、运行时自托管到 `.next/static/media`，离线可用。
 
 **阅读页外壳 `ReadingChrome`**（客户端组件，包在 `ReaderShell` 外层）：54px sticky 顶栏含目录开关、返回、标题、CEFR 徽章、进度数字、标记按钮、原文链接与底边 2px 进度条；下方两列 grid（目录 | 整个 Reader）。目录默认收起，从 `paragraphs` 筛 `blockType === "heading"` + `blockMeta.depth` 生成树，点击用 `window.scrollTo` 手动减去顶栏高度（不用 `scroll-margin-top`，免得影响 Reader 的 `focusParaId` 续读定位），滚动时高亮最后一个越过读线的章节。
 

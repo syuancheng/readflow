@@ -65,8 +65,6 @@
   /* 站点顶部导航专用：Outfit。阅读页窄条不用它，跟正文同族 */
   --font-nav: var(--font-outfit), -apple-system, "PingFang SC", sans-serif;
   --font-mono: var(--font-geist-mono);
-  /* 阅读器英文正文刻意保留衬线，长文可读性；不随全站字体切换 */
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", serif;
 }
 
 body {
@@ -235,10 +233,10 @@ body {
   color: var(--duo-orange-dark);
 }
 
-/* ====== 阅读器（保持衬线，但融入多邻国色彩） ====== */
+/* ====== 阅读器（P19 用户裁决：正文也用 DM Sans，不再保留衬线） ====== */
 
 .reading-body {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 19px;
   line-height: 1.85;
   letter-spacing: 0.006em;

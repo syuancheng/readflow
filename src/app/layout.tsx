@@ -6,9 +6,10 @@ import BottomNav from "@/components/BottomNav";
 import SiteHeader from "@/components/SiteHeader";
 
 /**
- * 字体分工（2026-11-08）：DM Sans 负责正文与标题，Outfit 只给站点顶部导航
- * （.duo-nav），阅读器英文正文仍走 --font-serif 衬线以保持长文可读性。
- * 等宽保留 Geist Mono（代码块 / 公式）。两者都不含中文字形，中文回退 PingFang SC。
+ * 字体分工（2026-11-09 修订）：DM Sans 负责全站正文与标题，含阅读器英文正文
+ * （用户撤回了最初「阅读器保留衬线」的决定）；Outfit 只给站点顶部导航
+ * （.duo-nav）。等宽保留 Geist Mono（代码块 / 公式）。
+ * DM Sans / Outfit 都不含中文字形，中文回退 PingFang SC。
  */
 const dmSans = DM_Sans({ variable: "--font-dm-sans", subsets: ["latin"] });
 const outfit = Outfit({ variable: "--font-outfit", subsets: ["latin"] });
