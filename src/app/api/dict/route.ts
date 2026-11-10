@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { lookup } from "@/lib/dict";
+import { currentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
  * 返回词形还原后的完整释义。
  */
 export async function GET(req: NextRequest) {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const word = req.nextUrl.searchParams.get("word")?.trim();
 
   if (!word) {

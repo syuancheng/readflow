@@ -30,6 +30,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const OWNER = "e2e_owner";
 const OWNER_PASS = "owner-pass-2026";
 const OWNER_NEW_PASS = "owner-pass-new-2026";
+const OWNER_PHONE = "13800138000";
+const BOB_PHONE = "13900139000";
 const BOB = "e2e_bob";
 const BOB_PASS = "bob-pass-2026";
 
@@ -108,15 +110,35 @@ try {
   check("空库登录失败（尚未建号）", publicImg.status === 401, `status=${publicImg.status}`);
 
   // ---- 2. 首次建号 ----
-  const weak = await api("/api/auth/setup", { method: "POST", body: { username: OWNER, password: "123" } });
+  const weak = await api("/api/auth/setup", { method: "POST", body: { username: OWNER, phone: OWNER_PHONE, password: "123" } });
   check("弱密码被拒绝", weak.status === 400, weak.data.error ?? "");
-  const setup = await api("/api/auth/setup", {
-    method: "POST",
-    body: { username: OWNER, password: OWNER_PASS, displayName: "E2E Owner" },
-  });
+  const noPhone = await api("/api/auth/setup", { method: "POST", body: { username: OWNER, password: OWNER_PASS } });
+  const badPhone = await api("/api/auth/setup", { method: "POST", body: { username: OWNER, phone: "12345", password: OWNER_PASS } });
+  check("建号必须填合法手机号", noPhone.status === 400 && badPhone.status === 400, `缺=${noPhone.status} 错=${badPhone.status}`);
+  // 两个不同用户名并发建号：入口检查与写库之间隔着 await，只能有一个成功
+  const [setup1, setup2] = await Promise.all([
+    api("/api/auth/setup", {
+      method: "POST",
+      body: { username: OWNER, phone: OWNER_PHONE, password: OWNER_PASS, displayName: "E2E Owner" },
+    }),
+    api("/api/auth/setup", {
+      method: "POST",
+      body: { username: "e2e_racer", phone: OWNER_PHONE, password: OWNER_PASS, displayName: "E2E Owner" },
+    }),
+  ]);
+  const winners = [setup1, setup2].filter((r) => r.status === 200);
+  {
+    const raceDb = new Database(DB_PATH);
+    const n = raceDb.prepare("SELECT count(*) AS n FROM users").get().n;
+    // 后面的用例都按 OWNER 登录：抢到的是 racer 就改名，session 绑的是 user id 不受影响
+    raceDb.prepare("UPDATE users SET username = ? WHERE username = 'e2e_racer'").run(OWNER);
+    raceDb.close();
+    check("并发建号只会成功一个，库里只有一个账号", winners.length === 1 && n === 1, `成功 ${winners.length} 个，users=${n}`);
+  }
+  const setup = winners[0] ?? setup1;
   check("首次建号成功并下发 session cookie", setup.status === 200 && Boolean(setup.cookie), `status=${setup.status}`);
   const cookieA = setup.cookie;
-  const again = await api("/api/auth/setup", { method: "POST", body: { username: "intruder", password: "intruder-pass" } });
+  const again = await api("/api/auth/setup", { method: "POST", body: { username: "intruder", phone: "13600136000", password: "intruder-pass" } });
   check("已有账号后 /setup 拒绝建号（关闭开放注册）", again.status === 403, `status=${again.status}`);
 
   const me = await api("/api/auth/me", { cookie: cookieA });
@@ -127,13 +149,21 @@ try {
   // ---- 3. 第二个账号（同时验证 add-user 运维脚本）----
   const add = spawnSync(
     process.execPath,
-    [path.join(ROOT, ".verify/scripts/account.js"), "add", BOB, `--password=${BOB_PASS}`],
+    [path.join(ROOT, ".verify/scripts/account.js"), "add", BOB, `--phone=${BOB_PHONE}`, `--password=${BOB_PASS}`],
     { cwd: ROOT, env: { ...process.env, DB_PATH }, encoding: "utf8" },
   );
   check("add-user 脚本在指定 DB 建号成功", add.status === 0, (add.stdout || add.stderr || "").trim().slice(0, 120));
   const loginB = await api("/api/auth/login", { method: "POST", body: { username: BOB, password: BOB_PASS } });
   check("第二账号可登录且不是 owner", loginB.status === 200 && loginB.data.user?.isOwner === false, `status=${loginB.status}`);
   const cookieB = loginB.cookie;
+  const byPhone = await api("/api/auth/login", { method: "POST", body: { account: "139 0013 9000", password: BOB_PASS } });
+  check(
+    "可用手机号登录（带空格也能识别），且登到同一个账号",
+    byPhone.status === 200 && byPhone.data.user?.username === BOB && byPhone.data.user?.phone === BOB_PHONE,
+    `status=${byPhone.status} user=${byPhone.data.user?.username}`,
+  );
+  const ownerMe = await api("/api/auth/me", { cookie: cookieA });
+  check("/api/auth/me 带回本人手机号", ownerMe.data.user?.phone === OWNER_PHONE, String(ownerMe.data.user?.phone));
 
   // ---- 4. 各自建文章，验证列表隔离 ----
   const mkText = (cookie, title) =>
@@ -186,6 +216,93 @@ try {
   const listWB = wordsB.data.words ?? wordsB.data ?? [];
   check("A 的词库只有自己的词", Array.isArray(listWA) && listWA.length === 1 && listWA[0].lemma === "alpha", `A=${listWA.length}`);
   check("B 的词库只有自己的词", Array.isArray(listWB) && listWB.length === 1 && listWB[0].lemma === "bravo", `B=${listWB.length}`);
+
+  // ---- 6b. 收词 / 批注写入的跨账号隔离 ----
+  const paraOf = async (cookie, id) => (await api(`/api/texts/${id}`, { cookie })).data.paragraphs?.[0]?.id;
+  const pA = await paraOf(cookieA, idA);
+  const pB = await paraOf(cookieB, idB);
+  const SENT = "The meticulous widget keeps its state in sync over a long run.";
+  const at = SENT.indexOf("widget");
+  const anchorOf = (textId, paragraphId) => ({
+    word: "widget",
+    quote: "widget",
+    textId,
+    paragraphId,
+    start: at,
+    end: at + 6,
+    prefix: SENT.slice(0, at),
+    suffix: SENT.slice(at + 6),
+  });
+  const saveA = await api("/api/words", { method: "POST", cookie: cookieA, body: anchorOf(idA, pA) });
+  const saveB = await api("/api/words", { method: "POST", cookie: cookieB, body: anchorOf(idB, pB) });
+  check(
+    "同一个词两个账号各收各的，不串到对方词条",
+    saveA.status === 200 && saveB.status === 200 && saveA.data.wordId !== saveB.data.wordId && saveB.data.created === true,
+    `A=${saveA.data.wordId} B=${saveB.data.wordId} B.created=${saveB.data.created}`,
+  );
+  const bWords = (await api("/api/words", { cookie: cookieB })).data.words ?? [];
+  check("B 的词库里有自己收的 widget", bWords.some((w) => w.lemma === "widget" && w.id === saveB.data.wordId), `B=${bWords.map((w) => w.lemma)}`);
+
+  const intrude = await api("/api/words", { method: "POST", cookie: cookieB, body: anchorOf(idA, pA) });
+  check("B 往 A 的文章收词 → 404", intrude.status === 404, `status=${intrude.status}`);
+  const intrudeGloss = await api("/api/contexts/gloss", {
+    method: "POST",
+    cookie: cookieB,
+    body: { ...anchorOf(idA, pA), aiGloss: "B 写的释义" },
+  });
+  check("B 往 A 的文章写 AI 释义 → 404", intrudeGloss.status === 404, `status=${intrudeGloss.status}`);
+  const intrudeEnsure = await api("/api/contexts/ensure", { method: "POST", cookie: cookieB, body: anchorOf(idA, pA) });
+  check("B 在 A 的文章补建批注 → 404", intrudeEnsure.status === 404, `status=${intrudeEnsure.status}`);
+
+  const peekWords = await api(`/api/words?textId=${idA}`, { cookie: cookieB });
+  check("B 按 A 的 textId 列词拿不到 A 的词", (peekWords.data.words ?? []).length === 0, `B 见到 ${(peekWords.data.words ?? []).length} 个`);
+
+  const delCross = await api(`/api/words/${saveB.data.wordId}?contextId=${saveA.data.contextId}`, {
+    method: "DELETE",
+    cookie: cookieB,
+  });
+  const annA = (await api(`/api/annotations?textId=${idA}`, { cookie: cookieA })).data.annotations ?? [];
+  check(
+    "B 借自己的词条删不掉 A 的批注",
+    annA.length === 1 && annA[0].id === saveA.data.contextId,
+    `delete status=${delCross.status}，A 批注 ${annA.length} 条`,
+  );
+
+  // ---- 6c. 只带假 cookie 穿过 proxy 的请求，必须被路由自己挡下 ----
+  const FAKE = "readflow_session=forged-token";
+  const fakeExplain = await api("/api/explain", { method: "POST", cookie: FAKE, body: { word: "widget" } });
+  const fakeDict = await api("/api/dict?word=widget", { cookie: FAKE });
+  const fakeDecks = await api("/api/markji/decks", { cookie: FAKE });
+  const fakeTest = await api("/api/settings/test", { method: "POST", cookie: FAKE, body: { target: "ai" } });
+  const fakeImg = await fetch(`${BASE}/api/img?u=${encodeURIComponent("https://example.com/a.png")}`, {
+    headers: { cookie: FAKE },
+  });
+  check(
+    "假 cookie 调 explain / dict / 牌组 / 测试连接 / 图片代理 → 401",
+    [fakeExplain.status, fakeDict.status, fakeDecks.status, fakeTest.status, fakeImg.status].every((st) => st === 401),
+    `explain=${fakeExplain.status} dict=${fakeDict.status} decks=${fakeDecks.status} test=${fakeTest.status} img=${fakeImg.status}`,
+  );
+  const loopImg = await fetch(`${BASE}/api/img?u=${encodeURIComponent(`${BASE}/icon.svg`)}`, {
+    headers: { cookie: cookieA },
+  });
+  check("图片代理拒绝代理本机 / 内网地址", loopImg.status === 403, `status=${loopImg.status}`);
+
+  // ---- 6d. 站级密钥只有 owner 能改，插件 Token 只给 owner ----
+  const bSetToken = await api("/api/settings", { method: "PUT", cookie: cookieB, body: { markjiToken: "b-token-123" } });
+  const bRegen = await api("/api/settings", { method: "PUT", cookie: cookieB, body: { regenerateExtensionToken: true } });
+  const bTest = await api("/api/settings/test", { method: "POST", cookie: cookieB, body: { target: "ai" } });
+  check(
+    "非 owner 改墨墨 Token / 重置插件 Token / 测试模型 → 403",
+    bSetToken.status === 403 && bRegen.status === 403 && bTest.status === 403,
+    `token=${bSetToken.status} regen=${bRegen.status} test=${bTest.status}`,
+  );
+  const aRegen = await api("/api/settings", { method: "PUT", cookie: cookieA, body: { regenerateExtensionToken: true } });
+  const bView = await api("/api/settings", { cookie: cookieB });
+  check(
+    "owner 能生成插件 Token，非 owner 读不到它",
+    aRegen.status === 200 && Boolean(aRegen.data.extension?.token) && bView.data.extension?.token === null,
+    `A=${aRegen.status}/${Boolean(aRegen.data.extension?.token)} B 见到=${bView.data.extension?.token}`,
+  );
 
   // ---- 7. 个人资料按账号隔离，站级密钥共享 ----
   const putA = await api("/api/settings", {

@@ -49,6 +49,8 @@ type SettingsPayload = {
   providers: ProviderRow[];
   markji: { configured: boolean; maskedToken: string; fromEnv: boolean };
   extension: { token: string | null };
+  /** 站级配置（模型 / 墨墨 / 插件）只有主账号能改 */
+  canEditSite?: boolean;
   profile?: Profile;
 };
 
@@ -611,6 +613,12 @@ export default function SettingsDialog({
                 {notice.text}
               </div>
             )}
+            {data?.canEditSite === false &&
+              (tab === "models" || tab === "markji" || tab === "extension") && (
+                <div className="st-notice st-notice-err">
+                  这里是全站共用的配置，只有主账号可以修改。
+                </div>
+              )}
 
             {loading ? (
               <p className="st-loading">读取配置中…</p>

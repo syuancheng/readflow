@@ -100,7 +100,10 @@ export async function DELETE(
         .where(and(eq(contexts.userWordId, id), eq(contexts.textId, textId)))
         .run();
     } else {
-      db.delete(contexts).where(eq(contexts.id, contextId!)).run();
+      // 必须同时限定 userWordId：只校验了词条归属，contextId 却是客户端随便填的
+      db.delete(contexts)
+        .where(and(eq(contexts.id, contextId!), eq(contexts.userWordId, id)))
+        .run();
     }
 
     const remaining = db

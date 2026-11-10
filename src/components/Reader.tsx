@@ -71,114 +71,10 @@ type Annotation = {
   createdAt: number;
 };
 
-/**
- * data-rf-skip 子树（公式渲染视图）对选区坐标零贡献：
- * KaTeX 输出的字符（MathML 注解 + 渲染字形）不是 content 里的字符，
- * 只有同层的隐藏 LaTeX 原文（.rf-math-src）按原样计数——它恰好等于
- * content 里该公式的字符数，所以整段的「有效 DOM 文本」与 content 等长。
- */
-function countText(n: Node): number {
-  if (n.nodeType === 3) return n.textContent?.length ?? 0;
-  if (n.nodeType === 1 && (n as Element).hasAttribute("data-rf-skip")) return 0;
-  let c = 0;
-  for (const ch of Array.from(n.childNodes)) c += countText(ch);
-  return c;
-}
-
-/** node 之前（不含自身）的兄弟文本 */
-function textBeforeNode(root: Node, node: Node): number {
-  if (node === root) return 0;
-  const parent = node.parentNode;
-  if (!parent || !root.contains(node)) return 0;
-  const idx = Array.prototype.indexOf.call(parent.childNodes, node);
-  let c = textBeforeNode(root, parent);
-  for (let i = 0; i < idx; i++) c += countText(parent.childNodes[i]);
-  return c;
-}
-
-/**
- * 把 DOM 里的 (node, offset) 换算成段落内的字符偏移。
- *
- * 与 Range.toString().length 的区别：跳过 data-rf-skip 子树（公式视图），
- * 否则 KaTeX 渲染产物的字符会混进计数，公式之后所有词的偏移整体漂移。
- * 终点落在公式复合体内（视图或隐藏源）时，公式按原子处理：
- * 起点吸附到公式开头（data-s）、终点吸附到公式结尾（data-e）。
- */
-function offsetIn(
-  container: HTMLElement,
-  node: Node,
-  offset: number,
-  side: "start" | "end",
-): number {
-  const composite = (
-    node.nodeType === 1 ? (node as Element) : node.parentElement
-  )?.closest<HTMLElement>(".rf-math-inline");
-  if (composite && container.contains(composite)) {
-    return side === "start" ? Number(composite.dataset.s) : Number(composite.dataset.e);
-  }
-
-  if (node === container) {
-    // 终点是容器的 childIndex 形式：前 offset 个孩子的文本全计入
-    let c = 0;
-    for (let i = 0; i < offset && i < container.childNodes.length; i++) {
-      c += countText(container.childNodes[i]);
-    }
-    return c;
-  }
-  if (node.nodeType === 3) {
-    return textBeforeNode(container, node) + offset;
-  }
-  // 元素终点：(node, offset) = 该元素内第 offset 个孩子之前
-  let c = textBeforeNode(container, node);
-  for (let i = 0; i < offset && i < node.childNodes.length; i++) {
-    c += countText(node.childNodes[i]);
-  }
-  return c;
-}
-
 function paraOf(node: Node | null): HTMLElement | null {
   if (!node) return null;
   const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
   return el?.closest<HTMLElement>("[data-pid]") ?? null;
-}
-
-/**
- * 把选区的两端吸附到词边界。
- * 用户按下/松开鼠标的位置经常落在词的中间（比如从 "This" 的 T 和 h 之间开始拖），
- * 字符级选区会变成 "is post…" 这样的半截词。这里把：
- *   - 起点：落在某词内部（offset > 0）→ 扩展到该词开头
- *   - 终点：落在某词内部（offset < 词长）→ 扩展到该词结尾
- * 标点和空白不在 .w span 里，保持原样不吸附。
- * 返回新 Range 并把视觉选区一并更新，保证高亮和弹层内容一致。
- */
-function snapRangeToWords(range: Range): Range {
-  const r = range.cloneRange();
-
-  const startEl =
-    r.startContainer.nodeType === 3 ? r.startContainer.parentElement : (r.startContainer as HTMLElement);
-  const startWord = startEl?.closest<HTMLElement>(".w");
-  if (
-    startWord &&
-    r.startContainer.nodeType === 3 &&
-    r.startOffset > 0 &&
-    r.startOffset < (r.startContainer as Text).length
-  ) {
-    r.setStartBefore(startWord);
-  }
-
-  const endEl =
-    r.endContainer.nodeType === 3 ? r.endContainer.parentElement : (r.endContainer as HTMLElement);
-  const endWord = endEl?.closest<HTMLElement>(".w");
-  if (endWord && r.endContainer.nodeType === 3 && r.endOffset > 0 && r.endOffset < (r.endContainer as Text).length) {
-    r.setEndAfter(endWord);
-  }
-
-  if (!r.collapsed) {
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(r);
-  }
-  return r;
 }
 
 function pidProps(p: Para) {
@@ -198,9 +94,9 @@ function styleClassesFor(t: { start: number; end: number }, ranges: InlineRange[
  * 行内公式（P17）：「视觉是图、坐标是文本」。
  *
  * 视觉层 .rf-math-view 是 KaTeX 渲染产物（和原网站 MathJax 同类观感）；
- * 坐标层 .rf-math-src 用 display:none 保留 LaTeX 原文——Range.toString()
- * 不受 CSS 影响，隐藏字符照样计入 offsetIn() 的字符偏移，
- * 所以拖选跨公式、点公式前后的词，锚点坐标与 content 严格一致。
+ * 坐标层 .rf-math-src 用 display:none 保留 LaTeX 原文，复合体自身带 data-s / data-e。
+ * 选词按每个词 span 的 data-s / data-e 取坐标（不读 DOM 文本长度），
+ * 所以跨公式选短语、点公式前后的词，锚点坐标与 content 严格一致。
  * 悬停 title 显示 LaTeX 源，方便核对。
  */
 function InlineMath({ latex, start, end }: { latex: string; start: number; end: number }) {
@@ -215,7 +111,7 @@ function InlineMath({ latex, start, end }: { latex: string; start: number; end: 
   }
   return (
     <span className="rf-math-inline" data-s={start} data-e={end} title={latex}>
-      {/* data-rf-skip：渲染视图对选区坐标零贡献（见 offsetIn），MathML 部分留给屏幕阅读器 */}
+      {/* data-rf-skip：渲染视图不是 content 里的字符，MathML 部分留给屏幕阅读器 */}
       <span
         className="rf-math-view"
         data-rf-skip=""
@@ -233,16 +129,57 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
   const ranges = p.inlineRanges ?? [];
   const links = ranges.filter((r) => r.kind === "link" && r.href);
   const mathRanges = ranges.filter((r) => r.kind === "math");
-  const annotatedRanges = rangeKey
-    .split(",")
-    .filter(Boolean)
-    .map((s) => {
-      const [a, b] = s.split("-").map(Number);
-      return { start: a, end: b };
-    });
+  // rangeKey = "已存批注区间,...|当前选中区间|拖动预览区间"：三种样式都由渲染决定，
+  // 不再命令式改 DOM class（批注首次落库时整段重渲染会把手动加的选中样式冲掉）
+  const [annKey, anchorKey = "", dragKey = ""] = rangeKey.split("|");
+  const parseRanges = (k: string) =>
+    k
+      .split(",")
+      .filter(Boolean)
+      .map((s) => {
+        const [a, b] = s.split("-").map(Number);
+        return { start: a, end: b };
+      });
+  const annotatedRanges = parseRanges(annKey);
+  const anchor = parseRanges(anchorKey)[0];
+  const dragSel = parseRanges(dragKey)[0];
+
+  /** 一条连续底色的 class：区间内 + 两端圆角标记 */
+  const runCls = (t: Token, word: boolean, list: { start: number; end: number }[], name: string) => {
+    const hit = list.filter((r) =>
+      word ? t.end > r.start && t.start < r.end : t.start >= r.start && t.end <= r.end,
+    );
+    if (hit.length === 0) return [];
+    const out = [name];
+    if (word && hit.some((r) => t.start <= r.start)) out.push(`${name}-l`);
+    if (word && hit.some((r) => t.end >= r.end)) out.push(`${name}-r`);
+    return out;
+  };
+  const anchorList = anchor ? [anchor] : [];
+  const dragList = dragSel ? [dragSel] : [];
 
   const one = (t: Token): React.ReactNode => {
-    if (!t.word) return <span key={`t${t.start}`}>{t.text}</span>;
+    if (!t.word) {
+      // 词间空白 / 标点也带坐标（.rf-g）：批注、选中、拖选的底色要把它们一起涂上，
+      // 否则一个短语会被涂成「defined」「an」「ultraintelligent」一块块断开的样子。
+      // 只在完整落在某个批注区间内部时才涂（首尾的空格、引号不算进去）。
+      const gapCls = [
+        "rf-g",
+        ...runCls(t, false, annotatedRanges, "w-annotated"),
+        ...runCls(t, false, anchorList, "w-anchor"),
+        ...runCls(t, false, dragList, "w-drag"),
+      ].join(" ");
+      return (
+        <span
+          key={`t${t.start}`}
+          className={gapCls}
+          data-s={t.start}
+          data-e={t.end}
+        >
+          {t.text}
+        </span>
+      );
+    }
     // 兜底：链接里包住的公式 token（主循环已把公式整体走 InlineMath，
     // 这里只处理「链接与公式区间重叠」的病理 markup）——不可点、弱化样式
     if (mathRanges.some((r) => t.start >= r.start && t.end <= r.end)) {
@@ -255,8 +192,14 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
     /* 标记只反映「这次批注」：划选存档的那一次出现（w-annotated）。
        不做词库级全局标记——同一个词在别的句子里可能你是懂的，
        全文铺绿既误导又破坏「单词放在句子语境里解释」的原则 */
-    const annotated = annotatedRanges.some((r) => t.end > r.start && t.start < r.end);
-    const cls = ["w", annotated ? "w-annotated" : "", styleClassesFor(t, ranges)]
+    // 一整条底色只在两端圆角，中间与词间空白直角相接，看起来是连续的一条
+    const cls = [
+      "w",
+      ...runCls(t, true, annotatedRanges, "w-annotated"),
+      ...runCls(t, true, anchorList, "w-anchor"),
+      ...runCls(t, true, dragList, "w-drag"),
+      styleClassesFor(t, ranges),
+    ]
       .filter(Boolean)
       .join(" ");
     return (
@@ -633,11 +576,7 @@ function buildSavedMap(words: SavedWordInfo[]): Map<string, SavedWordInfo> {
   return map;
 }
 
-/** 正文里当前被批注的锚点高亮（飞书/腾讯文档式） */
-function markActiveAnchor(els: Iterable<Element>) {
-  document.querySelectorAll(".w-anchor").forEach((el) => el.classList.remove("w-anchor"));
-  for (const el of els) el.classList.add("w-anchor");
-}
+
 
 export default function Reader({
   textId,
@@ -651,6 +590,8 @@ export default function Reader({
   focusParaId?: string;
 }) {
   const [pick, setPick] = useState<Pick | null>(null);
+  /** 拖动中的预览范围（按下即整词）；松手清空 */
+  const [dragSel, setDragSel] = useState<{ pid: string; start: number; end: number } | null>(null);
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
   const [autoSave, setAutoSave] = useState(true);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -868,7 +809,6 @@ export default function Reader({
   /** 关闭右侧批注：清空选区 + 去掉正文锚点高亮 */
   const close = useCallback(() => {
     setPick(null);
-    markActiveAnchor([]);
     window.getSelection()?.removeAllRanges();
   }, []);
 
@@ -891,13 +831,26 @@ export default function Reader({
   }, [focusParaId]);
 
   // 每段已存批注的字符范围，序列化成字符串传给 memo 化的块（避免长文全量重渲染）
+  const anchorPid = pick?.paragraphId;
+  const anchorStart = pick?.anchor.start;
+  const anchorEnd = pick?.anchor.end;
   const rangeKeyByPara = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of annotations) {
       m.set(a.paragraphId, (m.get(a.paragraphId) ?? "") + `${a.start}-${a.end},`);
     }
+    // 当前选中 / 拖动预览拼在「|」后面：只有涉及的段落 key 变化，其它段落的 memo 块不重渲染。
+    // 拖动中先隐藏上一次的选中，页面上只有正在拖的这一条。
+    const add = (pid: string, anchorPart: string, dragPart: string) => {
+      const [ann = ""] = (m.get(pid) ?? "").split("|");
+      m.set(pid, `${ann}|${anchorPart}|${dragPart}`);
+    };
+    if (!dragSel && anchorPid && anchorStart !== undefined && anchorEnd !== undefined) {
+      add(anchorPid, `${anchorStart}-${anchorEnd}`, "");
+    }
+    if (dragSel) add(dragSel.pid, "", `${dragSel.start}-${dragSel.end}`);
     return m;
-  }, [annotations]);
+  }, [annotations, anchorPid, anchorStart, anchorEnd, dragSel]);
 
   // 分组是纯函数（服务端/客户端结果一致），不会引入 hydration 差异
   const groups = useMemo(
@@ -905,17 +858,11 @@ export default function Reader({
     [paragraphs],
   );
 
-  function onClick(e: React.MouseEvent) {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-
-    const wordEl = (e.target as HTMLElement).closest<HTMLElement>(".w");
-    if (!wordEl) {
-      close();
-      return;
-    }
-    // 链接里的词：点词优先弹释义，别直接跳走（冒泡阶段阻止默认行为仍生效）
-    if ((e.target as HTMLElement).closest("a.rf-inline-link")) e.preventDefault();
+  /**
+   * 选中一个词：单击，或按下后没离开这个词就松开。
+   * 再点同一个词 = 收起（本次自动新建的词随之撤销）。
+   */
+  function pickWord(wordEl: HTMLElement) {
     const pEl = wordEl.closest<HTMLElement>("[data-pid]");
     if (!pEl) return;
 
@@ -959,7 +906,6 @@ export default function Reader({
       pickData.initialGloss = cached;
       pickData.fromAnnotation = true;
     }
-    markActiveAnchor([wordEl]);
     setPick(pickData);
 
     if (!autoSave) return;
@@ -976,34 +922,13 @@ export default function Reader({
     void ensureAnnotation(pickData);
   }
 
-  function onMouseUp(e: React.MouseEvent) {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-
-    // 先把两端吸附到词边界（起点落在词中间时扩展到整词），再走判定
-    const range = snapRangeToWords(sel.getRangeAt(0));
-    if (range.collapsed) return;
-
-    const pEl = paraOf(range.commonAncestorContainer);
-    if (!pEl) return;
-
+  /** 选中一段：按下后拖过两个及以上的词（[start, end) 已经是整词边界） */
+  function pickRange(pEl: HTMLElement, start: number, end: number, x: number, y: number) {
     const pid = pEl.dataset.pid!;
     const p = paragraphs.find((x) => x.id === pid);
     if (!p) return;
 
-    if (paraOf(range.startContainer) !== pEl || paraOf(range.endContainer) !== pEl) return;
-
-    const start = offsetIn(pEl, range.startContainer, range.startOffset, "start");
-    const end = offsetIn(pEl, range.endContainer, range.endOffset, "end");
-    if (end <= start) return;
-
     // 拖选：批注卡直接进右栏（不再用鼠标旁浮层）
-    const anchors = [...pEl.querySelectorAll<HTMLElement>(".w")].filter((el) => {
-      const s = Number(el.dataset.s);
-      const en = Number(el.dataset.e);
-      return en > start && s < end;
-    });
-    markActiveAnchor(anchors);
     const sig = selectionSignals(p.content, start, end, "select");
     const selectionText = p.content.slice(start, end).trim();
     const askInfo = noteSelection(sig, pid, selectionText);
@@ -1011,8 +936,8 @@ export default function Reader({
       paragraphId: pid,
       paragraphIdx: p.idx,
       anchor: buildAnchor(p.content, start, end),
-      x: e.clientX,
-      y: e.clientY,
+      x,
+      y,
       source: "select",
       signals: {
         ...sig,
@@ -1032,6 +957,147 @@ export default function Reader({
     if (autoSave && /\s/.test(pickData.anchor.quote.trim())) {
       void ensureAnnotation(pickData);
     }
+  }
+
+  // 原生事件监听只挂一次，闭包里的 pick / autoSave 会过期：每次渲染后把最新的处理函数放进 ref
+  const pickRef = useRef({ pickWord, pickRange });
+  useEffect(() => {
+    pickRef.current = { pickWord, pickRange };
+  });
+
+  // ---- 选词交互（对齐 Readlang）----
+  // 不用浏览器原生选区：原生选区按字符走，从「defined」的 d 后面按下，高亮就从 e 开始。
+  // 改成在词上按下时阻止原生选区、立刻整词选中；拖动时取指针下的词，起点词到当前词
+  // 之间整词连成一条（.w-drag）；拖出起点段落就停在段首 / 段尾。松手：没离开起点词
+  // = 点词，否则 = 选短语。按住 Option（⌥）拖动则交还原生选区，用来复制原文。
+  const suppressClickRef = useRef(false);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    type Drag = { pEl: HTMLElement; words: HTMLElement[]; from: number; to: number };
+    let drag: Drag | null = null;
+
+    const rangeOf = (d: Drag) => {
+      const a = Math.min(d.from, d.to);
+      const b = Math.max(d.from, d.to);
+      return { start: Number(d.words[a].dataset.s), end: Number(d.words[b].dataset.e) };
+    };
+    // 预览走 React 渲染（只重渲染这一段）：命令式改 class 会被同时到来的重渲染冲掉，
+    // 比如刚打开页面时批注列表返回，按下的那个词就不亮了
+    const paint = (d: Drag) => {
+      const r = rangeOf(d);
+      setDragSel({ pid: d.pEl.dataset.pid ?? "", start: r.start, end: r.end });
+    };
+
+    /**
+     * 离指针最近的词。正文行高约是字高的 1.4 倍，行与行之间有一条不属于任何词的空白
+     * （约占正文三分之一的高度）。按在这里时浏览器会起原生选区（蓝色、按字符走），
+     * 所以段内任何位置都按「先找最近的一行、再找这一行里水平最近的词」吸附到整词。
+     */
+    function nearestWord(words: HTMLElement[], x: number, y: number) {
+      let best = { i: -1, dx: Infinity, dy: Infinity };
+      let bestScore = Infinity;
+      words.forEach((w, i) => {
+        for (const r of w.getClientRects()) {
+          const dy = Math.max(r.top - y, 0, y - r.bottom);
+          const dx = Math.max(r.left - x, 0, x - r.right);
+          const score = dy * 10000 + dx;
+          if (score < bestScore) {
+            bestScore = score;
+            best = { i, dx, dy };
+          }
+        }
+      });
+      return best;
+    }
+    /** 按下时只在「贴着词」的空白里吸附（行间、词间）；点行尾远处的空白是想收起卡片，不选词 */
+    const SNAP_PX = 14;
+
+    /** 拖动中指针对应哪个词：段落上方 / 下方 → 段首 / 段尾；段落范围内 → 最近的词 */
+    function wordIndexAt(d: Drag, x: number, y: number): number {
+      const w = document.elementFromPoint(x, y)?.closest<HTMLElement>(".w");
+      if (w && d.pEl.contains(w)) return d.words.indexOf(w);
+      const r = d.pEl.getBoundingClientRect();
+      if (y < r.top) return 0;
+      if (y > r.bottom) return d.words.length - 1;
+      const n = nearestWord(d.words, x, y);
+      return n.i >= 0 ? n.i : d.to;
+    }
+
+    function onDown(e: MouseEvent) {
+      if (e.button !== 0 || e.altKey) return; // Option 拖动：走原生选区，方便复制
+      const target = e.target as HTMLElement;
+      // 代码块、表单控件保持原生行为（代码要能直接选中复制）
+      if (target.closest("pre, input, textarea, button")) return;
+      // 正文区其余任何位置都不起原生选区：包括段落之间、行与行之间的空白
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      const pEl = paraOf(target);
+      if (!pEl) return;
+      const words = [...pEl.querySelectorAll<HTMLElement>(".w")];
+      if (words.length === 0) return;
+      const hit = target.closest<HTMLElement>(".w");
+      let i = hit ? words.indexOf(hit) : -1;
+      if (i < 0) {
+        const n = nearestWord(words, e.clientX, e.clientY);
+        if (n.dx <= SNAP_PX && n.dy <= SNAP_PX) i = n.i;
+      }
+      if (i < 0) return;
+      drag = { pEl, words, from: i, to: i };
+      body!.classList.add("rf-dragging");
+      paint(drag);
+    }
+    function finish(x: number, y: number) {
+      const d = drag;
+      drag = null;
+      body!.classList.remove("rf-dragging");
+      setDragSel(null);
+      if (!d) return;
+      // 松手后浏览器还会补一个 click：这次已经处理过了，别让 onClick 再处理一遍
+      suppressClickRef.current = true;
+      setTimeout(() => (suppressClickRef.current = false), 0);
+      if (d.from === d.to) {
+        pickRef.current.pickWord(d.words[d.from]);
+      } else {
+        const r = rangeOf(d);
+        pickRef.current.pickRange(d.pEl, r.start, r.end, x, y);
+      }
+    }
+    function onMove(e: MouseEvent) {
+      if (!drag) return;
+      if ((e.buttons & 1) === 0) return finish(e.clientX, e.clientY); // 松手发生在窗口外
+      e.preventDefault();
+      const i = wordIndexAt(drag, e.clientX, e.clientY);
+      if (i !== drag.to) {
+        drag.to = i;
+        paint(drag);
+      }
+    }
+    function onUp(e: MouseEvent) {
+      if (drag) finish(e.clientX, e.clientY);
+    }
+    body.addEventListener("mousedown", onDown);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      body.removeEventListener("mousedown", onDown);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  /** 词与短语已在 mouseup 里处理；click 只负责「点空白处收起」和挡住链接跳转 */
+  function onClick(e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    // 链接里的词：点词优先弹释义，别直接跳走
+    if (target.closest(".w") && target.closest("a.rf-inline-link")) e.preventDefault();
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return; // Option 拖动出来的原生选区：留给复制
+    if (!target.closest(".w")) close();
   }
 
   function celebrate(x: number, y: number, label: string) {
@@ -1164,8 +1230,8 @@ export default function Reader({
    * 或两次并发请求竞态时，答案就「看得见、存不下」。现在由 /api/contexts/gloss
    * 按锚点更新或补建，把「点了 AI 就一定能查到」变成服务端保证的契约。
    *
-   * pickData 用弹层打开那一帧的对象（锚点稳定），即使中途切到别的词，
-   * 迟到的流式结果也只会写回它自己那次选区。
+   * pickData 用弹层打开那一帧的对象（锚点稳定），写回只落到它自己那次选区。
+   * 中途切到别的词时，弹层卸载会中止 AI 流，半截答案不会写回。
    */
   async function persistGloss(pickData: Pick, gloss: string) {
     const { anchor, paragraphId } = pickData;
@@ -1251,10 +1317,6 @@ export default function Reader({
     };
     const pEl = document.querySelector<HTMLElement>(`[data-pid="${a.paragraphId}"]`);
     if (pEl) {
-      const els = [...pEl.querySelectorAll<HTMLElement>(".w")].filter(
-        (el) => Number(el.dataset.e) > a.start && Number(el.dataset.s) < a.end,
-      );
-      markActiveAnchor(els);
       pEl.scrollIntoView({ block: "center", behavior: "smooth" });
     }
     setPick(pd);
@@ -1336,7 +1398,7 @@ export default function Reader({
       {/* 左栏（61.8%）：正文 */}
       <div className="reader-main">
         <div className="duo-card reader-article-card">
-          <div className="reading-body" ref={bodyRef} onClick={onClick} onMouseUp={onMouseUp}>
+          <div className="reading-body" ref={bodyRef} onClick={onClick}>
             {groups.map((g, gi) => {
               // 小结标记按自然段 idx 落点；一个分组可能含多个 idx（表格/列表），
               // 取组内最后一个命中，保证标记不会因为分组被吞掉
@@ -1530,6 +1592,11 @@ function PickCard({
   /** 用户主动把「整句模式」改回按词回答（只影响本次弹层） */
   const [forceWordMode, setForceWordMode] = useState(false);
 
+  // 进行中的 AI 流：切到别的词（弹层按锚点 key 卸载）或重新提问时中止，
+  // 服务端随之关掉上游模型流，不再为没人看的答案付费。
+  const aiAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => aiAbortRef.current?.abort(), []);
+
   // 场景 4：同句连续请教 ≥3 次时模型会按整句分析，这里给一个可撤销的入口
   const wholeSentenceMode = (pick.signals?.repeatCount ?? 0) >= 3 && !forceWordMode;
 
@@ -1590,6 +1657,9 @@ function PickCard({
 
   /** 触发 AI 释义（流式）。forceWord = 把「按整句分析」临时改回按词回答。 */
   async function triggerAI(prompt?: string, forceWord = false) {
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
     setAiStatus("loading");
     setAiText("");
 
@@ -1620,6 +1690,7 @@ function PickCard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
       if (!res.ok) throw new Error("请求失败");
 
@@ -1647,6 +1718,8 @@ function PickCard({
       // 但「没配模型」的引导文案 / 报错文案不是释义，存进去会被当成已存释义展示。
       if (!isNotAGloss(text)) onAIGloss?.(text);
     } catch (err) {
+      // 被主动中止（切词 / 重新提问）不是错误：不覆盖新一轮的状态，半截答案也不写回
+      if (controller.signal.aborted) return;
       setAiText(`[Error: ${err instanceof Error ? err.message : "AI 释义失败"}]`);
       setAiStatus("error");
     }

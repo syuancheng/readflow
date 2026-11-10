@@ -156,7 +156,7 @@ better        →  "0:good/1:r"      比较级
 
 | 表 | 关键列 | 说明 |
 |---|---|---|
-| `users` | `id` (UUID)、`username` UNIQUE、`password_hash`、`display_name`、`is_owner`、`created_at` | 密码是 `scrypt$<salt hex>$<hash hex>`，绝不存明文。只有 `/setup` 建的首个账号 `is_owner=1` |
+| `users` | `id` (UUID)、`username` UNIQUE、`phone` UNIQUE（P21，归一化 11 位，可空：老账号补列后为 NULL）、`password_hash`、`display_name`、`is_owner`、`created_at` | 密码是 `scrypt$<salt hex>$<hash hex>`，绝不存明文。只有 `/setup` 建的首个账号 `is_owner=1` |
 | `sessions` | `token_hash` PK、`user_id` → users、`expires_at`、`created_at` | 只存原始 token 的 sha256；原始 token 只在 cookie 里。DB 泄露也换不到登录态 |
 | `settings` | 主键改成 `(user_id, key)` | 从单行 KV 变成「站级默认 + 用户覆盖」，规则见 8.7 |
 
@@ -363,7 +363,7 @@ type Block = {
 
 **公式分两级，分界线是锚点安全。** 块级 `$$…$$` 独立成段 → 新增 `math` 块（`NON_PROSE_KINDS` 追加 `"math"`，与 `code` 同待遇：不计词数 / CEFR / 小结，不生成可点词）；`content` 存 LaTeX 源、保留换行，`Reader` 用 KaTeX `renderToString()`（`throwOnError: false`）渲染成 `dangerouslySetInnerHTML` —— KaTeX 是纯函数、无环境依赖，SSR 与客户端输出逐字节一致，不踩 9.1 节的 hydration 坑；它默认转义所有输入（不开 `trust` 选项），XSS 面可控。`remark-math` 的 flow 语法要求 `$$` 独占一行，而实际文档大量 `$$J=r$$` 单行写法（mdast 里是「只含一个 inlineMath 的段落」），`displayMathFromParagraph()` 把这种段落提升成 `math` 块。
 
-行内 `$s \in \mathcal{S}$` → `InlineKind: "math"` 区间：`content` 仍存 LaTeX 源，DOM 文本与坐标基准不变；`renderTokens()` 对区间内 token 不生成 `.w`（`\rho`、`\arg\max` 不是要背的单词），样式降为 `.rf-i-math` 弱化等宽；`proseTexts()` 的 `stripInlineMath()` 在统计前把区间替换成空格（倒序替换防错位）——与 3.5 节「代码标识符虚高难度」同一个坑的第二次预防。**刻意不用 KaTeX 渲染行内公式**：渲染后 DOM 文本长度 ≠ `content` 长度，`offsetIn()` 靠 `Range.toString()` 数字符，拖选跨公式偏移必错；将来做成「原子化 span + snapRange 改造」再开。
+行内 `$s \in \mathcal{S}$` → `InlineKind: "math"` 区间：`content` 仍存 LaTeX 源，DOM 文本与坐标基准不变；`renderTokens()` 对区间内 token 不生成 `.w`（`\rho`、`\arg\max` 不是要背的单词），样式降为 `.rf-i-math` 弱化等宽；`proseTexts()` 的 `stripInlineMath()` 在统计前把区间替换成空格（倒序替换防错位）——与 3.5 节「代码标识符虚高难度」同一个坑的第二次预防。（P14 时的结论：渲染后 DOM 文本长度 ≠ `content` 长度，拖选跨公式偏移必错，所以先不渲染；P17 已用下文的方式解决，P22 起选词直接读词 span 的坐标，不再数 DOM 字符。）
 
 HTML 路径在 walk 之前跑 `normalizeMath()`：KaTeX / MathJax v3 读 `<annotation encoding="application/x-tex">`（容器找最近的 `.katex-display` / `.katex`，连 MathML 一起换掉，双份渲染文本不进可见文本）；MathJax v2 读 `<script type="math/tex">`（`mode=display` 判块级）。替换产物是 `data-rf-math`（行内）/ `data-rf-math` + `data-display`（块级）占位元素，`inlineDom` / `walk` 各自识别。
 
@@ -408,41 +408,31 @@ tokenize("She sat on the river bank.")
 - 一段 100 词 ≈ 200 个 DOM 节点。视口内 10 段也就 2000 个，无压力。
 - `Tokens` 用 `memo` + `useMemo` 按 `content` 缓存分词结果，同段落不会重复切；代码块不生成 `.w`。
 
-### 4.2 单击
+### 4.2 选词：按下即整词，按词扩展（对齐 Readlang）
+
+**不用浏览器原生选区。** 原生选区按字符走：从 "defined" 的 d 后面按下，高亮从 e 开始，
+还会和悬停底色叠成两层，直到松手才吸附成整词。逆向 Readlang 的 `app.js` 后改成同样的做法：
 
 ```ts
-onClick(e) {
-  if (选区非折叠) return;                    // 拖选时不抢事件
-  wordEl = e.target.closest(".w")           // 没点到词 → 关弹层
-  pEl   = wordEl.closest("[data-pid]")      // 找所属段落
-  s = +wordEl.dataset.s; en = +wordEl.dataset.e
-  → buildAnchor(p.content, s, en)
-  → setPick({ ..., x: rect.left + rect.width/2, y: rect.bottom })
-}
-```
-再点同一个词会 toggle 关闭（比较 `paragraphId + start + end`）。
-
-### 4.3 拖选短语
-
-```ts
-onMouseUp() {
-  range = selection.getRangeAt(0)
-  pEl   = paraOf(range.commonAncestorContainer)   // 向上找 [data-pid]
-  起点和终点必须在同一段内（跨段直接放弃，避免语义歧义）
-  start = offsetIn(pEl, range.startContainer, range.startOffset)
-  end   = offsetIn(pEl, range.endContainer,   range.endOffset)
-}
-
-// 核心工具：把 DOM (node, offset) 换算成段内字符偏移
-function offsetIn(container, node, offset) {
-  const r = document.createRange();
-  r.selectNodeContents(container);
-  r.setEnd(node, offset);
-  return r.toString().length;      // 借浏览器自己算，不用手写遍历
-}
+mousedown(词 .w 上)  → preventDefault()（不起原生选区）
+                     → drag = { pEl, words: 段内全部 .w, from: i, to: i }
+                     → 立刻把这个词整词涂成 .w-drag
+mousemove           → elementFromPoint 取指针下的词；段内 → to = 它的下标
+                       在段落上方 / 下方 → 段首 / 段尾（批注只落在单个段落）
+                       其它（空格、页边）→ to 不变
+                     → [min(from,to), max(from,to)] 整词 + 中间空白标点连成一条 .w-drag
+mouseup             → from === to ? pickWord(那个词) : pickRange(pEl, words[a].data-s, words[b].data-e)
 ```
 
-> 这里没有用 `caretRangeFromPoint(x, y)`——拖选已经给了 Range，反而更准；单击则直接读 span 上的 `data-s/data-e`，不依赖坐标命中。
+- 坐标全部来自每个词 span 的 `data-s / data-e`，不读 DOM 文本长度，所以行内公式（KaTeX 视图）不影响锚点。
+- 单击 = 按下后没离开这个词就松开，与拖选同一条路径；再点同一个词 = 收起。
+- 松手后浏览器补发的 `click` 被吞掉，`onClick` 只负责「点空白收起」和挡住链接跳转。
+- **按住 Option（⌥）拖动**交还原生选区，用来复制原文，不弹卡片。
+
+**颜色只有一种底色。** 悬停、拖动中（`.w-drag`）、当前选中（`.w-anchor`）都是 `--duo-green-soft`；
+当前选中另加深绿底线；已存批注（`.w-annotated`）只画浅绿下划线、不铺底色。
+「当前选中」和批注都由 `Tokens` 按 `rangeKey`（`批注区间,…|选中区间`）渲染，不命令式改 class——
+否则批注首次落库时整段重渲染会把手动加的选中样式冲掉。只有拖动预览是命令式的（每跨一个词重涂，走 React 会让长文卡顿）。
 
 ### 4.4 锚点三件套（`lib/tokenize.ts`）
 
@@ -851,7 +841,7 @@ Next dev 热重载会让多个模块实例几乎同时求值 `db/index.ts`。`CR
 
 所以 `settings-store.ts` 定了一条规则：`getSetting(key, userId)` 先读本人行，没有再回退站级；但 `isPersonalKey()`（`profile.*` 前缀）**不回退**。`allSettings(userId)` 同样先铺站级行（跳过站级 `profile.*`），再用本人行覆盖。`/api/settings` 的 GET 与 PUT 必须用同一个 `userId`，否则就是「保存成功但读回默认值」——P20 实测踩过，单靠 typecheck 抓不到，是 `test:account` 的断言读回来的。
 
-守门分两层是 Edge runtime 逼出来的：`middleware.ts` 用不了 `node:crypto`、连不了 SQLite，只能检查 cookie 是否存在；真正的 token → sha256 → `sessions` → `users` → 过期校验全在 Node 侧 `currentUser()`。因此**每个页面和 API 都要自己调 `currentUser()`**，middleware 只是把未登录请求提前挡掉、省一次 DB 查询，不是安全边界。越权一律返回 404 而不是 403，避免向别的账号暴露「这个资源存在」。
+守门分两层：`proxy.ts`（Next 16 起替代 `middleware.ts`）只检查 cookie 是否存在；真正的 token → sha256 → `sessions` → `users` → 过期校验全在 Node 侧 `currentUser()`。因此**每个页面和 API 都要自己调 `currentUser()`**，proxy 只是把未登录请求提前挡掉、省一次 DB 查询，不是安全边界。越权一律返回 404 而不是 403，避免向别的账号暴露「这个资源存在」。
 
 `exports` 表没有 `user_id` 列，所以导出状态、每日配额、已推数量都必须 `innerJoin(userWords)` 按 `user_words.user_id` 过滤；插件链路没有 cookie，用 `ownerId()` 把数据归到 owner，查重也必须带上 `user_id`（唯一索引是 `(user_id, lemma)`），否则会改到别人的词。
 
@@ -1234,11 +1224,11 @@ npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
 ### 12.8 账户体系专项（P20）
 
 ```bash
-npm run test:account   # 34 项：登录 / 双账号隔离 / 越权 / 改密码 / 登出 / 浏览器登录
+npm run test:account   # 49 项：建号 / 手机号登录 / 双账号隔离 / 越权 / 假 cookie / 站级配置权限 / 改密码 / 登出 / 浏览器登录
 npm test               # 单测含 auth-crypto（scrypt、token、过期）与 settings-store 隔离
 ```
 
-`scripts/e2e-account.mjs` **绝不碰真实库**：用 `DB_PATH` 指向临时目录、另起一个 `next start`（默认 3107），跑完杀进程删库。这样既能验证「全新空库 → /setup 建号」的完整链路，也不需要替用户在真实库里造账号。末尾复用同一个临时服务跑一次 `e2e-spine-render`，确认带登录态时阅读页仍能 hydrate、点词链路没被 middleware 破坏。
+`scripts/e2e-account.mjs` **绝不碰真实库**：用 `DB_PATH` 指向临时目录、另起一个 `next start`（默认 3107），跑完杀进程删库。这样既能验证「全新空库 → /setup 建号」的完整链路，也不需要替用户在真实库里造账号。末尾复用同一个临时服务跑一次 `e2e-spine-render`，确认带登录态时阅读页仍能 hydrate、点词链路没被 proxy 破坏。
 
 P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整片假阴性，统一由 `scripts/e2e-auth.mjs` 注入登录态：`ensureAuth(BASE)` patch Node 侧 `globalThis.fetch` 自动带 cookie，`authCookies(BASE)` 给 Playwright context 注入（限定目标域名，不外泄给文章里的外链图片）。在真实库上跑需要 `E2E_USER` / `E2E_PASS` 指定账号；helper **不会自动建号**，避免替用户创建账号。
 
@@ -1265,9 +1255,9 @@ P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整�
 | 加页面 | `src/app/<route>/page.tsx` + `duo-card` 等现成类 | 记得挂进 `layout.tsx` 与 `BottomNav.tsx` |
 | 改视觉 | `src/app/globals.css` 的 CSS 变量 + `.duo-*` 类 | 颜色改变量，别硬编码 |
 | 加表/字段 | `db/schema.ts` **和** `db/index.ts` 的 `SCHEMA_SQL` + `migrate()` | 三处必须一致（8.4 / 11.5） |
-| 改登录 / 会话 | `lib/auth.ts` / `lib/auth-crypto.ts` / `middleware.ts` | middleware 只查 cookie 存在，真校验在每个页面与 API 的 `currentUser()`；改完跑 `npm run test:account` |
+| 改登录 / 会话 | `lib/auth.ts` / `lib/auth-crypto.ts` / `proxy.ts` | proxy 只查 cookie 存在，真校验在每个页面与 API 的 `currentUser()`；改完跑 `npm run test:account` |
 | 改配置归属 | `lib/settings-store.ts` + `api/settings/route.ts` | `profile.*` 绝不回退站级；GET 与 PUT 必须用同一个 `userId`，否则保存后读回默认值 |
-| 加账号 / 重置密码 | `npm run add-user -- <用户名>` / `npm run reset-password -- <用户名>` | `/setup` 只在 `users` 表为空时可用；两者都走 `scripts/account.ts`（独立 tsconfig，别卷进 verify 编译链） |
+| 加账号 / 重置密码 / 改手机号 | `npm run add-user -- <用户名> --phone=<手机号>` / `npm run reset-password -- <用户名或手机号>` / `npm run set-phone -- <账号> <手机号>` | `/setup` 只在 `users` 表为空时可用；两者都走 `scripts/account.ts`（独立 tsconfig，别卷进 verify 编译链） |
 | 改词典还原规则 | `lib/dict.ts` 的 `lemma()` / `lookup()` | 改完跑 `npm run backfill:lemma`，否则历史数据是旧规则 |
 | 改音标显示 | `lib/text.ts` 的 `normalizePhonetic()` | ECDICT 用 `'`/`,` 表示重音，别再把它当普通标点 |
 

@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export default async function Home() {
-  // middleware 只挡「没 cookie」；伪造 / 过期 cookie 在这里兜底
+  // proxy 只挡「没 cookie」；伪造 / 过期 cookie 在这里兜底
   const user = await currentUser();
   if (!user) redirect("/login");
   const [rows, stats] = await Promise.all([

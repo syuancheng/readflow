@@ -11,6 +11,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
   const router = useRouter();
   const params = useSearchParams();
   const [username, setUsername] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -38,7 +39,11 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
     e.preventDefault();
     setError("");
     if (!username.trim() || !password) {
-      setError("请填写用户名和密码");
+      setError(mode === "setup" ? "请填写用户名和密码" : "请填写用户名或手机号，以及密码");
+      return;
+    }
+    if (mode === "setup" && !phone.trim()) {
+      setError("请填写手机号");
       return;
     }
     if (mode === "setup" && password !== confirm) {
@@ -50,11 +55,11 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
       const res = await fetch(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-          ...(mode === "setup" ? { displayName: username.trim() } : {}),
-        }),
+        body: JSON.stringify(
+          mode === "setup"
+            ? { username: username.trim(), phone: phone.trim(), password, displayName: username.trim() }
+            : { account: username.trim(), password },
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -108,16 +113,34 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
 
         <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
           <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
-            用户名
+            {isSetup ? "用户名" : "用户名 / 手机号"}
             <input
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="中英文、数字均可"
+              placeholder={isSetup ? "中英文、数字均可" : "输入用户名或手机号"}
               disabled={checking || busy}
               style={inputStyle}
             />
           </label>
+          {isSetup && (
+            <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+              手机号
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="11 位手机号，以后可用它登录"
+                disabled={checking || busy}
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--duo-ink-faint, #afafaf)" }}>
+                只用作登录名，不会发送验证码。
+              </span>
+            </label>
+          )}
           <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
             密码
             <input
@@ -173,7 +196,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
 
         {!isSetup && (
           <p style={{ marginTop: 18, fontSize: 12, color: "var(--duo-ink-faint, #afafaf)", lineHeight: 1.6 }}>
-            忘记密码？在项目目录运行 <code>npm run reset-password -- 用户名</code> 重置。
+            忘记密码？在项目目录运行 <code>npm run reset-password -- 用户名或手机号</code> 重置。
           </p>
         )}
       </div>

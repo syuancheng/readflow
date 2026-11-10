@@ -371,7 +371,10 @@ try {
     await page.mouse.move(E.x + E.width - 1, E.y + E.height / 2, { steps: 10 });
     await page.mouse.up();
     await page.waitForTimeout(800);
-    const sel = await page.evaluate(() => window.getSelection()?.toString());
+    // 选词不再走原生选区（对齐 Readlang：按下即整词、按词扩展），读正文里「当前选中」的整条标记
+    const sel = await page.evaluate(() =>
+      [...document.querySelectorAll(".w-anchor")].map((e) => e.textContent).join(""),
+    );
     const pop = await page.evaluate(() => !!document.querySelector(".reader-note"));
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);

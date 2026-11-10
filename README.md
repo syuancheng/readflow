@@ -175,15 +175,16 @@ export MARKJI_TOKEN=xxxxxxxx
 npm run dev
 ```
 
-**首次打开会先进 `/setup`**：输入用户名和密码创建第一个账号。这是唯一一次开放建号，之后关闭注册；你原有的文章、词库和设置会在这次建号时自动归到这个账号名下，不会丢数据。以后每次访问需要登录。
+**首次打开会先进 `/setup`**：输入用户名、手机号和密码创建第一个账号（手机号只作登录名，不发验证码；以后登录框填用户名或手机号都行）。这是唯一一次开放建号，之后关闭注册；你原有的文章、词库和设置会在这次建号时自动归到这个账号名下，不会丢数据。以后每次访问需要登录。
 
 账号运维（在项目目录运行）：
 
 ```bash
 npm run list-users                       # 列出账号
-npm run add-user -- alice                # 加人，自动生成随机初始密码并只打印一次
-npm run add-user -- alice --password=... # 指定密码（也可用环境变量 READFLOW_PASSWORD）
-npm run reset-password -- alice          # 忘记密码时重置，同时吊销该账号全部会话
+npm run add-user -- alice --phone=13800138000                # 加人，自动生成随机初始密码并只打印一次
+npm run add-user -- alice --phone=13800138000 --password=... # 指定密码（也可用环境变量 READFLOW_PASSWORD）
+npm run reset-password -- alice          # 忘记密码时重置（也可填手机号），同时吊销该账号全部会话
+npm run set-phone -- alice 13900139000   # 补填 / 修改手机号
 ```
 
 打开 <http://localhost:3000>：粘贴一段英文 → 开始阅读 → 点任意单词 → 收进词库 → 去「导出」页推到墨墨。
@@ -250,7 +251,7 @@ readflow/
 │   │   ├── ensure-cefr.ts        texts 表补 CEFR 列（应用启动与回填脚本共用）
 │   │   ├── ensure-blocks.ts      texts/paragraphs 补结构化列（同上，共用定义）
 │   │   └── ensure-auth.ts        users/sessions 建表 + settings 复合主键重建（连接层执行）
-│   ├── middleware.ts            Edge 守门：只查 cookie 存在，真校验在 currentUser()
+│   ├── proxy.ts                 粗守门：只查 cookie 存在，真校验在 currentUser()
 │   └── lib/
 │       ├── import/               Block IR 契约层与适配器
 │       │   ├── types.ts          Block / InlineRange / BlockMeta + JSON 安全解析
@@ -282,7 +283,7 @@ readflow/
 ├── scripts/
 │   ├── import-ecdict.mjs         CSV → SQLite 批量导入
 │   ├── account.ts                账号运维：list / add / reset（独立 tsconfig.account.json）
-│   ├── e2e-account.mjs           临时库 + 临时端口跑 34 项登录与双账号隔离验证
+│   ├── e2e-account.mjs           临时库 + 临时端口跑 49 项登录与双账号隔离验证
 │   ├── e2e-auth.mjs              旧 E2E 脚本共用的登录态注入（patch fetch + Playwright cookies）
 │   ├── verify-export.ts          离线验证：收词 → 生成卡片 → 语法自检
 │   ├── verify-markji.ts          只读联调：用自研客户端列牌组/章节
@@ -353,7 +354,7 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 不用 Auth.js / Clerk / Supabase：本地 SQLite + Node 内置 `crypto.scrypt` 就够，零依赖、零月费、断网可用。所有业务表第一天就预留了 `user_id`，所以这次上账户**没有改任何业务表的列**，只新增 `users` / `sessions` 两张表。
 
 - **关闭开放注册**：唯一建号入口是 `/setup`，且只在 `users` 表为空时接受。建号事务把老库 `user_id='local'` 的文章与词一次性改挂到 owner 的 UUID 名下。之后加人只能由 owner 跑 `npm run add-user`。
-- **守门分两层**：`middleware.ts` 跑在 Edge runtime（用不了 `node:crypto`），只判断「有没有 session cookie」；真正的校验在 Node 侧 `currentUser()`：cookie → sha256 → `sessions` 表 → 关联 `users` → 查过期。伪造、过期、已登出都在这里挡掉。因此**所有页面与 API 必须自己调 `currentUser()`**，不能把 middleware 当安全边界。
+- **守门分两层**：`proxy.ts`（Next 16 起替代 `middleware.ts`）只判断「有没有 session cookie」；真正的校验在 Node 侧 `currentUser()`：cookie → sha256 → `sessions` 表 → 关联 `users` → 查过期。伪造、过期、已登出都在这里挡掉。因此**所有页面与 API 必须自己调 `currentUser()`**，不能把 proxy 当安全边界——只带一个假 cookie 就能穿过它。
 - **cookie 只存原始 token，库里只存它的 sha256**；DB 泄露也换不到登录态。密码是 scrypt 哈希串，绝不存明文。登录失败按 (IP, 用户名) 计数，5 次锁 60 秒；改密码吊销该账号全部 session 并给本机重发一个。
 - **配置分两类**：AI 密钥 / 墨墨 Token / 插件 Token 是**站级默认**（`user_id='local'`，所有账号共享，插件链路没有 cookie 也要能读到同一个 token）；`profile.*` 是**个人资料**，只存本人行，且 `settings-store` 对它**不回退站级**，否则 A 会看到 owner 的昵称。牌组 / 章节这类导出目标也支持「本人覆盖站级」。
 - **越权返回 404 而非 403**：知道别人的文章 id 时，不向对方暴露「这个资源存在」。`exports` 表没有 `user_id`，统计与每日配额一律经 `user_words` 关联过滤；插件链路用站级 token 鉴权，数据统一归到 `ownerId()`。
@@ -367,8 +368,8 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/api/auth/status` | 公开：`{needsSetup}`，登录页据此决定显示「建号」还是「登录」 |
-| `POST` | `/api/auth/setup` | 首次建号（仅 `users` 表为空时可用），下发 session cookie |
-| `POST` | `/api/auth/login` | 用户名 + 密码登录；连续失败 5 次锁 60 秒 |
+| `POST` | `/api/auth/setup` | 首次建号（仅 `users` 表为空时可用；必填用户名、手机号、密码），下发 session cookie |
+| `POST` | `/api/auth/login` | `{account, password}`：账号填用户名或手机号；连续失败 5 次锁 60 秒（同一账号的用户名 / 手机号共用计数） |
 | `POST` | `/api/auth/logout` | 吊销当前 session 并清 cookie |
 | `GET` | `/api/auth/me` | 当前登录态（用户名 / displayName / 是否 owner） |
 | `POST` | `/api/auth/password` | 改密码 `{currentPassword, newPassword}`，吊销其它设备会话 |
@@ -426,6 +427,8 @@ AI 全文写回 `contexts.ai_gloss` 供回看，但**不进墨墨卡片背面**�
 | **P19** | **字体与阅读页外壳**：全站正文/标题（含阅读器英文正文，用户撤回了最初的衬线保留）统一 DM Sans、站点顶部导航换 Outfit（中文回退 PingFang SC）；阅读页 54px 常驻顶栏（返回 / 标题 / 难度 / 进度 / 标记 / 原文 + 底边进度条）+ 默认收起的目录（按 `heading` 块生成、scroll spy）；进度上报逻辑抽成 `useReadProgress` hook，Reader 与批注栏零改动；顺带修窄屏长链接 / KaTeX 公式溢出 | ✅ |
 | **P5** | **长文性能：实测基准，决定不做虚拟滚动**（见 [`docs/PERF.md`](docs/PERF.md)） | ✅ |
 | **P20** | **账户体系**：本地 scrypt 密码哈希 + sha256 会话表、关闭开放注册、`/setup` 首次建号自动迁移老数据、middleware 粗守门 + 服务端 `currentUser()` 真校验、站级密钥 / 个人资料分层、全链路归属校验（越权 404）、登录限速与改密码吊销会话；附运维脚本与 34 项隔离 E2E | ✅ |
+| **P21** | **手机号登录**：建号必填中国大陆手机号（归一化 +86 / 空格 / 短横线，唯一），登录框接受用户名或手机号；不接短信验证码（按条收费），号码只作好记的登录名；用户名禁止手机号格式以免歧义；运维脚本支持 `--phone` / `set-phone` | ✅ |
+| **P22** | **选词手感对齐 Readlang**：不再用浏览器原生选区——在词上按下即整词选中，拖动按整词扩展、出段落停在段首/段尾，单击与拖选同一路径；悬停 / 拖动 / 当前选中只用一种浅绿底色，已存批注改为下划线；按住 Option 拖动保留原生选区用于复制 | ✅ |
 | P7 | 云端同步 / 多设备（账户体系已就位，同步机制待定） | 待定 |
 
 P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节）：
@@ -438,7 +441,7 @@ P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节�
 
 ## 11. 已知限制
 
-- **鉴权是本机级的，不是公网产品级的**：登录限速是进程内计数器（重启清零）、没有 CSRF token（靠 `SameSite=Lax` 兜底）、没有邮箱验证与找回（忘记密码用本地脚本重置）、session 30 天有效期不滑动续期。经公网访问前请套 HTTPS 隧道，且不要开放注册。
+- **鉴权是本机级的，不是公网产品级的**：模型 / 墨墨 / 插件这些站级配置只有主账号能改，插件 Token 也只对主账号可见；登录限速默认按用户名计数（`X-Forwarded-For` 可被伪造，只有设了 `TRUST_PROXY=1` 才按 IP 区分），是进程内计数器（重启清零）、没有 CSRF token（靠 `SameSite=Lax` 兜底）、没有邮箱验证与找回（忘记密码用本地脚本重置）、session 30 天有效期不滑动续期。经公网访问前请套 HTTPS 隧道，且不要开放注册。
 - **无虚拟滚动（实测后决定不做）**：全部段落一次性渲染进 DOM。实测（[`docs/PERF.md`](docs/PERF.md)）：4 千词的真实文章在 4 倍 CPU 降速下 TTFI 0.8s、交互满帧；4 万词才在弱设备出现可感知劣化（TTFI 2.5s），瓶颈是 SSR HTML 体积与水合，不是交互渲染。将来若常态读 2 万词以上的文本，改做分段懒渲染而不是虚拟滚动。
 - **`/api/explain` 的 Content-Type 是 `text/event-stream`，但 body 是纯文本分块**（没有 `data:` 帧）。前端直接读 `res.body` 所以能工作，但如果将来要接标准 EventSource，需要补 SSE 帧格式。
 - **AI 层没有跨位置的语义缓存**：同一个锚点（同一篇文章、同一处选区）再点开会直接读已存的 `ai_gloss`，不再计费；但同一个词出现在**另一个位置**会当成新的一次请教，重新请求模型。Readlang 用内存 + 服务端按词缓存规避，我们还没做。P11 之后词典未命中的每个新选区（短语 / 生僻词）都会自动发一次请求；词典命中的点击不受影响。
@@ -451,7 +454,7 @@ P4 落地时被墨墨的 API 边界改写了设计（详见技术文档 11 节�
 - **CEFR 是启发式估算，不是标注模型**：没有用带 CEFR 标签的语料训练，阈值是拿 ECDICT 词频在真实文本上校准出来的。专有名词 / 术语 / 公式会被当成生僻词而高估难度（置信度会自动降级）；短文本（<150 词）的句法统计波动很大。将来可以用 `user_words` / `contexts` 里的个人收词行为做个性化校准。
 - **旧文章的结构补不回来**：P9 之前入库的文本，表格换行已被压成空格，无法从压平结果反推行列。按约定不做迁移工具，需要重新粘贴原始 Markdown 重新导入；旧文章的锚点、词库、CEFR 都不受影响，仍可正常阅读。
 - **结构化导入不是全保真**：支持 GFM 表格、多级列表、代码块、引用/callout、行内链接与强调；公式与配图见 3.3 节（覆盖 `$…$`/`$$…$$`/`\(…\)`/`\[…\]` 与 KaTeX/MathJax 已渲染产物；行内公式渲染成图但保留坐标；夹在句子中间的小图仍是占位文字）；`colspan`/`rowspan`、嵌套表格、脚注、语法高亮配色不还原。MDX 的 info string（如 `text theme={null}`）只取合法语言名。链接里的词可以点（不会跳走），代码块里的词刻意不可点。公式是模型渲染（KaTeX + mhchem + 常用宏），`throwOnError: false` 下坏公式显示红色错误提示而不是崩溃；纯文本粘贴路径不做 `$` 扫描（货币误伤风险，URL 导入不受影响）。
-- **端到端靠脚本回归**：`npm test` 跑 `node:test` 单测（含 CEFR、密码哈希与配置隔离的控制变量测试），`npm run typecheck` 查类型；E2E 与导出验证另有 `npm run test:account`（临时库 + 临时端口，34 项登录与双账号隔离，不碰真实数据）/ `npm run test:e2e` / `npm run test:auto-explain` / `npm run test:gloss-persist` / `npm run test:spine-render` / `npm run verify:cards` / `npm run verify:markji`。P20 之后旧 E2E 脚本统一经 `scripts/e2e-auth.mjs` 注入登录态，在真实库上跑需先用 `E2E_USER` / `E2E_PASS` 指定账号。
+- **端到端靠脚本回归**：`npm test` 跑 `node:test` 单测（含 CEFR、密码哈希与配置隔离的控制变量测试），`npm run typecheck` 查类型；E2E 与导出验证另有 `npm run test:account`（临时库 + 临时端口，49 项登录与双账号隔离，不碰真实数据）/ `npm run test:e2e` / `npm run test:auto-explain` / `npm run test:gloss-persist` / `npm run test:spine-render` / `npm run verify:cards` / `npm run verify:markji`。P20 之后旧 E2E 脚本统一经 `scripts/e2e-auth.mjs` 注入登录态，在真实库上跑需先用 `E2E_USER` / `E2E_PASS` 指定账号。
 - **词形还原受 ECDICT 数据限制**：`leaves` 的 exchange 指向 `leave`（离开），但阅读中更常见的意思是「树叶」。我们优先展示变形词自己的释义（树叶），lemma 仍按 exchange 落库，所以 `leaves` 和 `leaf` 在词库里可能是两条。`was → be`、`went → go` 这类规则变形还原正常。
 - **音标是 ECDICT 原文的近似写法**：多数条目用 `'`/`,` 表示主/次重音（`'glisn`），我们统一显示成 `ˈ`/`ˌ`，但音值本身仍是 ECDICT 的记音，不保证是标准 IPA。
 - **导出不可逆**：墨墨没有删除接口，推错的卡片只能在 App 里手删。幂等只保证「不重复推」，不保证「推对了」——所以写入前必须先看预览。

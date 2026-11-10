@@ -3,12 +3,19 @@ import { resolveProvider } from "@/lib/config";
 import { allSettings } from "@/lib/settings-store";
 import { testProvider } from "@/lib/providers";
 import { withRetry } from "@/lib/retry";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** POST /api/settings/test  { target: "ai", providerId?: string } */
 export async function POST(req: Request) {
+  // 测试连接会真实调用站级模型（花钱），与改密钥同级：只有 owner 能做
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "请先登录" }, { status: 401 });
+  if (!user.isOwner) {
+    return NextResponse.json({ ok: false, error: "只有站点管理员可以测试模型配置" }, { status: 403 });
+  }
   let body: { target?: string; providerId?: string };
   try {
     body = (await req.json()) as typeof body;

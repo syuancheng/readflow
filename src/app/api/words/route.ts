@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { userWords, contexts } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
@@ -34,7 +34,7 @@ export async function GET(req: Request) {
       })
       .from(userWords)
       .innerJoin(contexts, eq(contexts.userWordId, userWords.id))
-      .where(eq(contexts.textId, textId))
+      .where(and(eq(contexts.textId, textId), eq(userWords.userId, user.id)))
       .orderBy(desc(userWords.createdAt))
       .all();
     return NextResponse.json({ words: dedup(rows) });

@@ -1,7 +1,7 @@
 /**
  * 服务端会话（P20）。
  *
- * middleware 只判断「有没有 cookie」（Edge runtime 用不了 node:crypto），
+ * proxy（原 middleware）只判断「有没有 cookie」，
  * 真正的校验一律在这里、在 Node runtime 完成：token → sha256 → sessions 表
  * → 关联 users → 检查过期。 cookie 伪造、过期、已登出的 session 都会在这里挡掉。
  *
@@ -13,6 +13,7 @@ import { sqlite } from "@/db/sqlite";
 import {
   isSessionExpired,
   newSessionToken,
+  normalizePhone,
   SESSION_TTL_MS,
   tokenHash,
 } from "./auth-crypto";
@@ -25,6 +26,8 @@ export type AuthUser = {
   id: string;
   username: string;
   displayName: string | null;
+  /** 归一化后的手机号；老账号可能为空 */
+  phone: string | null;
   isOwner: boolean;
 };
 
@@ -32,6 +35,7 @@ type UserRow = {
   id: string;
   username: string;
   display_name: string | null;
+  phone: string | null;
   is_owner: number;
 };
 
@@ -59,6 +63,21 @@ export function findUserByUsername(username: string): (UserRow & { password_hash
     .get(username) as (UserRow & { password_hash: string }) | undefined;
 }
 
+export function findUserByPhone(phone: string): (UserRow & { password_hash: string }) | undefined {
+  return sqlite
+    .prepare("SELECT * FROM users WHERE phone = ?")
+    .get(phone) as (UserRow & { password_hash: string }) | undefined;
+}
+
+/**
+ * 登录框只有一个「账号」输入：手机号格式就按手机号查，否则按用户名查。
+ * 用户名禁止是手机号格式（checkUsername），所以两者不会歧义。
+ */
+export function findUserByLogin(account: string): (UserRow & { password_hash: string }) | undefined {
+  const phone = normalizePhone(account);
+  return phone ? findUserByPhone(phone) : findUserByUsername(account.trim());
+}
+
 export function findUserById(id: string): UserRow | undefined {
   return sqlite.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
 }
@@ -76,7 +95,7 @@ export function userFromToken(token: string | null | undefined): AuthUser | null
   if (!token) return null;
   const row = sqlite
     .prepare(
-      `SELECT u.id, u.username, u.display_name, u.is_owner, s.expires_at
+      `SELECT u.id, u.username, u.display_name, u.phone, u.is_owner, s.expires_at
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ?`,
     )
@@ -86,6 +105,7 @@ export function userFromToken(token: string | null | undefined): AuthUser | null
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    phone: row.phone ?? null,
     isOwner: row.is_owner === 1,
   };
 }
@@ -132,11 +152,21 @@ const failures = new Map<string, { count: number; until: number }>();
 const MAX_FAILURES = 5;
 const LOCK_MS = 60_000;
 
-export function loginRateKey(req: Request, username: string): string {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "local";
+/**
+ * 限速 key。X-Forwarded-For / X-Real-IP 是客户端能随便填的头：直接信任的话，
+ * 每次换一个假 IP 就能绕过限速。只有显式声明前面有可信反代（TRUST_PROXY=1，
+ * 例如经 HTTPS 隧道访问）时才读它；否则按用户名限速，所有来源共用一个计数。
+ */
+export function loginRateKey(
+  req: Request,
+  username: string,
+  trustProxy = process.env.TRUST_PROXY === "1",
+): string {
+  const ip = trustProxy
+    ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "local"
+    : "any";
   return `${ip}|${username.toLowerCase()}`;
 }
 
@@ -150,7 +180,14 @@ export function isRateLimited(key: string, now = Date.now()): boolean {
   return rec.count >= MAX_FAILURES;
 }
 
+/** 计数表上限：被大量随机用户名轰炸时先清过期项，仍超限就整表重置，内存不会无限涨 */
+const MAX_TRACKED = 10_000;
+
 export function noteLoginFailure(key: string, now = Date.now()): void {
+  if (failures.size >= MAX_TRACKED && !failures.has(key)) {
+    for (const [k, v] of failures) if (v.until <= now) failures.delete(k);
+    if (failures.size >= MAX_TRACKED) failures.clear();
+  }
   const rec = failures.get(key);
   if (!rec || rec.until <= now) {
     failures.set(key, { count: 1, until: now + LOCK_MS });

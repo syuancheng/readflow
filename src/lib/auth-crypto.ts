@@ -21,7 +21,11 @@ const SCRYPT_PARALLEL = 1;
 
 export type PasswordRules = { ok: boolean; reason?: string };
 
-/** 用户名：3–32 位，字母数字下划线/中划线，允许中文 */
+// 手机号规则放在不依赖 node:crypto 的纯模块里，客户端组件也能用
+import { checkPhone, maskPhone, normalizePhone } from "./phone";
+export { checkPhone, maskPhone, normalizePhone };
+
+/** 用户名：2–32 位，字母数字下划线/中划线，允许中文；不能长得像手机号 */
 export function checkUsername(v: unknown): PasswordRules {
   if (typeof v !== "string") return { ok: false, reason: "用户名不能为空" };
   const s = v.trim();
@@ -29,6 +33,8 @@ export function checkUsername(v: unknown): PasswordRules {
   if (!/^[\p{L}\p{N}_.-]+$/u.test(s)) {
     return { ok: false, reason: "用户名只能包含中英文、数字、_ . -" };
   }
+  // 登录框同时接受用户名和手机号：用户名若是手机号格式，就分不清该按哪个查
+  if (normalizePhone(s)) return { ok: false, reason: "用户名不能是手机号格式" };
   return { ok: true };
 }
 

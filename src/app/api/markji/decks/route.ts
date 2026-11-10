@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { hasMarkjiToken, listChapters, listDecks, MarkjiError } from "@/lib/markji";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
  * 也因为墨墨开放 API **不能建牌组/章节** —— 用户只能从已有的里面选。
  */
 export async function GET(req: Request) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "请先登录" }, { status: 401 });
   if (!hasMarkjiToken()) {
     return NextResponse.json(
       {

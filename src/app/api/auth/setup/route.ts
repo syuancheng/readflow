@@ -10,9 +10,11 @@ import { sqlite } from "@/db/sqlite";
 import { GLOBAL_USER } from "@/db/ensure-auth";
 import {
   checkPassword,
+  checkPhone,
   checkUsername,
   hashPassword,
   newUserId,
+  normalizePhone,
 } from "@/lib/auth-crypto";
 import {
   createSession,
@@ -29,7 +31,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "账号已创建，请直接登录" }, { status: 403 });
   }
 
-  let body: { username?: unknown; password?: unknown; displayName?: unknown };
+  let body: { username?: unknown; phone?: unknown; password?: unknown; displayName?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -38,10 +40,13 @@ export async function POST(req: Request) {
 
   const u = checkUsername(body?.username);
   if (!u.ok) return NextResponse.json({ error: u.reason }, { status: 400 });
+  const ph = checkPhone(body?.phone);
+  if (!ph.ok) return NextResponse.json({ error: ph.reason }, { status: 400 });
   const p = checkPassword(body?.password);
   if (!p.ok) return NextResponse.json({ error: p.reason }, { status: 400 });
 
   const username = (body.username as string).trim();
+  const phone = normalizePhone(body.phone)!;
   const password = body.password as string;
   const displayName =
     typeof body.displayName === "string" && body.displayName.trim()
@@ -54,12 +59,15 @@ export async function POST(req: Request) {
   // 「建号 + 老数据归属 + 资料迁移」要么全成、要么全不成。
   try {
     sqlite.transaction(() => {
+      // 入口处的 hasAnyUser() 与这里之间隔着 await req.json()：两个不同用户名的
+      // 并发请求都能通过入口检查，UNIQUE(username) 挡不住。必须在事务内再判一次。
+      if (hasAnyUser()) throw new Error("ALREADY_SETUP");
       sqlite
         .prepare(
-          `INSERT INTO users (id, username, password_hash, display_name, is_owner, created_at)
-           VALUES (?, ?, ?, ?, 1, ?)`,
+          `INSERT INTO users (id, username, phone, password_hash, display_name, is_owner, created_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?)`,
         )
-        .run(id, username, hash, displayName, Date.now());
+        .run(id, username, phone, hash, displayName, Date.now());
       // 全新空库上连接层只建了 users/sessions/settings，主表要等第一次
       // import @/db 才由 db/index.ts 建立。老库迁移必须容忍表不存在，
       // 否则事务抛错会被下面的 catch 误判成「账号已存在」返回 403。
@@ -84,7 +92,7 @@ export async function POST(req: Request) {
   }
 
   const token = createSession(id);
-  const res = NextResponse.json({ ok: true, user: { id, username, displayName } });
+  const res = NextResponse.json({ ok: true, user: { id, username, phone, displayName } });
   res.cookies.set(sessionCookieOptions(req, token));
   return res;
 }

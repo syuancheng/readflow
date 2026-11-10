@@ -189,6 +189,8 @@ export const settings = sqliteTable(
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull().unique(),
+  /** 归一化后的 11 位手机号，可作登录名；未验证（不发短信），老账号可能为空 */
+  phone: text("phone").unique(),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
   isOwner: integer("is_owner").notNull().default(0),

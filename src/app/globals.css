@@ -461,7 +461,10 @@ body {
   color: var(--duo-blue-dark);
 }
 
-/* 每个可点击的词 */
+/* ====== 正文选词：只用一种底色（对齐 Readlang）======
+   悬停、拖动中、当前选中都用同一个浅绿底色，松手前后颜色不变；
+   当前选中（.w-anchor）另加一条深绿底线，已存批注（.w-annotated）只有下划线、没有底色。
+   所以页面上任何时候只会出现一种背景色。 */
 .w {
   cursor: pointer;
   border-radius: 3px;
@@ -469,16 +472,32 @@ body {
 }
 
 .w:hover {
-  background: var(--duo-blue-soft);
+  background: var(--duo-green-soft);
 }
 
-/* 拖选中的短语 */
-.w-sel {
-  background: var(--duo-blue-soft);
-}
-
+/* Option（⌥）拖动出来的原生选区（用来复制原文） */
 ::selection {
   background: var(--duo-blue-soft);
+}
+
+/* 拖动中：只显示拖选范围，指针经过的其它词不再出悬停底色 */
+.rf-dragging .w:not(.w-drag):hover {
+  background: transparent;
+}
+
+/* 拖动预览：一整条连续底色，中间直角、两端圆角 */
+.w-drag,
+.rf-dragging .w-drag:hover {
+  background: var(--duo-green-soft);
+  border-radius: 0;
+}
+.w-drag-l {
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+.w-drag-r {
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
 }
 
 /* 顶部导航：唯一使用 Outfit 的区域（阅读页 /texts/* 整条隐藏） */
@@ -1255,15 +1274,10 @@ body {
 
 /* ====== 已存句子/短语批注：正文标记 + 右栏回看列表 ====== */
 
-/* 正文里「这句有批注」的持久标记：浅绿高亮整词。
-   与「当前选中锚点」(.w-anchor = 同底色 + 绿下划) 区分：纯底色即已存批注 */
+/* 已存批注的持久标记：只画下划线、不铺底色（底色留给「悬停 / 选中」这一种状态）。
+   词与词间空白都带下划线，连成一整条；当前选中（.w-anchor）在下面覆盖成底色 + 深绿底线。 */
 .w-annotated {
-  background: var(--duo-green-soft);
-}
-
-.w-annotated:hover {
-  background: var(--duo-green-soft);
-  box-shadow: inset 0 -2px 0 var(--duo-green);
+  box-shadow: inset 0 -2px 0 rgba(88, 204, 2, 0.45);
 }
 
 .rf-annots {
@@ -1373,10 +1387,19 @@ body {
 }
 
 /* 正文当前批注锚点的高亮 */
-.w-anchor {
+.w-anchor,
+.w-anchor:hover {
   background: var(--duo-green-soft);
   box-shadow: inset 0 -2px 0 var(--duo-green);
-  border-radius: 3px;
+  border-radius: 0;
+}
+.w-anchor-l {
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+.w-anchor-r {
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
 }
 
 /* 右栏轻提示：无框一句话，替代原空态框 */

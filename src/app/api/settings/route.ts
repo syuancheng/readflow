@@ -51,9 +51,12 @@ export async function GET() {
       maskedToken: maskSecret(markji),
       fromEnv: !settings[SETTINGS_KEYS.markjiToken] && Boolean(markji),
     },
+    // 插件 Token 能读写 owner 的整个词库（插件链路无 cookie、数据归 owner），
+    // 只能给 owner 看；其它账号拿到它就等于拿到了 owner 的词库。
     extension: {
-      token: getSetting(SETTINGS_KEYS.extensionToken),
+      token: user.isOwner ? getSetting(SETTINGS_KEYS.extensionToken) : null,
     },
+    canEditSite: user.isOwner,
     profile: profileFromSettings(settings),
   });
 }
@@ -76,6 +79,23 @@ type PutBody = {
   profileReset?: boolean;
 };
 
+/** 这次请求是否会改动站级密钥（脱敏回传值不算改动）。 */
+function touchesSiteSecrets(body: PutBody): boolean {
+  if (body.activeProvider !== undefined) return true;
+  if (body.markjiClear === true || body.regenerateExtensionToken === true) return true;
+  const token = str(body.markjiToken);
+  if (token && !isMaskedValue(token)) return true;
+  if (body.providers && typeof body.providers === "object") {
+    for (const patch of Object.values(body.providers)) {
+      if (!patch || typeof patch !== "object") continue;
+      if (patch.clear === true || str(patch.model) || str(patch.baseUrl)) return true;
+      const key = str(patch.apiKey);
+      if (key && !isMaskedValue(key)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * PUT /api/settings
  * 保存配置。脱敏值原样回传时忽略（防止把 "••••abcd" 写进 DB）。
@@ -95,6 +115,11 @@ export async function PUT(req: Request) {
 
   // 密钥类配置（AI / 墨墨 / 插件 Token）是站级共享，不传 userId 即写站级行。
   // 这样所有账号共用一份额度配置，插件链路（无 cookie）也能读到同一个 token。
+  // 正因为是共享的，只有 owner 能改：否则任何账号都能换掉别人在用的 Key、
+  // 把墨墨导出指到自己的账户，或重置插件 Token 拿到 owner 的词库。
+  if (!user.isOwner && touchesSiteSecrets(body)) {
+    return NextResponse.json({ error: "只有主账号可以修改模型、墨墨与插件配置" }, { status: 403 });
+  }
   if (body.activeProvider !== undefined) {
     if (body.activeProvider === null || body.activeProvider === "") {
       deleteSetting(SETTINGS_KEYS.activeProvider);

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contexts, paragraphs, texts } from "@/db/schema";
+import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -48,7 +48,9 @@ export async function GET(req: Request) {
     })
     .from(contexts)
     .innerJoin(paragraphs, eq(paragraphs.id, contexts.paragraphId))
-    .where(eq(contexts.textId, textId))
+    // 只要本人的批注：修复前别的账号可能往这篇文章写过脏批注
+    .innerJoin(userWords, eq(userWords.id, contexts.userWordId))
+    .where(and(eq(contexts.textId, textId), eq(userWords.userId, user.id)))
     .orderBy(desc(contexts.createdAt))
     .all();
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { maskPhone } from "@/lib/phone";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -20,7 +21,7 @@ import SettingsDialog from "./SettingsDialog";
  * 个人资料（settings 表的 profile.* 行不回退站级）。设置中心保存后广播
  * readflow.profile，这里即时同步，不用刷新页面。
  */
-type Me = { username: string; displayName: string; isOwner: boolean };
+type Me = { username: string; displayName: string; phone: string | null; isOwner: boolean };
 
 // 新增 UI 一律内联样式：globals.css 在增量构建里丢过新规则，别再踩
 const inputStyle: React.CSSProperties = {
@@ -85,12 +86,13 @@ export default function ProfileMenu() {
           setMe({
             username: data.user.username,
             displayName: data.user.displayName ?? data.user.username,
+            phone: typeof data.user.phone === "string" ? data.user.phone : null,
             isOwner: Boolean(data.user.isOwner),
           });
         }
       })
       .catch(() => {
-        /* 登录态由 middleware 兜底，这里只影响菜单展示 */
+        /* 登录态由 proxy + currentUser() 兜底，这里只影响菜单展示 */
       });
     function onProfileChanged(e: Event) {
       setProfile(normalizeProfile((e as CustomEvent<Profile>).detail));
@@ -198,6 +200,7 @@ export default function ProfileMenu() {
             {me && (
               <p style={{ margin: "6px 0 0", fontSize: 11.5, fontWeight: 700, color: "var(--duo-ink-faint, #afafaf)" }}>
                 @{me.username}
+                {me.phone ? ` · ${maskPhone(me.phone)}` : ""}
                 {me.isOwner ? " · 主账号" : ""}
               </p>
             )}

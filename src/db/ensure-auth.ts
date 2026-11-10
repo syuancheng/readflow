@@ -36,6 +36,14 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   `);
 
+  // 手机号（P21）：可作登录名。老账号补列后为 NULL，可用 npm run set-phone 补上；
+  // SQLite 的 UNIQUE 允许多个 NULL，所以老账号不会互相冲突。
+  const userCols = sqlite.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!userCols.some((c) => c.name === "phone")) {
+    sqlite.exec("ALTER TABLE users ADD COLUMN phone TEXT");
+  }
+  sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_phone ON users(phone)");
+
   const table = sqlite
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
     .get() as { name: string } | undefined;

@@ -27,6 +27,7 @@
     "list-users": "tsc -p tsconfig.account.json && node .verify/scripts/account.js list",
     "add-user": "tsc -p tsconfig.account.json && node .verify/scripts/account.js add",
     "reset-password": "tsc -p tsconfig.account.json && node .verify/scripts/account.js reset",
+    "set-phone": "tsc -p tsconfig.account.json && node .verify/scripts/account.js phone",
     "service:install": "bash scripts/service.sh install",
     "service:status": "bash scripts/service.sh status",
     "service:restart": "bash scripts/service.sh restart",

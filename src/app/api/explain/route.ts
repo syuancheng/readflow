@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { streamExplain, type ExplainParams } from "@/lib/ai";
+import { currentUser } from "@/lib/auth";
 import type { SelectionSignals } from "@/lib/sentence";
 
 export const dynamic = "force-dynamic";
@@ -69,18 +70,29 @@ function narrowSignals(v: unknown): SelectionSignals | undefined {
 
 async function handle(params: ExplainParams) {
   const encoder = new TextEncoder();
+  const iter = streamExplain(params)[Symbol.asyncIterator]();
+  let cancelled = false;
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const chunk of streamExplain(params)) {
-          controller.enqueue(encoder.encode(chunk));
+        while (!cancelled) {
+          const { value, done } = await iter.next();
+          if (done || cancelled) break;
+          controller.enqueue(encoder.encode(value));
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "AI explain failed";
-        controller.enqueue(encoder.encode(`\n\n[Error: ${msg}]`));
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : "AI explain failed";
+          controller.enqueue(encoder.encode(`\n\n[Error: ${msg}]`));
+        }
       } finally {
-        controller.close();
+        if (!cancelled) controller.close();
       }
+    },
+    // 前端切到别的词会 abort 请求：顺着 return() 关掉上游模型流，别继续烧 token
+    cancel() {
+      cancelled = true;
+      void iter.return?.(undefined);
     },
   });
 
@@ -94,6 +106,8 @@ async function handle(params: ExplainParams) {
 }
 
 export async function GET(req: NextRequest) {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   const params = req.nextUrl.searchParams;
   const word = params.get("word")?.trim();
   const context = params.get("context")?.trim() ?? "";
@@ -111,6 +125,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
   let body: Partial<ExplainParams> = {};
   try {
     body = await req.json();

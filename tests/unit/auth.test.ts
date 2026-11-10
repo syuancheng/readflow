@@ -8,7 +8,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   checkPassword,
+  checkPhone,
   checkUsername,
+  maskPhone,
+  normalizePhone,
   hashPassword,
   isSessionExpired,
   newSessionToken,
@@ -93,4 +96,30 @@ test("用户 id 是随机 UUID，不会撞车", () => {
   const ids = new Set(Array.from({ length: 20 }, () => newUserId()));
   assert.equal(ids.size, 20);
   assert.match([...ids][0], /^[0-9a-f-]{36}$/);
+});
+
+test("手机号归一化：空格 / 短横线 / +86 / 0086 / 86 前缀都还原成 11 位", () => {
+  for (const v of ["13800138000", "138 0013 8000", "138-0013-8000", "+86 138 0013 8000", "008613800138000", "8613800138000", "(138)00138000"]) {
+    assert.equal(normalizePhone(v), "13800138000", `${v} 应归一化`);
+  }
+});
+
+test("手机号：非大陆号段 / 位数不对 / 非字符串一律拒绝", () => {
+  for (const v of ["12800138000", "1380013800", "138001380000", "abc", "", "  ", undefined, 13800138000]) {
+    assert.equal(normalizePhone(v), null, `${String(v)} 应被拒绝`);
+    assert.equal(checkPhone(v).ok, false);
+  }
+  assert.equal(checkPhone("13800138000").ok, true);
+});
+
+test("手机号脱敏只露前 3 后 4", () => {
+  assert.equal(maskPhone("13800138000"), "138****8000");
+  assert.equal(maskPhone(null), "");
+});
+
+test("用户名不能是手机号格式（否则登录时分不清按哪个查）", () => {
+  assert.equal(checkUsername("13800138000").ok, false);
+  assert.equal(checkUsername("+8613800138000").ok, false);
+  // 普通数字用户名不受影响
+  assert.equal(checkUsername("12345").ok, true);
 });

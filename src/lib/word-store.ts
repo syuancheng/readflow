@@ -46,10 +46,14 @@ export type SaveResult = {
 
 export class InvalidAnchorError extends Error {}
 
-/** 校验锚点指向的文章 / 段落确实存在，防止客户端传脏数据写出孤儿批注。 */
-export function assertAnchor(input: WordAnchor): void {
+/**
+ * 校验锚点指向的文章 / 段落确实存在，且文章属于当前账号。
+ * 不校验归属的话，B 能把批注（含 AI 释义）挂到 A 的文章上，
+ * A 的「已存批注」会混进别人的内容。用「不存在」而非「无权」：不暴露别人的文章。
+ */
+export function assertAnchor(input: WordAnchor, userId: string): void {
   const text = db.select().from(texts).where(eq(texts.id, input.textId)).get();
-  if (!text) throw new InvalidAnchorError("文本不存在");
+  if (!text || text.userId !== userId) throw new InvalidAnchorError("文本不存在");
   const para = db
     .select()
     .from(paragraphs)
@@ -66,7 +70,7 @@ export function saveWordAndContext(
   input: WordAnchor & { aiGloss?: string },
   userId: string,
 ): SaveResult {
-  assertAnchor(input);
+  assertAnchor(input, userId);
   const { word, textId, paragraphId, start, end, quote, prefix, suffix, aiGloss } = input;
   const dictResult = lookup(word.trim());
 
@@ -90,7 +94,8 @@ export function saveWordAndContext(
     const existing = tx
       .select()
       .from(userWords)
-      .where(eq(userWords.lemma, lemmaForm))
+      // 唯一索引是 (user_id, lemma)：查重必须带归属，否则会把语境挂到别人的同名词条上
+      .where(and(eq(userWords.userId, userId), eq(userWords.lemma, lemmaForm)))
       .get() as typeof userWords.$inferSelect | undefined;
 
     let resolvedWordId: string;
@@ -184,13 +189,22 @@ export function applyGlossToContext(contextId: string, gloss: string): void {
   }
 }
 
-/** 按 (textId, paragraphId, start, end) 找最近一条 context。 */
-export function findContextByAnchor(input: WordAnchor) {
+/**
+ * 按 (textId, paragraphId, start, end) 找当前账号最近一条 context。
+ * 经 user_words 限定归属：修复前可能有别的账号写进来的脏批注，不能被当成自己的复用 / 覆盖。
+ */
+export function findContextByAnchor(input: WordAnchor, userId: string) {
   return db
-    .select()
+    .select({
+      id: contexts.id,
+      userWordId: contexts.userWordId,
+      aiGloss: contexts.aiGloss,
+    })
     .from(contexts)
+    .innerJoin(userWords, eq(userWords.id, contexts.userWordId))
     .where(
       and(
+        eq(userWords.userId, userId),
         eq(contexts.textId, input.textId),
         eq(contexts.paragraphId, input.paragraphId),
         eq(contexts.start, input.start),
@@ -214,8 +228,8 @@ export function ensureContextByAnchor(
   input: WordAnchor & { aiGloss?: string },
   userId: string,
 ): SaveResult {
-  assertAnchor(input);
-  const existing = findContextByAnchor(input);
+  assertAnchor(input, userId);
+  const existing = findContextByAnchor(input, userId);
   if (existing) {
     // 顺手补一次释义：手动「收词」按钮可能带着刚生成的 AI 全文过来
     if (input.aiGloss && !existing.aiGloss) {
