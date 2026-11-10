@@ -150,6 +150,22 @@ better        →  "0:good/1:r"      比较级
 它按新规则重算每个词的 lemma，顺带刷新指针式释义；lemma 撞上已有词时合并
 （上下文和导出记录一起迁过去，导出记录撞唯一键则丢弃）。
 
+### 2.4 账户体系的数据模型（P20）
+
+新增两张表，**业务表一列没动**（第一天预留的 `user_id` 兑现了）。
+
+| 表 | 关键列 | 说明 |
+|---|---|---|
+| `users` | `id` (UUID)、`username` UNIQUE、`password_hash`、`display_name`、`is_owner`、`created_at` | 密码是 `scrypt$<salt hex>$<hash hex>`，绝不存明文。只有 `/setup` 建的首个账号 `is_owner=1` |
+| `sessions` | `token_hash` PK、`user_id` → users、`expires_at`、`created_at` | 只存原始 token 的 sha256；原始 token 只在 cookie 里。DB 泄露也换不到登录态 |
+| `settings` | 主键改成 `(user_id, key)` | 从单行 KV 变成「站级默认 + 用户覆盖」，规则见 8.7 |
+
+**`'local'` 的语义变了**：`LOCAL_USER` / `GLOBAL_USER` 不再是「当前用户」，只用于①各表 `user_id` 的 DEFAULT、②`settings` 里站级共享配置的行标识。真实账号 id 是 `users` 表的 UUID。业务代码写入必须显式给 `currentUser().id`，不能依赖默认值，否则数据又堆回站级行。
+
+`ensureAuthSchema()` 放在**连接层** `db/sqlite.ts` 而不是 `db/index.ts`：登录 API 与设置中心可能先于主 schema 初始化被读取。它幂等地建 `users` / `sessions`，并把老 `settings` 表（`key` 单列主键）重建成复合主键——SQLite 不能 ALTER 主键，只能 `CREATE new → INSERT SELECT → DROP → RENAME`，全程包在事务里。老配置全部归到站级，一条不丢；老库的 `profile.*` 与 `user_id='local'` 的文章/词，在 `/api/auth/setup` 建号事务里迁到 owner 名下。
+
+**老库迁移必须容忍主表不存在**：全新空库上连接层只建了账户表，`texts` / `user_words` 要等第一次 `import @/db` 才由 `db/index.ts` 建立。setup 事务里的 `UPDATE ... SET user_id` 因此先查 `sqlite_master`，否则事务抛错会被 catch 误判成「账号已存在」而返回 403。这个 bug 正是 `test:account` 在全新库场景下抓到的。
+
 ---
 
 ## 3. 链路一：文本导入
@@ -826,6 +842,19 @@ Next dev 热重载会让多个模块实例几乎同时求值 `db/index.ts`。`CR
 
 好处：词典是「可再生的大文件」（94MB，脚本 3 秒重建），用户数据是「不可再生的小文件」（64KB）。分开后可以单独备份/删除/替换，也不会因为词典写入把用户库锁住。
 
+### 8.7 为什么自己写账户体系，以及站级/用户级配置的边界
+
+不引 Auth.js / Clerk / Supabase：本地 SQLite + Node 内置 `crypto` 就够，零依赖、零月费、断网可用，也符合「要收费就放弃」的前提。真正要解决的不是「怎么登录」，而是**两类配置不能混在一张单行 KV 表里**：
+
+- AI 密钥 / 墨墨 Token / 插件 Token 是**站点资源**：`ai.ts` / `markji.ts` 是无请求上下文的同步函数，插件 API 用站级 token 鉴权、根本没有 cookie。它们必须能从 `GLOBAL_USER` 行直接读到。
+- `profile.*` 是**个人数据**：如果沿用「读不到就回退站级」，A 用户会看到 owner 的昵称，A 改昵称又会覆盖所有人。
+
+所以 `settings-store.ts` 定了一条规则：`getSetting(key, userId)` 先读本人行，没有再回退站级；但 `isPersonalKey()`（`profile.*` 前缀）**不回退**。`allSettings(userId)` 同样先铺站级行（跳过站级 `profile.*`），再用本人行覆盖。`/api/settings` 的 GET 与 PUT 必须用同一个 `userId`，否则就是「保存成功但读回默认值」——P20 实测踩过，单靠 typecheck 抓不到，是 `test:account` 的断言读回来的。
+
+守门分两层是 Edge runtime 逼出来的：`middleware.ts` 用不了 `node:crypto`、连不了 SQLite，只能检查 cookie 是否存在；真正的 token → sha256 → `sessions` → `users` → 过期校验全在 Node 侧 `currentUser()`。因此**每个页面和 API 都要自己调 `currentUser()`**，middleware 只是把未登录请求提前挡掉、省一次 DB 查询，不是安全边界。越权一律返回 404 而不是 403，避免向别的账号暴露「这个资源存在」。
+
+`exports` 表没有 `user_id` 列，所以导出状态、每日配额、已推数量都必须 `innerJoin(userWords)` 按 `user_words.user_id` 过滤；插件链路没有 cookie，用 `ownerId()` 把数据归到 owner，查重也必须带上 `user_id`（唯一索引是 `(user_id, lemma)`），否则会改到别人的词。
+
 ---
 
 ## 9. 踩坑记录
@@ -1202,6 +1231,17 @@ npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
 已验证过的结果（2026-11-02）：写入后 `GET /decks/{deck}/cards/{card}` 回读的 content
 与提交内容逐字一致，`grammar_version` 为 3，章节卡片数 +1。
 
+### 12.8 账户体系专项（P20）
+
+```bash
+npm run test:account   # 34 项：登录 / 双账号隔离 / 越权 / 改密码 / 登出 / 浏览器登录
+npm test               # 单测含 auth-crypto（scrypt、token、过期）与 settings-store 隔离
+```
+
+`scripts/e2e-account.mjs` **绝不碰真实库**：用 `DB_PATH` 指向临时目录、另起一个 `next start`（默认 3107），跑完杀进程删库。这样既能验证「全新空库 → /setup 建号」的完整链路，也不需要替用户在真实库里造账号。末尾复用同一个临时服务跑一次 `e2e-spine-render`，确认带登录态时阅读页仍能 hydrate、点词链路没被 middleware 破坏。
+
+P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整片假阴性，统一由 `scripts/e2e-auth.mjs` 注入登录态：`ensureAuth(BASE)` patch Node 侧 `globalThis.fetch` 自动带 cookie，`authCookies(BASE)` 给 Playwright context 注入（限定目标域名，不外泄给文章里的外链图片）。在真实库上跑需要 `E2E_USER` / `E2E_PASS` 指定账号；helper **不会自动建号**，避免替用户创建账号。
+
 ## 13. 代码地图与改动指引
 
 | 想改什么 | 改哪里 | 注意 |
@@ -1225,6 +1265,9 @@ npm run push:one -- retouch <词> <qa|cloze|choice> <deckId>
 | 加页面 | `src/app/<route>/page.tsx` + `duo-card` 等现成类 | 记得挂进 `layout.tsx` 与 `BottomNav.tsx` |
 | 改视觉 | `src/app/globals.css` 的 CSS 变量 + `.duo-*` 类 | 颜色改变量，别硬编码 |
 | 加表/字段 | `db/schema.ts` **和** `db/index.ts` 的 `SCHEMA_SQL` + `migrate()` | 三处必须一致（8.4 / 11.5） |
+| 改登录 / 会话 | `lib/auth.ts` / `lib/auth-crypto.ts` / `middleware.ts` | middleware 只查 cookie 存在，真校验在每个页面与 API 的 `currentUser()`；改完跑 `npm run test:account` |
+| 改配置归属 | `lib/settings-store.ts` + `api/settings/route.ts` | `profile.*` 绝不回退站级；GET 与 PUT 必须用同一个 `userId`，否则保存后读回默认值 |
+| 加账号 / 重置密码 | `npm run add-user -- <用户名>` / `npm run reset-password -- <用户名>` | `/setup` 只在 `users` 表为空时可用；两者都走 `scripts/account.ts`（独立 tsconfig，别卷进 verify 编译链） |
 | 改词典还原规则 | `lib/dict.ts` 的 `lemma()` / `lookup()` | 改完跑 `npm run backfill:lemma`，否则历史数据是旧规则 |
 | 改音标显示 | `lib/text.ts` 的 `normalizePhonetic()` | ECDICT 用 `'`/`,` 表示重音，别再把它当普通标点 |
 

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": false,
+    "outDir": ".verify",
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": [
+    "scripts/account.ts",
+    "src/lib/auth-crypto.ts",
+    "src/db/ensure-auth.ts"
+  ]
+}

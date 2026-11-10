@@ -15,8 +15,10 @@
  * 结束时删掉自己造的文本与词，不污染用户库。
  */
 import { chromium } from "playwright";
+import { ensureAuth, authCookies } from "./e2e-auth.mjs";
 
 const BASE = process.env.BASE || "http://127.0.0.1:3000";
+await ensureAuth(BASE);
 const TITLE = `[E2E] auto-explain ${Date.now()}`;
 const BODY =
   "The tradition dates back to a small book written in 1920. It is still useful today.";
@@ -39,6 +41,7 @@ let textId;
 let explainCount = 0;
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+await ctx.addCookies(authCookies(BASE));
 const page = await ctx.newPage();
 page.on("request", (req) => {
   if (req.url().includes("/api/explain")) explainCount += 1;

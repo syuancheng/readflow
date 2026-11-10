@@ -34,6 +34,7 @@
     "src/lib/import/index.ts",
     "src/lib/settings-form.ts",
     "src/lib/settings-store.ts",
+    "src/lib/auth-crypto.ts",
     "src/db/sqlite.ts",
     "tests/unit/**/*.ts"
   ]

@@ -14,8 +14,10 @@
  *  G. 词库「跳到原文」→ URL 带 ?p= 且目标段落高亮
  */
 import { chromium } from "playwright";
+import { ensureAuth, authCookies } from "./e2e-auth.mjs";
 
 const BASE = process.env.BASE || "http://127.0.0.1:3103";
+await ensureAuth(BASE);
 const TEXT_ID = process.env.TEXT_ID || "6d5fab15-5422-4dcd-991d-51c52eb633c1";
 
 const results = [];
@@ -43,6 +45,7 @@ async function cleanup(keepIds) {
 
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 const ctx = await browser.newContext({ viewport: { width: 1180, height: 900 } });
+await ctx.addCookies(authCookies(BASE));
 const page = await ctx.newPage();
 page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 

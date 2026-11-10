@@ -9,10 +9,12 @@ import ProfileMenu from "@/components/ProfileMenu";
 /**
  * 全局顶栏（logo + 导航 tab + 头像菜单）。
  * 阅读页（/texts/*）整条隐藏——那里只留「← 返回我的文本」一个入口。
+ * 登录 / 首次建号页也隐藏：此时还没有登录态，头像菜单会白请求 /api/settings。
  */
 export default function SiteHeader() {
   const pathname = usePathname();
   if (pathname?.startsWith("/texts")) return null;
+  if (pathname === "/login" || pathname === "/setup") return null;
 
   return (
     <header className="duo-nav sticky top-0 z-30">

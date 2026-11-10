@@ -14,6 +14,7 @@ import {
   getSetting,
   setSetting,
 } from "@/lib/settings-store";
+import { currentUser } from "@/lib/auth";
 import {
   isAvatarImage,
   normalizeProfile,
@@ -35,7 +36,11 @@ const str = (v: unknown): string | undefined =>
  * 插件 Token 例外——用户需要复制它到插件里，只能在这里看到。
  */
 export async function GET() {
-  const settings = allSettings();
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  // 站级默认（AI / 墨墨 / 插件）+ 本人覆盖；profile.* 不回退站级。
+  // 必须与 PUT 写入时用同一个 userId，否则「保存成功但读回默认值」。
+  const settings = allSettings(user.id);
   const markji = resolveMarkjiToken(settings, process.env);
   return NextResponse.json({
     ok: true,
@@ -76,6 +81,8 @@ type PutBody = {
  * 保存配置。脱敏值原样回传时忽略（防止把 "••••abcd" 写进 DB）。
  */
 export async function PUT(req: Request) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   let body: PutBody;
   try {
     body = (await req.json()) as PutBody;
@@ -86,6 +93,8 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "请求格式错误" }, { status: 400 });
   }
 
+  // 密钥类配置（AI / 墨墨 / 插件 Token）是站级共享，不传 userId 即写站级行。
+  // 这样所有账号共用一份额度配置，插件链路（无 cookie）也能读到同一个 token。
   if (body.activeProvider !== undefined) {
     if (body.activeProvider === null || body.activeProvider === "") {
       deleteSetting(SETTINGS_KEYS.activeProvider);
@@ -131,8 +140,10 @@ export async function PUT(req: Request) {
     SETTINGS_KEYS.profileBio,
     SETTINGS_KEYS.profileAvatar,
   ];
+  // profile.* 是纯个人数据，必须写到本人行：settings-store 对它不回退站级，
+  // 否则 A 改昵称会覆盖所有人的、或读到 owner 的资料。
   if (body.profileReset === true) {
-    for (const key of PROFILE_KEYS) deleteSetting(key);
+    for (const key of PROFILE_KEYS) deleteSetting(key, user.id);
   } else if (body.profile && typeof body.profile === "object") {
     // 头像不是普通字符串：必须在归一化（会静默丢弃非法值）之前显式挡掉
     const rawAvatar = body.profile.avatar;
@@ -141,8 +152,8 @@ export async function PUT(req: Request) {
     }
     const patch = profileToSettingsPatch(normalizeProfile(body.profile));
     for (const [key, value] of Object.entries(patch)) {
-      if (value) setSetting(key, value);
-      else deleteSetting(key);
+      if (value) setSetting(key, value, user.id);
+      else deleteSetting(key, user.id);
     }
   }
 

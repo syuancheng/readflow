@@ -9,8 +9,10 @@
  *   npm run test:spine-render
  */
 import { chromium } from "playwright";
+import { ensureAuth, authCookies } from "./e2e-auth.mjs";
 
 const BASE = process.env.BASE || "http://127.0.0.1:3000";
+await ensureAuth(BASE);
 const stamp = Date.now().toString(36);
 const TITLE = `[E2E] spine render ${stamp}`;
 const WORD = "meticulous";
@@ -37,6 +39,7 @@ let textId = "";
 let wordId = "";
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+await page.context().addCookies(authCookies(BASE));
 
 try {
   const created = await j(

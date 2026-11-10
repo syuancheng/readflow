@@ -1,7 +1,8 @@
 import { asc, eq } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
-import { paragraphs, texts, userWords, LOCAL_USER } from "@/db/schema";
+import { paragraphs, texts, userWords } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 import ReaderShell from "@/components/ReaderShell";
 import ReadingChrome from "@/components/ReadingChrome";
 import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
@@ -21,8 +22,12 @@ export default async function TextPage({
   const { id } = await params;
   const { p } = await searchParams;
 
+  const user = await currentUser();
+  if (!user) redirect(`/login?next=/texts/${id}`);
+
   const [text] = await db.select().from(texts).where(eq(texts.id, id)).limit(1);
-  if (!text) notFound();
+  // 用 404 而不是 403：不向别的账号暴露「这篇文章存在」
+  if (!text || text.userId !== user.id) notFound();
 
   const rows = await db
     .select()
@@ -41,7 +46,7 @@ export default async function TextPage({
       starred: userWords.starred,
     })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, user.id))
     .all();
 
   // 每日目标进度条已按用户要求移除

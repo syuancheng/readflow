@@ -9,8 +9,14 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /**
- * 本地单机版固定使用 "local"。
- * 上云做多人时，这里替换为真实用户 id，表结构不需要改动。
+ * 站级哨兵 / 列默认值（P20 后语义已变，不再是「当前用户」）。
+ *
+ * "local" 如今只用于两处：
+ *   1. 各表 user_id 列的 DEFAULT —— 业务代码写入时必须显式给真实账号 UUID，
+ *      不要依赖默认值，否则数据又会堆到站级行上；
+ *   2. settings 表里站级共享配置（AI 密钥 / 墨墨 Token / 插件 Token）的行标识。
+ * 真实账号 id 是 users 表的 UUID，由 lib/auth.ts 的 currentUser() 提供。
+ * 老库里 user_id='local' 的文章与词，会在 /api/auth/setup 建号时迁到 owner 名下。
  */
 export const LOCAL_USER = "local";
 

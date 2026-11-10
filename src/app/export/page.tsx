@@ -1,7 +1,10 @@
-import { and, eq, gte, ne, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { exports, settings, userWords, LOCAL_USER } from "@/db/schema";
+import { exports, userWords } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
+import { getSetting } from "@/lib/settings-store";
 import { hasMarkjiToken } from "@/lib/markji";
 import { CARD_TYPES } from "@/lib/cardgen";
 import ExportPanel from "@/components/ExportPanel";
@@ -11,32 +14,42 @@ export const dynamic = "force-dynamic";
 const DAILY_CAP = 600;
 
 export default async function ExportPage() {
+  const user = await currentUser();
+  if (!user) redirect("/login?next=/export");
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  // 词库词数
   const wordCount = db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, user.id))
     .get();
 
+  // exports 没有 user_id 列，必须经 user_words 关联才能只统计自己的卡片
   const exportedByType = db
     .select({ t: exports.cardType, c: sql<number>`count(*)` })
     .from(exports)
-    .where(eq(exports.status, "done"))
+    .innerJoin(userWords, eq(exports.userWordId, userWords.id))
+    .where(and(eq(exports.status, "done"), eq(userWords.userId, user.id)))
     .groupBy(exports.cardType)
     .all();
 
   const todayPushed = db
     .select({ c: sql<number>`count(*)` })
     .from(exports)
-    .where(and(eq(exports.status, "done"), gte(exports.pushedAt, todayStart.getTime())))
+    .innerJoin(userWords, eq(exports.userWordId, userWords.id))
+    .where(
+      and(
+        eq(exports.status, "done"),
+        eq(userWords.userId, user.id),
+        gte(exports.pushedAt, todayStart.getTime()),
+      ),
+    )
     .get();
 
-  const cfg = Object.fromEntries(
-    db.select().from(settings).all().map((r) => [r.key, r.value]),
-  );
+  // 站级默认 + 本人覆盖；直接从 settings 全表读会把别人的行混进来
+  const deckId = getSetting("markji.deck", user.id) ?? "";
+  const chapterId = getSetting("markji.chapter", user.id) ?? "";
 
   const total = Number(wordCount?.c ?? 0);
   const exported = exportedByType.reduce((s, r) => s + Number(r.c), 0);
@@ -64,8 +77,8 @@ export default async function ExportPage() {
 
       <ExportPanel
         tokenReady={hasMarkjiToken()}
-        initialDeckId={cfg["markji.deck"] ?? ""}
-        initialChapterId={cfg["markji.chapter"] ?? ""}
+        initialDeckId={deckId}
+        initialChapterId={chapterId}
         wordCount={total}
         todayPushed={Number(todayPushed?.c ?? 0)}
         dailyCap={DAILY_CAP}

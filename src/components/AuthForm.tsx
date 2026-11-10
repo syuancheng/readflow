@@ -173,7 +173,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
 
         {!isSetup && (
           <p style={{ marginTop: 18, fontSize: 12, color: "var(--duo-ink-faint, #afafaf)", lineHeight: 1.6 }}>
-            忘记密码？在项目目录运行 <code>npm run reset-password</code> 重置。
+            忘记密码？在项目目录运行 <code>npm run reset-password -- 用户名</code> 重置。
           </p>
         )}
       </div>

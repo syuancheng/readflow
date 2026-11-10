@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { contexts, exports, paragraphs, settings, texts, userWords, LOCAL_USER } from "@/db/schema";
+import { contexts, exports, paragraphs, texts, userWords } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
+import { getSetting, setSetting } from "@/lib/settings-store";
 import { resolveAnchor } from "@/lib/tokenize";
 import { sentenceAround } from "@/lib/split";
 import { buildCard, lintCard, CARD_TYPES, type CardType } from "@/lib/cardgen";
@@ -23,17 +25,9 @@ function isCardType(v: string): v is CardType {
   return TYPE_KEYS.has(v);
 }
 
-function getSetting(key: string): string | null {
-  const row = db.select().from(settings).where(eq(settings.key, key)).get();
-  return row?.value ?? null;
-}
-
-function setSetting(key: string, value: string) {
-  db.insert(settings)
-    .values({ key, value, updatedAt: Date.now() })
-    .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: Date.now() } })
-    .run();
-}
+// P20：牌组 / 章节这类「导出目标」走 settings-store 的站级默认 + 本人覆盖。
+// 旧写法直接按 settings.key 做 onConflictDoUpdate，但 settings 主键已改成
+// (user_id, key)，单列 target 不再是唯一约束，会直接抛错。
 
 type ExportItem = {
   wordId: string;
@@ -50,6 +44,8 @@ type ExportItem = {
  * 给 UI 用的状态：令牌是否可用、目标牌组/章节、各类卡片的已推送数量、今日已推送量。
  */
 export async function GET() {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
@@ -57,28 +53,37 @@ export async function GET() {
   const wordCount = db
     .select({ c: sql<number>`count(*)` })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, user.id))
     .get();
 
+  // exports 没有 user_id 列，经 user_words 关联才不会把别人的推送量算进来
   const byType = db
     .select({ t: exports.cardType, c: sql<number>`count(*)` })
     .from(exports)
-    .where(eq(exports.status, "done"))
+    .innerJoin(userWords, eq(exports.userWordId, userWords.id))
+    .where(and(eq(exports.status, "done"), eq(userWords.userId, user.id)))
     .groupBy(exports.cardType)
     .all();
 
   const todayPushed = db
     .select({ c: sql<number>`count(*)` })
     .from(exports)
-    .where(and(eq(exports.status, "done"), gte(exports.pushedAt, todayStart.getTime())))
+    .innerJoin(userWords, eq(exports.userWordId, userWords.id))
+    .where(
+      and(
+        eq(exports.status, "done"),
+        eq(userWords.userId, user.id),
+        gte(exports.pushedAt, todayStart.getTime()),
+      ),
+    )
     .get();
 
   return NextResponse.json({
     tokenReady: hasMarkjiToken(),
-    deckId: getSetting("markji.deck") ?? "",
-    chapterId: getSetting("markji.chapter") ?? "",
-    deckName: getSetting("markji.deckName") ?? "",
-    chapterName: getSetting("markji.chapterName") ?? "",
+    deckId: getSetting("markji.deck", user.id) ?? "",
+    chapterId: getSetting("markji.chapter", user.id) ?? "",
+    deckName: getSetting("markji.deckName", user.id) ?? "",
+    chapterName: getSetting("markji.chapterName", user.id) ?? "",
     wordCount: Number(wordCount?.c ?? 0),
     exportedByType: Object.fromEntries(byType.map((r) => [r.t, Number(r.c)])),
     todayPushed: Number(todayPushed?.c ?? 0),
@@ -98,6 +103,8 @@ export async function GET() {
  * dryRun 返回将要发送的卡片全文，不写任何东西。真正写卡前必须先看这个。
  */
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
   let body: {
     deckId?: string;
     chapterId?: string;
@@ -135,7 +142,7 @@ export async function POST(req: Request) {
   let wordRows = db
     .select()
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, user.id))
     .orderBy(desc(userWords.createdAt))
     .all();
 
@@ -148,7 +155,17 @@ export async function POST(req: Request) {
   // 2. 已推送过的（同一个牌组内的幂等键）
   const doneKeys = new Set<string>();
   if (deckId) {
-    for (const row of db.select().from(exports).where(eq(exports.deckId, deckId)).all()) {
+    const pushed = db
+      .select({
+        userWordId: exports.userWordId,
+        cardType: exports.cardType,
+        status: exports.status,
+      })
+      .from(exports)
+      .innerJoin(userWords, eq(exports.userWordId, userWords.id))
+      .where(and(eq(exports.deckId, deckId), eq(userWords.userId, user.id)))
+      .all();
+    for (const row of pushed) {
       if (row.status === "done") doneKeys.add(`${row.userWordId}:${row.cardType}`);
     }
   }
@@ -159,7 +176,14 @@ export async function POST(req: Request) {
   const todayRow = db
     .select({ c: sql<number>`count(*)` })
     .from(exports)
-    .where(and(eq(exports.status, "done"), gte(exports.pushedAt, todayStart.getTime())))
+    .innerJoin(userWords, eq(exports.userWordId, userWords.id))
+    .where(
+      and(
+        eq(exports.status, "done"),
+        eq(userWords.userId, user.id),
+        gte(exports.pushedAt, todayStart.getTime()),
+      ),
+    )
     .get();
   let remainingToday = DAILY_CAP - Number(todayRow?.c ?? 0);
 
@@ -386,8 +410,8 @@ export async function POST(req: Request) {
   }
 
   if (!dryRun && deckId && chapterId) {
-    setSetting("markji.deck", deckId);
-    setSetting("markji.chapter", chapterId);
+    setSetting("markji.deck", deckId, user.id);
+    setSetting("markji.chapter", chapterId, user.id);
   }
 
   return NextResponse.json({

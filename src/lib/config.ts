@@ -80,7 +80,7 @@ export const SETTINGS_KEYS = {
   providerBaseUrl: (id: string) => `ai.${id}.baseUrl`,
   markjiToken: "markji.token",
   extensionToken: "extension.token",
-  // 本地个人资料（无账号体系，只用于昵称/头像/签名的展示）
+  // 个人资料：按账号隔离（profile.* 不回退站级），见 lib/settings-store.ts
   profileName: "profile.displayName",
   profileFullName: "profile.fullName",
   profileBio: "profile.bio",

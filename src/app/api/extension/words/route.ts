@@ -3,7 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { contexts, paragraphs, texts, userWords, LOCAL_USER } from "@/db/schema";
+import { contexts, paragraphs, texts, userWords } from "@/db/schema";
+import { ownerId } from "@/lib/auth";
 import { SETTINGS_KEYS } from "@/lib/config";
 import { getSetting } from "@/lib/settings-store";
 import { shortGloss } from "@/lib/gloss";
@@ -58,6 +59,8 @@ export async function GET(req: Request) {
     );
   }
 
+  // 插件走站级 token、没有 cookie，数据统一归到 owner 名下
+  const owner = ownerId();
   const rows = db
     .select({
       id: userWords.id,
@@ -70,7 +73,7 @@ export async function GET(req: Request) {
       createdAt: userWords.createdAt,
     })
     .from(userWords)
-    .where(eq(userWords.userId, LOCAL_USER))
+    .where(eq(userWords.userId, owner))
     .orderBy(desc(userWords.createdAt))
     .all();
 
@@ -82,6 +85,8 @@ export async function GET(req: Request) {
       createdAt: contexts.createdAt,
     })
     .from(contexts)
+    .innerJoin(userWords, eq(contexts.userWordId, userWords.id))
+    .where(eq(userWords.userId, owner))
     .orderBy(desc(contexts.createdAt))
     .all();
   const exampleByWord = new Map<string, string>();
@@ -156,17 +161,23 @@ export async function POST(req: Request) {
   const isPhrase = /\s/.test(word) ? 1 : 0;
   const now = Date.now();
 
+  const owner = ownerId();
   const result = db.transaction((tx) => {
-    // 同一个网页复用一条 text（避免每收一个词就多一篇文章）
+    // 同一个网页复用一条 text（避免每收一个词就多一篇文章）。
+    // 必须带上 userId：否则 B 用户的网页摘录会挂到 A 的同网址文章下。
     let text = url
-      ? tx.select().from(texts).where(eq(texts.sourceUrl, url)).get()
+      ? tx
+          .select()
+          .from(texts)
+          .where(and(eq(texts.sourceUrl, url), eq(texts.userId, owner)))
+          .get()
       : undefined;
     if (!text) {
       const id = randomUUID();
       tx.insert(texts)
         .values({
           id,
-          userId: LOCAL_USER,
+          userId: owner,
           title,
           sourceType: "web",
           sourceUrl: url || null,
@@ -188,7 +199,12 @@ export async function POST(req: Request) {
       .values({ id: paragraphId, textId: text!.id, idx: Number(paraCount?.c ?? 0), content: sentence })
       .run();
 
-    let existing = tx.select().from(userWords).where(eq(userWords.lemma, lemmaForm)).get();
+    // 唯一索引是 (user_id, lemma)，查重也必须带上归属，否则会改到别人的词
+    let existing = tx
+      .select()
+      .from(userWords)
+      .where(and(eq(userWords.lemma, lemmaForm), eq(userWords.userId, owner)))
+      .get();
     let wordId: string;
     if (existing) {
       wordId = existing.id;
@@ -206,7 +222,7 @@ export async function POST(req: Request) {
       tx.insert(userWords)
         .values({
           id: wordId,
-          userId: LOCAL_USER,
+          userId: owner,
           lemma: lemmaForm,
           displayForm: word,
           pos,

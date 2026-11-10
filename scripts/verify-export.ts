@@ -19,6 +19,13 @@ const ROOT = process.cwd();
 const db = new Database(path.join(ROOT, "data", "readflow.db"));
 db.pragma("foreign_keys = ON");
 
+/**
+ * 离线验证用独立身份：user_words 的唯一键是 (user_id, lemma)，
+ * 直接写 'local' 会和用户真实收的词撞键（P20 后 'local' 也不再是任何账号）。
+ * 这些行在每张卡验证完立即删除，不会留在库里。
+ */
+const VERIFY_USER = "__verify_cards__";
+
 const OUT = "/tmp/cards";
 fs.mkdirSync(OUT, { recursive: true });
 for (const f of fs.readdirSync(OUT)) fs.unlinkSync(path.join(OUT, f));
@@ -85,9 +92,10 @@ for (const item of picked) {
 
   db.prepare(
     `insert into user_words (id, user_id, lemma, display_form, pos, phonetic, translation, note, created_at)
-     values (?, 'local', ?, ?, ?, ?, ?, null, ?)`,
+     values (?, ?, ?, ?, ?, ?, ?, null, ?)`,
   ).run(
     wordId,
+    VERIFY_USER,
     r.lemmaForm,
     item.word,
     r.entry?.pos ?? null,

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contexts, paragraphs } from "@/db/schema";
+import { contexts, paragraphs, texts } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,19 @@ export async function GET(req: Request) {
   const textId = new URL(req.url).searchParams.get("textId");
   if (!textId) {
     return NextResponse.json({ error: "textId is required" }, { status: 400 });
+  }
+
+  // 批注是挂在文章上的，先确认这篇文章属于当前账号；否则换个 textId
+  // 就能把别人的批注、AI 释义全文读走。
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  const [own] = await db
+    .select({ userId: texts.userId })
+    .from(texts)
+    .where(eq(texts.id, textId))
+    .limit(1);
+  if (!own || own.userId !== user.id) {
+    return NextResponse.json({ error: "文本不存在" }, { status: 404 });
   }
 
   const rows = db

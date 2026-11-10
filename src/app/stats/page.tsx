@@ -1,7 +1,9 @@
 import { eq, desc } from "drizzle-orm";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { texts, userWords, LOCAL_USER } from "@/db/schema";
+import { texts, userWords } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 import { getStats } from "@/lib/stats";
 import HeatCalendar, { HeatLegend } from "@/components/HeatCalendar";
 
@@ -10,17 +12,19 @@ export const dynamic = "force-dynamic";
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export default async function StatsPage() {
+  const user = await currentUser();
+  if (!user) redirect("/login?next=/stats");
   const [stats, textRows, wordRows] = await Promise.all([
-    getStats(14, 18),
+    getStats(14, 18, user.id),
     db
       .select()
       .from(texts)
-      .where(eq(texts.userId, LOCAL_USER))
+      .where(eq(texts.userId, user.id))
       .orderBy(desc(texts.createdAt)),
     db
       .select()
       .from(userWords)
-      .where(eq(userWords.userId, LOCAL_USER))
+      .where(eq(userWords.userId, user.id))
       .orderBy(desc(userWords.createdAt))
       .limit(8),
   ]);

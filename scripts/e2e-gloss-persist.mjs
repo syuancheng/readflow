@@ -21,13 +21,16 @@
  */
 import { chromium } from "playwright";
 import { createRequire } from "node:module";
+import { ensureAuth, authCookies } from "./e2e-auth.mjs";
 
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3");
-// 只读校验 context 是否重复（/api/annotations 按词条去重，看不出重复插入）
-const db = new Database(new URL("../data/readflow.db", import.meta.url).pathname, {
-  readonly: true,
-});
+// 只读校验 context 是否重复（/api/annotations 按词条去重，看不出重复插入）。
+// 把 BASE 指向临时库服务时，用 E2E_DB 指到同一个库，否则会读到真实库。
+const db = new Database(
+  process.env.E2E_DB ?? new URL("../data/readflow.db", import.meta.url).pathname,
+  { readonly: true },
+);
 
 const BASE = process.env.READFLOW_BASE ?? "http://127.0.0.1:3000";
 const stamp = Date.now().toString(36);
@@ -50,8 +53,10 @@ const ok = (cond, msg) => {
   console.log(`  ✓ ${msg}`);
 };
 
+await ensureAuth(BASE);
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+await ctx.addCookies(authCookies(BASE));
 const page = await ctx.newPage();
 
 let explainCount = 0;

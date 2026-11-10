@@ -1,7 +1,9 @@
 import { desc, eq } from "drizzle-orm";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { userWords, contexts, paragraphs, texts, LOCAL_USER } from "@/db/schema";
+import { userWords, contexts, paragraphs, texts } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 import { getStats } from "@/lib/stats";
 import { resolveAnchor } from "@/lib/tokenize";
 import { sentenceAround } from "@/lib/split";
@@ -41,12 +43,14 @@ function fullSentence(c: {
 }
 
 export default async function WordsPage() {
+  const user = await currentUser();
+  if (!user) redirect("/login?next=/words");
   const [stats, rows] = await Promise.all([
-    getStats(7),
+    getStats(7, 18, user.id),
     db
       .select()
       .from(userWords)
-      .where(eq(userWords.userId, LOCAL_USER))
+      .where(eq(userWords.userId, user.id))
       .orderBy(desc(userWords.createdAt)),
   ]);
 

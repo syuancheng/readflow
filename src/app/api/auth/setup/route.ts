@@ -60,12 +60,27 @@ export async function POST(req: Request) {
            VALUES (?, ?, ?, ?, 1, ?)`,
         )
         .run(id, username, hash, displayName, Date.now());
-      sqlite.prepare("UPDATE texts SET user_id = ? WHERE user_id = ?").run(id, GLOBAL_USER);
-      sqlite.prepare("UPDATE user_words SET user_id = ? WHERE user_id = ?").run(id, GLOBAL_USER);
+      // 全新空库上连接层只建了 users/sessions/settings，主表要等第一次
+      // import @/db 才由 db/index.ts 建立。老库迁移必须容忍表不存在，
+      // 否则事务抛错会被下面的 catch 误判成「账号已存在」返回 403。
+      for (const table of ["texts", "user_words"] as const) {
+        const exists = sqlite
+          .prepare("SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name = ?")
+          .get(table);
+        if (exists) {
+          sqlite.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`).run(id, GLOBAL_USER);
+        }
+      }
       migrateProfileToUser(id);
     })();
-  } catch {
-    return NextResponse.json({ error: "账号已创建，请直接登录" }, { status: 403 });
+  } catch (err) {
+    // 并发双击 /setup 时 UNIQUE(username) 冲突，确实是「已经建好了」；
+    // 其它异常要如实报出来，别把它伪装成 403 掩盖真实故障。
+    if (hasAnyUser()) {
+      return NextResponse.json({ error: "账号已创建，请直接登录" }, { status: 403 });
+    }
+    console.error("[auth/setup] 建号事务失败", err);
+    return NextResponse.json({ error: "建号失败，请查看服务日志" }, { status: 500 });
   }
 
   const token = createSession(id);

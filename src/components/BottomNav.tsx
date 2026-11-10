@@ -12,6 +12,8 @@ const ITEMS = [
 
 export default function BottomNav() {
   const path = usePathname();
+  // 登录 / 建号页是独立全屏表单，不该出现底部主导航
+  if (path === "/login" || path === "/setup") return null;
 
   return (
     <nav className="duo-bottom-nav">

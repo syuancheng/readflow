@@ -1,16 +1,22 @@
 import { NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { paragraphs, texts } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
 
   const [text] = await db.select().from(texts).where(eq(texts.id, id)).limit(1);
-  if (!text) return NextResponse.json({ error: "文本不存在" }, { status: 404 });
+  // 用 404 而非 403：不向别的账号暴露「这篇文章存在」
+  if (!text || text.userId !== user.id) {
+    return NextResponse.json({ error: "文本不存在" }, { status: 404 });
+  }
 
   const rows = await db
     .select()
@@ -37,6 +43,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
 
   let body: {
     title?: unknown;
@@ -56,7 +64,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   const [row] = await db.select().from(texts).where(eq(texts.id, id)).limit(1);
-  if (!row) return NextResponse.json({ error: "文本不存在" }, { status: 404 });
+  if (!row || row.userId !== user.id) {
+    return NextResponse.json({ error: "文本不存在" }, { status: 404 });
+  }
 
   const updates: Record<string, unknown> = {};
 
@@ -115,6 +125,18 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  await db.delete(texts).where(eq(texts.id, id));
+  const user = await currentUser();
+  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+
+  const [row] = await db
+    .select({ userId: texts.userId })
+    .from(texts)
+    .where(eq(texts.id, id))
+    .limit(1);
+  if (!row || row.userId !== user.id) {
+    return NextResponse.json({ error: "文本不存在" }, { status: 404 });
+  }
+  // delete 的 where 也带上 userId，避免校验与写入之间任何竞态
+  db.delete(texts).where(and(eq(texts.id, id), eq(texts.userId, user.id))).run();
   return NextResponse.json({ ok: true });
 }

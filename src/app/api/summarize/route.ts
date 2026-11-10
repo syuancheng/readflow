@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { paragraphs, sectionSummaries } from "@/db/schema";
+import { paragraphs, sectionSummaries, texts } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 import { hasModelConfigured, NO_MODEL_NOTICE, streamSectionSummary } from "@/lib/ai";
 import { STREAM_RESET } from "@/lib/config";
 import { isProse, type BlockKind } from "@/lib/import/types";
@@ -28,6 +29,24 @@ const SSE_HEADERS = {
   Connection: "keep-alive",
 };
 
+/**
+ * 小结按 textId 读写，必须先确认这篇文章属于当前账号。
+ * 否则换个 id 就能读到别人文章的小结、还能消耗站级 AI 额度。
+ */
+async function guardText(textId: string): Promise<Response | null> {
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
+  const [own] = await db
+    .select({ userId: texts.userId })
+    .from(texts)
+    .where(eq(texts.id, textId))
+    .limit(1);
+  if (!own || own.userId !== user.id) {
+    return Response.json({ error: "文本不存在" }, { status: 404 });
+  }
+  return null;
+}
+
 function streamText(
   producer: () => AsyncIterable<string>,
   extra: Record<string, string> = {},
@@ -51,6 +70,8 @@ function streamText(
 export async function GET(req: NextRequest) {
   const textId = req.nextUrl.searchParams.get("textId")?.trim();
   if (!textId) return Response.json({ error: "textId is required" }, { status: 400 });
+  const denied = await guardText(textId);
+  if (denied) return denied;
 
   const rows = db
     .select()
@@ -82,6 +103,8 @@ export async function POST(req: NextRequest) {
   const regenerate = body.regenerate === true;
 
   if (!textId) return Response.json({ error: "textId is required" }, { status: 400 });
+  const denied = await guardText(textId);
+  if (denied) return denied;
   if (!Number.isInteger(startIdx) || !Number.isInteger(endIdx)) {
     return Response.json({ error: "startIdx/endIdx must be integers" }, { status: 400 });
   }

@@ -1,7 +1,9 @@
 import { desc, eq } from "drizzle-orm";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { texts, LOCAL_USER } from "@/db/schema";
+import { texts } from "@/db/schema";
+import { currentUser } from "@/lib/auth";
 import { getStats } from "@/lib/stats";
 import ImportForm from "@/components/ImportForm";
 import TextList, { type TextCardRow } from "@/components/TextList";
@@ -11,13 +13,16 @@ export const dynamic = "force-dynamic";
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export default async function Home() {
+  // middleware 只挡「没 cookie」；伪造 / 过期 cookie 在这里兜底
+  const user = await currentUser();
+  if (!user) redirect("/login");
   const [rows, stats] = await Promise.all([
     db
       .select()
       .from(texts)
-      .where(eq(texts.userId, LOCAL_USER))
+      .where(eq(texts.userId, user.id))
       .orderBy(desc(texts.createdAt)),
-    getStats(7),
+    getStats(7, 18, user.id),
   ]);
 
   const cards: TextCardRow[] = rows.map((t) => ({

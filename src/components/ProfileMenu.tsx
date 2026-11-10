@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   DEFAULT_PROFILE,
   initialsFrom,
@@ -13,17 +14,58 @@ import SettingsDialog from "./SettingsDialog";
 
 /**
  * 右上角用户菜单（仿 Readlang）：头像按钮 + 下拉面板。
- * 面板只做「入口」：个人资料、设置。阅读偏好（自动收词 / 发音音色）
- * 统一收进设置中心的「阅读设置」，避免同一个开关在两处出现。
+ * P20 接上账户体系后，面板同时是「账号入口」：显示当前登录名、改密码、退出。
  *
- * 昵称 / 头像 / 签名来自 /api/settings 的 profile（本机资料，无账号体系）；
- * 设置中心保存后广播 readflow.profile，这里即时同步，不用刷新页面。
+ * 昵称 / 头像 / 签名仍来自 /api/settings 的 profile，但现在是**按账号隔离**的
+ * 个人资料（settings 表的 profile.* 行不回退站级）。设置中心保存后广播
+ * readflow.profile，这里即时同步，不用刷新页面。
  */
+type Me = { username: string; displayName: string; isOwner: boolean };
+
+// 新增 UI 一律内联样式：globals.css 在增量构建里丢过新规则，别再踩
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "10px 12px",
+  border: "2px solid var(--duo-border, #e5e5e5)",
+  borderRadius: 10,
+  fontSize: 14,
+  fontFamily: "inherit",
+  outline: "none",
+};
+
+const backdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 60,
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  background: "rgba(0,0,0,0.35)",
+};
+
+const modalStyle: React.CSSProperties = {
+  width: "100%",
+  maxWidth: 380,
+  padding: "26px 24px",
+  borderRadius: 18,
+  background: "#fff",
+  color: "var(--duo-ink, #3c3c3c)",
+  boxShadow: "0 18px 50px rgba(0,0,0,0.18)",
+};
+
 export default function ProfileMenu() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<NavId>("models");
   const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
+  const [me, setMe] = useState<Me | null>(null);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwMsg, setPwMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,6 +77,20 @@ export default function ProfileMenu() {
       })
       .catch(() => {
         /* 离线时保留默认展示值即可 */
+      });
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data?.user) {
+          setMe({
+            username: data.user.username,
+            displayName: data.user.displayName ?? data.user.username,
+            isOwner: Boolean(data.user.isOwner),
+          });
+        }
+      })
+      .catch(() => {
+        /* 登录态由 middleware 兜底，这里只影响菜单展示 */
       });
     function onProfileChanged(e: Event) {
       setProfile(normalizeProfile((e as CustomEvent<Profile>).detail));
@@ -48,12 +104,14 @@ export default function ProfileMenu() {
 
   // 点击菜单外部 / 按 Esc 关闭
   useEffect(() => {
-    if (!open) return;
+    if (!open && !pwOpen) return;
     function onDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (open && rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      setPwOpen(false);
     }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -61,12 +119,53 @@ export default function ProfileMenu() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, pwOpen]);
 
   function openSettings(tab: NavId) {
     setOpen(false);
     setSettingsTab(tab);
     setSettingsOpen(true);
+  }
+
+  async function logout() {
+    setOpen(false);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      // 服务端已吊销 session；清掉客户端可能缓存的页面再回登录页
+      router.replace("/login");
+      router.refresh();
+    }
+  }
+
+  async function changePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwMsg(null);
+    if (!pwCurrent || !pwNew) {
+      setPwMsg({ text: "请填写原密码和新密码", ok: false });
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: pwCurrent, newPassword: pwNew }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPwMsg({ text: data?.error ?? "修改失败，请重试", ok: false });
+        return;
+      }
+      setPwCurrent("");
+      setPwNew("");
+      // 接口会重发本设备的 session，同时吊销其它设备，无需重新登录
+      setPwMsg({ text: "密码已更新，其它设备的登录态已失效", ok: true });
+    } catch {
+      setPwMsg({ text: "网络异常，请稍后重试", ok: false });
+    } finally {
+      setPwBusy(false);
+    }
   }
 
   return (
@@ -96,13 +195,19 @@ export default function ProfileMenu() {
           <div className="pm-head">
             <p className="pm-name">{profile.displayName}</p>
             <p className="pm-sub">{profile.bio || DEFAULT_PROFILE.bio}</p>
+            {me && (
+              <p style={{ margin: "6px 0 0", fontSize: 11.5, fontWeight: 700, color: "var(--duo-ink-faint, #afafaf)" }}>
+                @{me.username}
+                {me.isOwner ? " · 主账号" : ""}
+              </p>
+            )}
           </div>
 
           <p className="pm-section-title">账户</p>
           <button className="pm-row" role="menuitem" onClick={() => openSettings("profile")}>
             <span className="pm-row-label">
               👤 个人资料
-              <span className="pm-row-hint">昵称 · 头像 · 签名 · 账号与安全</span>
+              <span className="pm-row-hint">昵称 · 头像 · 签名</span>
             </span>
             <span className="pm-row-arrow" aria-hidden>›</span>
           </button>
@@ -113,14 +218,113 @@ export default function ProfileMenu() {
             </span>
             <span className="pm-row-arrow" aria-hidden>›</span>
           </button>
+          <button
+            className="pm-row"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setPwMsg(null);
+              setPwOpen(true);
+            }}
+          >
+            <span className="pm-row-label">
+              🔑 账号与安全
+              <span className="pm-row-hint">修改密码</span>
+            </span>
+            <span className="pm-row-arrow" aria-hidden>›</span>
+          </button>
+          <button className="pm-row" role="menuitem" onClick={logout}>
+            <span className="pm-row-label">
+              ↪ 退出登录
+              <span className="pm-row-hint">下次进入需要重新输入密码</span>
+            </span>
+            <span className="pm-row-arrow" aria-hidden>›</span>
+          </button>
         </div>
       )}
 
       {settingsOpen && (
-        <SettingsDialog
-          initialTab={settingsTab}
-          onClose={() => setSettingsOpen(false)}
-        />
+        <SettingsDialog initialTab={settingsTab} onClose={() => setSettingsOpen(false)} />
+      )}
+
+      {pwOpen && (
+        <div style={backdropStyle} onClick={() => setPwOpen(false)}>
+          <div style={modalStyle} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>修改密码</h2>
+            <p style={{ fontSize: 13, lineHeight: 1.6, color: "var(--duo-ink-soft, #777)", margin: "0 0 20px" }}>
+              新密码至少 8 位。修改后其它设备会被强制登出，本机保持登录。
+            </p>
+            <form onSubmit={changePassword} style={{ display: "grid", gap: 14 }}>
+              <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+                原密码
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={pwCurrent}
+                  onChange={(e) => setPwCurrent(e.target.value)}
+                  disabled={pwBusy}
+                  style={inputStyle}
+                />
+              </label>
+              <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+                新密码
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwNew}
+                  onChange={(e) => setPwNew(e.target.value)}
+                  placeholder="至少 8 位"
+                  disabled={pwBusy}
+                  style={inputStyle}
+                />
+              </label>
+              {pwMsg && (
+                <p
+                  role="status"
+                  style={{ margin: 0, fontSize: 13, fontWeight: 600, color: pwMsg.ok ? "#2b8a3e" : "#d33" }}
+                >
+                  {pwMsg.text}
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setPwOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: "11px 14px",
+                    border: "2px solid var(--duo-border, #e5e5e5)",
+                    borderRadius: 12,
+                    background: "#fff",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  关闭
+                </button>
+                <button
+                  type="submit"
+                  disabled={pwBusy}
+                  style={{
+                    flex: 1,
+                    padding: "11px 14px",
+                    border: "none",
+                    borderRadius: 12,
+                    background: "var(--duo-blue, #1cb0f6)",
+                    color: "#fff",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    cursor: pwBusy ? "not-allowed" : "pointer",
+                    opacity: pwBusy ? 0.6 : 1,
+                  }}
+                >
+                  {pwBusy ? "请稍候…" : "保存"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

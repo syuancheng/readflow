@@ -13,7 +13,8 @@
     "paths": { "@/*": ["./src/*"] }
   },
   "exclude": [
-    "src/lib/stats.ts"
+    "src/lib/stats.ts",
+    "src/lib/word-store.ts"
   ],
   "include": [
     "scripts/verify-export.ts",

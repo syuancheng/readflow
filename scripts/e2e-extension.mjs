@@ -5,6 +5,7 @@
  * 用法：node scripts/e2e-extension.mjs（需 3000 端口服务已启动）
  */
 import { chromium } from "playwright";
+import { ensureAuth, authCookies } from "./e2e-auth.mjs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +32,9 @@ const pageServer = http.createServer((_req, res) => {
 });
 await new Promise((r) => pageServer.listen(0, "127.0.0.1", r));
 const pageUrl = `http://127.0.0.1:${pageServer.address().port}/`;
+
+// /api/settings 现在需要登录态，先注入 session cookie
+await ensureAuth(BASE);
 
 // 确保插件 Token 存在
 let cfg = await (await fetch(`${BASE}/api/settings`)).json();
@@ -69,6 +73,7 @@ try {
       ...(headless ? [] : ["--window-position=-2400,-2400", "--window-size=1200,900"]),
     ],
   });
+  await context.addCookies(authCookies(BASE));
 
   // 等 Service Worker 起来，从它的 URL 拿 extension id
   let worker = context.serviceWorkers()[0];
