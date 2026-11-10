@@ -1,0 +1,25 @@
+# ReadFlow 常驻服务（server-setup.sh 安装到 /etc/systemd/system/）
+#   systemctl status readflow      查看状态
+#   journalctl -u readflow -f      跟踪日志
+#   systemctl restart readflow     重启（改了 /etc/readflow/readflow.env 之后要执行）
+[Unit]
+Description=ReadFlow
+After=network.target
+
+[Service]
+Type=simple
+User=readflow
+Group=readflow
+# current 是软链接：每次发布切换它再重启，就换成新版本
+WorkingDirectory=/opt/readflow/current
+EnvironmentFile=/etc/readflow/readflow.env
+ExecStart=/usr/local/bin/node node_modules/next/dist/bin/next start -p ${PORT} -H ${READFLOW_HOST}
+Restart=always
+RestartSec=3
+# 基础加固：不能提权，系统目录只读，只有数据目录可写
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

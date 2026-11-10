@@ -73,3 +73,7 @@ nohup.out
 
 # 图片代理的运行时缓存（可重新抓取，无版本管理价值）
 /data/img-cache/
+
+# 部署配置（含服务器地址）与本地下载的备份
+/deploy/deploy.conf
+/backups/
