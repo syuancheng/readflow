@@ -79,9 +79,7 @@ export async function DELETE(
     // 删 context（?contextId= 一条；?textId= 该文本下这个词的全部——
     // 批注按词去重后，× 的语义是「清掉这个词在本文的标记」，
     // 只删最新一条会让更早的 context 重新浮出来）。
-    // 如果这个词是句子/短语的占位词条（isPhrase），且删完后它已经
-    // 没有任何 context 了，就把词条一并删掉——
-    // 否则词库里会留下一具没有语境的句子尸体。
+    // 删完后这个词条已经没有任何 context 了，就把词条一并删掉（见下）。
     const word = db
       .select()
       .from(userWords)
@@ -112,8 +110,13 @@ export async function DELETE(
       .where(eq(contexts.userWordId, id))
       .all();
 
-    if (word.isPhrase === 1 && remaining.length === 0) {
-      db.delete(userWords).where(eq(userWords.id, id)).run();
+    // 「取消记录」（P25）只删这篇文章里的这一处；这个词别处已经没有任何记录时，
+    // 连词条一起删掉 —— 否则词库和墨墨导出里会留下一个没有原句的空词条。
+    if (remaining.length === 0) {
+      db.transaction((tx) => {
+        tx.delete(exports).where(eq(exports.userWordId, id)).run();
+        tx.delete(userWords).where(eq(userWords.id, id)).run();
+      });
       return NextResponse.json({ ok: true, prunedWord: true });
     }
 

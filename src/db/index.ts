@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS contexts (
   prefix TEXT NOT NULL,
   suffix TEXT NOT NULL,
   ai_gloss TEXT,
+  dict_entry TEXT,
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_contexts_word ON contexts(user_word_id);
@@ -163,6 +164,12 @@ function migrate(): void {
   }
   if (!wordCols.some((c) => c.name === "is_phrase")) {
     sqlite.exec("ALTER TABLE user_words ADD COLUMN is_phrase INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // contexts.dict_entry（P25）：查词当时的词典结果快照，回看时直接用，不再查词典
+  const ctxCols = sqlite.prepare("PRAGMA table_info(contexts)").all() as { name: string }[];
+  if (!ctxCols.some((c) => c.name === "dict_entry")) {
+    sqlite.exec("ALTER TABLE contexts ADD COLUMN dict_entry TEXT");
   }
 
   // texts：2026-11 新增的 CEFR 粗估字段（与回填脚本共用定义）

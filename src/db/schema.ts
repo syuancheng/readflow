@@ -135,6 +135,12 @@ export const contexts = sqliteTable(
     prefix: text("prefix").notNull(),
     suffix: text("suffix").notNull(),
     aiGloss: text("ai_gloss"),
+    /**
+     * 查词当时的词典结果快照（P25），JSON：{ entry, originalForm, lemmaForm }。
+     * 回看一律用它摊开右栏，不再查词典；entry 为 null 表示当时词典没收录（交给 AI）。
+     * 老记录为 NULL，由 /api/annotations 首次读取时补一次。
+     */
+    dictEntry: text("dict_entry"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [

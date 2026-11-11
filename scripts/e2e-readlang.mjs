@@ -97,51 +97,68 @@ try {
     `${before.total} → ${afterSave.total}`,
   );
 
-  // ---------- C：再点一次 = 收起 + 删词 ----------
+  // ---------- C：再点一次只收起，不删除（P25）----------
   await page.locator('[data-e2e="1"]').click();
   await page.waitForTimeout(900);
   const noteGone = !(await page.locator(".reader-note").isVisible().catch(() => false));
-  check("C1 再点一次批注卡收起", noteGone);
-
+  check("C1 再点一次同一个词：右栏收起", noteGone);
   const afterDeselect = await wordCount();
   check(
-    "C2 delete-on-deselect：收起即移除该词",
-    afterDeselect.total === before.total,
+    "C2 再点一次不删除记录（删除只走「取消记录」按钮）",
+    afterDeselect.total === afterSave.total,
     `${afterSave.total} → ${afterDeselect.total}`,
   );
 
-  // ---------- C3/C4：批注卡内的显式「撤销」按钮 ----------
+  // ---------- C3：点绿色划线回看 —— 词典和 AI 一次都不请求 ----------
+  const recallReqs = [];
+  const onReq = (r) => {
+    if (/\/api\/(dict|explain)/.test(r.url())) recallReqs.push(r.url());
+  };
+  page.on("request", onReq);
   await page.locator('[data-e2e="1"]').click();
-  await page.waitForTimeout(900);
-  const undoVisible = await page.locator(".rf-undo").isVisible().catch(() => false);
-  check("C3 首次自动收词出现撤销按钮", undoVisible);
-  if (undoVisible) {
-    await page.locator(".rf-undo").click();
-    await page.waitForTimeout(900);
-    const afterUndo = await wordCount();
-    const noteGone2 = !(await page.locator(".reader-note").isVisible().catch(() => false));
-    check(
-      "C4 点击撤销删除词条并收起批注",
-      afterUndo.total === before.total && noteGone2,
-      `${afterUndo.total} 词，卡片收起=${noteGone2}`,
-    );
-  }
+  await page.waitForTimeout(1200);
+  page.off("request", onReq);
+  const recallVisible = await page.locator(".reader-note").isVisible().catch(() => false);
+  const recallHasDict = await page.locator(".reader-note").innerText().catch(() => "");
+  check(
+    "C3 回看：右栏直接摊开存下的释义，零次词典 / AI 请求",
+    recallVisible && recallReqs.length === 0 && recallHasDict.length > 20,
+    `请求=${recallReqs.length} 卡片字数=${recallHasDict.length}`,
+  );
 
-  // ---------- E：批注卡自带词典与 AI 入口 ----------
+  // ---------- C4：「取消记录」→ 右栏、划线、行内中文一起消失 ----------
+  const cancelBtn = page.locator('.reader-note [aria-label="取消记录"]');
+  check("C4a 右栏只有一个操作按钮「取消记录」", (await cancelBtn.count()) === 1);
+  await cancelBtn.click();
+  await page.waitForTimeout(1200);
+  const afterCancel = await wordCount();
+  const marks = await page.evaluate(() => {
+    const el = document.querySelector('[data-e2e="1"]');
+    return { annotated: el?.classList.contains("w-annotated") ?? false, gloss: el?.hasAttribute("data-gloss") ?? false };
+  });
+  const noteGone2 = !(await page.locator(".reader-note").isVisible().catch(() => false));
+  check(
+    "C4 取消记录：右栏收起、划线与上方中文消失、词条删除",
+    noteGone2 && !marks.annotated && !marks.gloss && afterCancel.total === before.total,
+    `卡片收起=${noteGone2} 划线=${marks.annotated} 中文=${marks.gloss} 词数 ${afterCancel.total}/${before.total}`,
+  );
+
+  // ---------- E：新查一个词，右栏有 AI 入口和「取消记录」----------
   await page.locator('[data-e2e="1"]').click();
   await page.waitForTimeout(900);
   const aiBtn = await page.locator('.reader-note button:has-text("AI")').count();
-  const saveBtnEarly = await page
-    .locator('[aria-label="收进词库"], [aria-label="已在词库，点击删除"]')
+  const oneAction = await page.locator('.reader-note [aria-label="取消记录"]').count();
+  const legacy = await page
+    .locator('.reader-note [aria-label="收进词库"], .reader-note [aria-label="已在词库，点击删除"], .reader-note [aria-label="关闭"], .rf-undo')
     .count();
   check(
-    "E 批注卡内含 AI 释义入口与收词按钮",
-    aiBtn > 0 && saveBtnEarly > 0,
-    `AI按钮=${aiBtn} 收词按钮=${saveBtnEarly}`,
+    "E 右栏含 AI 释义入口与「取消记录」，旧的 ✓ / + / × / 撤销都已移除",
+    aiBtn > 0 && oneAction === 1 && legacy === 0,
+    `AI按钮=${aiBtn} 取消记录=${oneAction} 旧按钮=${legacy}`,
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
-  // E 步骤会顺带收词，清掉，保证 D 阶段起点干净
+  // E 步骤会顺带收词，清掉，保证后面阶段起点干净
   await cleanup(keepIds);
 
   // ---------- D：P23 自动收词开关已移除，阅读设置里不该再有它 ----------
@@ -307,40 +324,7 @@ try {
   await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
   await page.waitForTimeout(600);
 
-  const beforeOff = await wordCount();
-  const t2 = await page.evaluate(([TARGET, knownArr]) => {
-    const set = new Set([...knownArr, String(TARGET).toLowerCase()]);
-    const ws = [...document.querySelectorAll(".reading-body .w")];
-    const el = ws.find(
-      (e) =>
-        /^[A-Za-z]{6,}$/.test(e.textContent || "") &&
-        !set.has((e.textContent || "").toLowerCase()),
-    );
-    if (!el) return null;
-    el.setAttribute("data-e2e", "2");
-    return el.textContent;
-  }, [target, known]);
-  await page.locator('[data-e2e="2"]').scrollIntoViewIfNeeded();
-  await page.locator('[data-e2e="2"]').click();
-  await page.waitForTimeout(900);
-  const b2 = await page.locator(".reader-note").isVisible().catch(() => false);
-  const afterOff = await wordCount();
-  check("D1 关闭后仍显示批注卡", b2, `点击 ${t2}`);
-  check("D2 关闭后不自动入库", afterOff.total === beforeOff.total, `${beforeOff.total} → ${afterOff.total}`);
-
-  // 在批注卡里手动收词
-  const saveBtn = page.locator('[aria-label="收进词库"]');
-  if (await saveBtn.count()) {
-    await saveBtn.click();
-    await page.waitForTimeout(900);
-    const afterManual = await wordCount();
-    check("D3 弹层手动收词生效", afterManual.total === beforeOff.total + 1, `${beforeOff.total} → ${afterManual.total}`);
-  } else {
-    const labels = await page.evaluate(() =>
-      [...document.querySelectorAll(".reader-note button")].map((b) => b.getAttribute("aria-label")),
-    );
-    check("D3 弹层手动收词生效", false, `找不到「收进词库」按钮，实际按钮: ${labels.join(",")}`);
-  }
+  // D1–D3（自动收词开关 / 手动收词按钮）随 P23、P25 移除：点词恒定落库，右栏只剩「取消记录」
 
   // ---------- E2：拖选整句 + 词边界吸附 ----------
   const dragOk = await (async () => {

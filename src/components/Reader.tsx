@@ -44,16 +44,18 @@ type Pick = {
   anchor: Anchor;
   x: number;
   y: number;
-  /** 来源：点词 or 拖选。点词才支持「再点一次收起」 */
+  /** 来源：点词 or 拖选 */
   source: "word" | "select";
-  /** 点词自动入库时，本次是新建词条 —— 收起批注时撤销（delete-on-deselect） */
-  justSaved?: boolean;
-  /** 拖选自动入库后对应的 context id，用于回填 AI 释义 / 回看 */
+  /** 这一处记录（context）的 id：落库后才有，「取消记录」按钮要用 */
   contextId?: string;
-  /** 点回正文里已存批注的绿色标记：不是新选区，不自动发起 AI 请求 */
+  /** 记录所属词条 id：「取消记录」按它删本文这一处 */
+  wordId?: string;
+  /** 点回正文里已存的记录（绿色划线）：回看，不查词典、不自动问 AI */
   fromAnnotation?: boolean;
-  /** 从已存批注回看时，直接展示当时保存的 AI 释义，不重新请求 */
+  /** 回看时直接展示当时保存的 AI 释义 */
   initialGloss?: string;
+  /** 回看时直接展示当时保存的词典结果快照（null = 当时词典没收录） */
+  initialDict?: DictResult | null;
   /** 这次选区采集的客观信号，随 /api/explain 送给模型（不是结论） */
   signals?: SelectionSignals;
 };
@@ -72,6 +74,8 @@ type Annotation = {
   aiGloss: string | null;
   /** P23 行内标签：词典命中时中文从这里来（/api/annotations 随批注下发） */
   translation: string | null;
+  /** 查词当时的词典结果快照（P25）：回看直接用，不再查词典 */
+  dict: DictResult | null;
   createdAt: number;
 };
 
@@ -657,6 +661,23 @@ export default function Reader({
     return findCoveringRange(annotationsRef.current, pid, s, en);
   }
 
+  /** 由一条已存记录构造回看用的 Pick：词典快照 + AI 释义都直接带进右栏 */
+  function recallPick(a: Annotation, rect: { left: number; width: number; bottom: number }): Pick {
+    return {
+      paragraphId: a.paragraphId,
+      paragraphIdx: a.paragraphIdx,
+      anchor: { start: a.start, end: a.end, quote: a.quote, prefix: a.prefix, suffix: a.suffix },
+      x: rect.left + rect.width / 2,
+      y: rect.bottom,
+      source: /\s/.test(a.quote.trim()) ? "select" : "word",
+      contextId: a.id,
+      wordId: a.wordId,
+      fromAnnotation: true,
+      initialGloss: a.aiGloss ?? savedGlossFor(a.paragraphId, a.start, a.end) ?? undefined,
+      initialDict: a.dict,
+    };
+  }
+
   /** 删词 / 删批注后抹掉内存索引，避免「已经删掉的词」还摊开旧答案 */
   function forgetGloss(opts: { wordId?: string; quote?: string }) {
     for (const a of annotationsRef.current) {
@@ -915,44 +936,19 @@ export default function Reader({
     const displayForm = wordEl.textContent ?? "";
     const key = displayForm.toLowerCase();
 
-    // 点在已存短语/整句批注里的某个词：整条回看，一次请求都不发。
-    // 用户会去点短语里的词，往往是因为当初那条答案没把这个词讲清楚 —— 这是答案
-    // 质量问题，不是「又查一个新词」，不该重新走词典 + AI 再生成另一条答案。
+    // 点在已存的记录上（单词或短语的绿色划线）：回看，一次请求都不发 ——
+    // 右栏直接摊开当时存下的词典结果和 AI 释义（P25）。点短语里的某个词也回看整条：
+    // 往往是当初那条答案没把这个词讲清楚，不是「又查一个新词」。
+    // 再点一次正在看的这条 = 收起右栏；点词永远不删除记录，删除只走「取消记录」按钮。
     const covering = findCoveringAnnotation(pid, s, en);
-    if (covering && /\s/.test(covering.quote.trim())) {
-      if (pick?.contextId === covering.id) {
-        close();
-        return;
-      }
-      setPick({
-        paragraphId: pid,
-        paragraphIdx: covering.paragraphIdx,
-        anchor: {
-          start: covering.start,
-          end: covering.end,
-          quote: covering.quote,
-          prefix: covering.prefix,
-          suffix: covering.suffix,
-        },
-        x: rect.left + rect.width / 2,
-        y: rect.bottom,
-        source: "select",
-        contextId: covering.id,
-        fromAnnotation: true,
-        initialGloss:
-          covering.aiGloss ?? savedGlossFor(pid, covering.start, covering.end) ?? undefined,
-      });
+    if (covering) {
+      if (pick?.contextId === covering.id) close();
+      else setPick(recallPick(covering, rect));
       return;
     }
-
-    // 再点同一个词 = 收起批注（本次自动新建的词随之撤销，delete-on-deselect）
-    if (pick && pick.source === "word" && pick.anchor.quote.toLowerCase() === key) {
-      const victim = pick.justSaved ? savedMap.get(key) : null;
+    // 记录还在落库途中（批注列表没刷新）就又点了同一个词：同样只是收起
+    if (pick && pick.paragraphId === pid && pick.anchor.start === s && pick.anchor.end === en) {
       close();
-      // ⚠️ 必须刷新批注列表：服务端删了 context，但前端 annotations 还是旧快照，
-      // 不刷新的话正文里的绿色划线和行内中文标签会留在原地（看着像「删了词但标记还在」）。
-      // 卡片里的显式「撤销」按钮走的也是同一个 unsaveWord，那里已经带上了刷新。
-      if (victim) void unsaveWord(victim, key).then(() => loadAnnotations());
       return;
     }
 
@@ -971,13 +967,6 @@ export default function Reader({
         ...(askInfo.priorAsks.length > 0 ? { priorAsks: askInfo.priorAsks } : {}),
       },
     };
-    // 同一个锚点之前问过 AI：直接把答案摊开，不再重新请求模型。
-    // 这也是「点回已经变绿的词」时能立刻看到那次解释的依据。
-    const cached = savedGlossFor(pid, pickData.anchor.start, pickData.anchor.end);
-    if (cached) {
-      pickData.initialGloss = cached;
-      pickData.fromAnnotation = true;
-    }
     setPick(pickData);
 
     // P23：自动收词开关已移除，点词一律落库 —— 「查过 = 已有批注 = 显示行内中文标签」。
@@ -988,7 +977,7 @@ export default function Reader({
     //
     // 也别拿前端 annotations 快照做「这一处已有批注就跳过」的乐观判断：
     // delete-on-deselect 刚删过词、并发刷新、别处补建 context 都会让快照过期，
-    // 一跳过就既拿不到 justSaved（撤销按钮消失），也漏掉这一处的 context。
+    // 一跳过就漏掉这一处的 context，「取消记录」按钮也拿不到 contextId。
     // /api/contexts/ensure 本身按锚点幂等，重复点只是多一次 SELECT，
     // 落库裁决统一交给服务端，前端不猜。
     void ensureAnnotation(pickData);
@@ -999,6 +988,16 @@ export default function Reader({
     const pid = pEl.dataset.pid!;
     const p = paragraphs.find((x) => x.id === pid);
     if (!p) return;
+
+    // 划的正好是一条已存记录：回看，不重新查
+    const same = annotationsRef.current.find(
+      (a) => a.paragraphId === pid && a.start === start && a.end === end,
+    );
+    if (same) {
+      const r = pEl.getBoundingClientRect();
+      setPick(recallPick(same, { left: x, width: 0, bottom: y || r.top }));
+      return;
+    }
 
     // 拖选：批注卡直接进右栏（不再用鼠标旁浮层）
     const sig = selectionSignals(p.content, start, end, "select");
@@ -1017,11 +1016,6 @@ export default function Reader({
         ...(askInfo.priorAsks.length > 0 ? { priorAsks: askInfo.priorAsks } : {}),
       },
     };
-    const cached = savedGlossFor(pid, pickData.anchor.start, pickData.anchor.end);
-    if (cached) {
-      pickData.initialGloss = cached;
-      pickData.fromAnnotation = true;
-    }
     setPick(pickData);
 
     // 与点词一致（P23 起不再有开关）：拖选的句子/短语也自动入库。
@@ -1208,54 +1202,12 @@ export default function Reader({
     setTimeout(() => setFloats((f) => f.filter((i) => i.id !== id)), 1200);
   }
 
-  /** 收词落库，返回落库后的词条（供气泡与高亮使用） */
-  async function saveWord(pickData: Pick, aiGloss?: string): Promise<SavedWordInfo | null> {
-    const { anchor, paragraphId } = pickData;
-    try {
-      const res = await fetch("/api/words", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          word: anchor.quote,
-          textId,
-          paragraphId,
-          start: anchor.start,
-          end: anchor.end,
-          quote: anchor.quote,
-          prefix: anchor.prefix || "",
-          suffix: anchor.suffix || "",
-          aiGloss,
-        }),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const info: SavedWordInfo = {
-        id: data.wordId,
-        lemma: data.lemma ?? "",
-        displayForm: data.displayForm ?? anchor.quote,
-        translation: data.translation ?? "",
-        status: data.status ?? "learning",
-        starred: data.starred ?? 0,
-        created: data.created === true,
-        contextId: data.contextId,
-      };
-      setSavedMap((prev) => {
-        const next = new Map(prev);
-        next.set(info.displayForm.toLowerCase(), info);
-        if (info.lemma) next.set(info.lemma.toLowerCase(), info);
-        return next;
-      });
-      celebrate(pickData.x, pickData.y - 20, /\s/.test(anchor.quote.trim()) ? "+1 批注" : "+1 词");
-      return info;
-    } catch {
-      return null;
-    }
-  }
+
 
   /**
    * 自动批注：确保「本文这一处」有一条 context（按锚点幂等）。
    *
-   * 与手动收词 saveWord() 不同：后者总是新插一条 context，这里由服务端
+   * 与 POST /api/words 不同：后者总是新插一条 context，这里由服务端
    * `ensureContextByAnchor()` 裁决，重复点同一个位置不会堆重复批注。
    * 词在别的文章收过时 user_words 只是 upsert，不会新建一个词条，
    * 但当前文章这一处仍会得到自己的批注 —— 「已收词」和「已存批注」终于对齐。
@@ -1304,9 +1256,8 @@ export default function Reader({
         cur.anchor.end === anchor.end
           ? {
               ...cur,
-              // 只有本次真新建了词条才允许「收起即撤销」，别误删老词
-              justSaved: data.created === true,
               contextId: data.contextId ?? cur.contextId,
+              wordId: data.wordId ?? cur.wordId,
             }
           : cur,
       );
@@ -1399,42 +1350,36 @@ export default function Reader({
   // 把上次的释义作为 initialGloss 带进 PickCard，右栏直接摊开、不重新请求模型。
 
   /**
-   * 撤销本次自动收词（Readlang 的 delete-on-deselect）。
-   * 用真删除而不是软删除：这个词是用户「顺手点错」收进来的，
-   * 还没经过任何复习或导出，留一条「已移出」的垃圾记录没有意义。
+   * 取消记录（P25）：删掉这个词在本文的记录 —— 右栏释义、正文绿色划线、划线上方的
+   * 中文一起消失。只删本文这一处；词在别的文章还有记录就保留词条，没有了才连词条一起删
+   * （服务端裁决，返回 prunedWord）。
+   * 必须刷新批注列表：正文的划线和行内中文都由 annotations 派生，不刷新就是陈旧快照（P24 的教训）。
    */
-  async function unsaveWord(info: SavedWordInfo, key: string) {
+  async function cancelRecord(target: Pick) {
+    const wordId =
+      target.wordId ?? annotationsRef.current.find((a) => a.id === target.contextId)?.wordId;
+    if (!wordId) return;
+    let pruned = false;
     try {
-      const res = await fetch(`/api/words/${info.id}`, { method: "DELETE" });
+      const res = await fetch(
+        `/api/words/${wordId}?textId=${encodeURIComponent(textId)}`,
+        { method: "DELETE" },
+      );
       if (!res.ok) return;
+      pruned = Boolean((await res.json()).prunedWord);
     } catch {
       return;
     }
-    forgetGloss({ quote: key });
-    setSavedMap((prev) => {
-      const next = new Map(prev);
-      next.delete(key);
-      if (info.lemma) next.delete(info.lemma.toLowerCase());
-      return next;
-    });
-  }
-
-  /** 从词库删除（彻底删除）：删词 = 已掌握，不留「已移出」的中间态 */
-  async function removeWord(id: string) {
-    try {
-      const res = await fetch(`/api/words/${id}`, { method: "DELETE" });
-      if (!res.ok) return;
-    } catch {
-      /* 静默失败 */
+    forgetGloss({ wordId });
+    if (pruned) {
+      setSavedMap((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of next) if (v.id === wordId) next.delete(k);
+        return next;
+      });
     }
-    forgetGloss({ wordId: id });
-    setSavedMap((prev) => {
-      const next = new Map(prev);
-      for (const [k, v] of next) {
-        if (v.id === id) next.delete(k);
-      }
-      return next;
-    });
+    setPick((cur) => (cur && cur.contextId === target.contextId ? null : cur));
+    await loadAnnotations();
   }
 
   return (
@@ -1485,9 +1430,9 @@ export default function Reader({
           <PickCard
             key={`${pick.paragraphId}:${pick.anchor.start}:${pick.anchor.end}:${pick.source}`}
             pick={pick}
-            saved={savedMap.get(pick.anchor.quote.toLowerCase()) ?? null}
             onClose={close}
             initialGloss={pick.initialGloss}
+            initialDict={pick.initialDict}
             /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境；
                「没看懂整句」信号（覆盖 ≥75% 词汇或句内生词密度 ≥75%）→ 前文额外带上一句 */
             aiContext={(() => {
@@ -1501,34 +1446,7 @@ export default function Reader({
                 : { prefix: pick.anchor.prefix, suffix: pick.anchor.suffix };
             })()}
             onAIGloss={(text) => void persistGloss(pick, text)}
-            onSave={(aiGloss?: string) => {
-              if (pick.contextId) {
-                // 拖选已自动入库：只补 AI 释义，避免重复插一条 context
-                if (aiGloss) void persistGloss(pick, aiGloss);
-                return;
-              }
-              void saveWord(pick, aiGloss).then(async (info) => {
-                if (!info?.contextId) return;
-                setPick((cur) =>
-                  cur &&
-                  cur.paragraphId === pick.paragraphId &&
-                  cur.anchor.start === pick.anchor.start &&
-                  cur.anchor.end === pick.anchor.end
-                    ? { ...cur, contextId: info.contextId }
-                    : cur,
-                );
-                await loadAnnotations();
-              });
-            }}
-            onDelete={() => {
-              const info = savedMap.get(pick.anchor.quote.toLowerCase());
-              if (info) void removeWord(info.id).then(() => loadAnnotations());
-            }}
-            onUndo={() => {
-              const info = savedMap.get(pick.anchor.quote.toLowerCase());
-              close();
-              if (info) void unsaveWord(info, pick.anchor.quote.toLowerCase()).then(() => loadAnnotations());
-            }}
+            onCancel={() => void cancelRecord(pick)}
           />
         ) : (
           <p className="reader-hint">点击文中单词，或拖住一句话 —— 释义会显示在这里</p>
@@ -1563,24 +1481,21 @@ type DictResult = {
 
 function PickCard({
   pick,
-  saved,
   onClose,
-  onSave,
-  onDelete,
-  onUndo,
+  onCancel,
   initialGloss,
+  initialDict,
   onAIGloss,
   aiContext,
 }: {
   pick: Pick;
-  saved: SavedWordInfo | null;
   onClose: () => void;
-  onSave: (aiGloss?: string) => void;
-  onDelete: () => void;
-  /** 撤销本次自动收词（仅本次新建的词条会出现） */
-  onUndo: () => void;
+  /** 取消记录：删掉这个词在本文的记录（右栏、划线、行内中文一起消失） */
+  onCancel: () => void;
   /** 回看已存批注时，直接展示当时保存的 AI 释义 */
   initialGloss?: string;
+  /** 回看时直接展示当时保存的词典结果快照（不再查词典） */
+  initialDict?: DictResult | null;
   /** AI 释义生成完成后回调，用于把结果写回该批注 */
   onAIGloss?: (text: string) => void;
   /** AI 用的上下文（句子边界 + 按需带上一句；锚点的 40 字符窗口只够定位，会切碎句子） */
@@ -1626,15 +1541,15 @@ function PickCard({
     fromAnnotation: Boolean(pick.fromAnnotation),
   });
 
-  /** 纯回看：已有完整旧答案时连词典都不查，直接摊开结果。
-      用户点的是「以前查过的那一条」，不是新选区，不该再发任何请求。 */
-  const recall = Boolean(pick.fromAnnotation && initialGloss);
+  /** 回看（P25）：点的是「以前查过的那一条」，不是新选区 —— 词典和 AI 都不再请求，
+      直接摊开当时存下的词典快照和 AI 释义。没存过 AI 释义的，留一个手动入口。 */
+  const recall = Boolean(pick.fromAnnotation);
 
   // 弹层打开时自动查词典；查不到就顺着第 2 层直接开始 AI 释义。
   // 自动触发挂在 fetch 回调里而不是一个「看 dict state」的 effect：
   // 组件复用时 state 会短暂残留上一次的结果，只有请求自己确认「这次没命中」才可靠。
   useEffect(() => {
-    setDict(null);
+    setDict(recall ? (initialDict ?? null) : null);
     setDictLoading(!recall);
     setAiText(initialGloss ?? "");
     setAiStatus(initialGloss ? "done" : "idle");
@@ -1642,7 +1557,7 @@ function PickCard({
     setAskPrompt("");
     setForceWordMode(false);
 
-    // 回看已存答案：一次请求都不发（词典 / AI 都不查），直接展示。
+    // 回看：一次请求都不发（词典 / AI 都不查），直接展示存下来的结果。
     if (recall) return;
 
     // 选区切换后，旧请求的回调不能再替新的选区发起 AI 请求
@@ -1803,57 +1718,30 @@ function PickCard({
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {/* 收词按钮：已收显示 ✓（点击彻底删除），未收显示 + */}
-          {saved ? (
-            <button
-              className="duo-icon-btn duo-icon-btn-sm duo-icon-btn-saved"
-              onClick={onDelete}
-              title="已在词库 · 点击删除"
-              aria-label="已在词库，点击删除"
-            >
-              ✓
-            </button>
-          ) : (
-            <button
-              className="duo-icon-btn duo-icon-btn-sm"
-              onClick={() =>
-                onSave(aiStatus === "done" && !isNotAGloss(aiText) ? aiText : undefined)
-              }
-              title="收进词库"
-              aria-label="收进词库"
-            >
-              +
-            </button>
-          )}
+          {/* 唯一的操作（P25）：取消这条记录。关闭右栏用点空白处 / Esc，再点一次这个词也会收起 */}
           <button
-            onClick={onClose}
-            className="text-ink-faint hover:text-ink-soft text-[15px] leading-none px-0.5 font-bold"
-            aria-label="关闭"
+            className="rf-cancel-record"
+            onClick={onCancel}
+            disabled={!pick.contextId}
+            title={pick.contextId ? "删除这条记录：右栏释义、正文划线和上方的中文一起消失" : "正在保存…"}
+            aria-label="取消记录"
           >
-            ×
+            取消记录
           </button>
         </div>
       </div>
 
-      {/* 本次自动收词 → 显式撤销入口（delete-on-deselect 之外的可见途径） */}
-      {pick.justSaved && (
-        <button className="rf-undo" onClick={onUndo} title="删除这条刚收进的词">
-          ↩ 已自动收进词库 · 撤销
-        </button>
+      {/* 词典释义：无框平铺。回看时用存下的快照，不查词典，也不引导再问一次 */}
+      {dictLoading ? (
+        <p className="text-[14px] font-bold text-ink-faint mt-4">查词典中…</p>
+      ) : dict?.entry ? (
+        <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
+      ) : recall ? null : (
+        <p className="text-[13px] font-bold text-ink-faint mt-4">
+          {isPhrase ? "短语不在词典中" : "词典未收录"} ·{" "}
+          {autoExplain ? "交给 AI 老师解释" : "可用 AI 解释"}
+        </p>
       )}
-
-      {/* 词典释义：无框平铺。回看已存答案时不查词典，也不引导再问一次 */}
-      {!recall &&
-        (dictLoading ? (
-          <p className="text-[14px] font-bold text-ink-faint mt-4">查词典中…</p>
-        ) : dict?.entry ? (
-          <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
-        ) : (
-          <p className="text-[13px] font-bold text-ink-faint mt-4">
-            {isPhrase ? "短语不在词典中" : "词典未收录"} ·{" "}
-            {autoExplain ? "交给 AI 老师解释" : "可用 AI 解释"}
-          </p>
-        ))}
 
       {/* 新选区在词典未命中时已自动触发；这个手动入口留给回看旧批注 / 请求失败重试 */}
       {aiStatus === "idle" && (

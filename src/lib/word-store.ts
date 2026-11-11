@@ -146,6 +146,8 @@ export function saveWordAndContext(
         prefix,
         suffix,
         aiGloss: aiGloss ?? null,
+        // 词典结果快照：回看时右栏直接用，不再查词典（P25）
+        dictEntry: JSON.stringify(dictResult),
         createdAt: now,
       })
       .run();

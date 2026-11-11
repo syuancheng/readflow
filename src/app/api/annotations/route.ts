@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
+import { lookup } from "@/lib/dict";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +48,7 @@ export async function GET(req: Request) {
       // P23 行内中文标签：词典命中的词没有 aiGloss，中文只能从词条拿。
       // 必须随批注一起下发 —— 前端 savedWords 是 SSR 快照，刚落库的新词不在里面。
       translation: userWords.translation,
+      dictEntry: contexts.dictEntry,
       createdAt: contexts.createdAt,
     })
     .from(contexts)
@@ -70,5 +72,26 @@ export async function GET(req: Request) {
     return true;
   });
 
-  return NextResponse.json({ annotations });
+  // 回看不再查词典（P25）：右栏直接用查词当时存下的词典快照。
+  // 快照功能上线前的老记录没有它 —— 这里按原文补查一次并写回，以后就不会再查了。
+  const out = annotations.map(({ dictEntry, ...r }) => {
+    let snapshot = dictEntry;
+    if (!snapshot) {
+      try {
+        snapshot = JSON.stringify(lookup(r.quote.trim()));
+        db.update(contexts).set({ dictEntry: snapshot }).where(eq(contexts.id, r.id)).run();
+      } catch {
+        snapshot = null; // 词典库缺失：下次再补
+      }
+    }
+    let dict: unknown = null;
+    try {
+      dict = snapshot ? JSON.parse(snapshot) : null;
+    } catch {
+      dict = null;
+    }
+    return { ...r, dict };
+  });
+
+  return NextResponse.json({ annotations: out });
 }
