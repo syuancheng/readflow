@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS exports (
   chapter_id TEXT,
   card_id TEXT,
   card_type TEXT NOT NULL DEFAULT 'qa',
+  target TEXT NOT NULL DEFAULT 'markji',
   status TEXT NOT NULL DEFAULT 'pending',
   error TEXT,
   pushed_at INTEGER
@@ -183,9 +184,14 @@ function migrate(): void {
   if (!cols.some((c) => c.name === "card_type")) {
     sqlite.exec("ALTER TABLE exports ADD COLUMN card_type TEXT NOT NULL DEFAULT 'qa'");
   }
+  // exports.target（P27）：导出到哪个卡片应用，老记录都是墨墨
+  if (!cols.some((c) => c.name === "target")) {
+    sqlite.exec("ALTER TABLE exports ADD COLUMN target TEXT NOT NULL DEFAULT 'markji'");
+  }
   sqlite.exec("DROP INDEX IF EXISTS uq_exports_word_deck");
+  sqlite.exec("DROP INDEX IF EXISTS uq_exports_word_deck_type");
   sqlite.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_exports_word_deck_type ON exports(user_word_id, deck_id, card_type)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_exports_word_target_deck_type ON exports(user_word_id, target, deck_id, card_type)",
   );
 }
 

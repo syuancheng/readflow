@@ -163,6 +163,11 @@ export const exports = sqliteTable(
     userWordId: text("user_word_id")
       .notNull()
       .references(() => userWords.id, { onDelete: "cascade" }),
+    /**
+     * 导出到哪个卡片应用：markji（墨墨）；以后接 Anki / Quizlet 时写 anki / quizlet。
+     * 词库的「已导出」标签与筛选按它显示应用名，不用再改词库页。
+     */
+    target: text("target").notNull().default("markji"),
     deckId: text("deck_id").notNull(),
     chapterId: text("chapter_id"),
     cardId: text("card_id"),
@@ -172,7 +177,9 @@ export const exports = sqliteTable(
     error: text("error"),
     pushedAt: integer("pushed_at"),
   },
-  (t) => [uniqueIndex("uq_exports_word_deck_type").on(t.userWordId, t.deckId, t.cardType)],
+  (t) => [
+    uniqueIndex("uq_exports_word_target_deck_type").on(t.userWordId, t.target, t.deckId, t.cardType),
+  ],
 );
 
 /**

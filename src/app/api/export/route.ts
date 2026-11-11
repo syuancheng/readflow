@@ -61,7 +61,7 @@ export async function GET() {
     .select({ t: exports.cardType, c: sql<number>`count(*)` })
     .from(exports)
     .innerJoin(userWords, eq(exports.userWordId, userWords.id))
-    .where(and(eq(exports.status, "done"), eq(userWords.userId, user.id)))
+    .where(and(eq(exports.status, "done"), eq(exports.target, "markji"), eq(userWords.userId, user.id)))
     .groupBy(exports.cardType)
     .all();
 
@@ -72,6 +72,7 @@ export async function GET() {
     .where(
       and(
         eq(exports.status, "done"),
+        eq(exports.target, "markji"),
         eq(userWords.userId, user.id),
         gte(exports.pushedAt, todayStart.getTime()),
       ),
@@ -94,7 +95,10 @@ export async function GET() {
 /**
  * POST /api/export
  *
- * body: { deckId, chapterId, types: CardType[], wordIds?: string[], dryRun?: boolean, limit?: number }
+ * body: { deckId, chapterId, types: CardType[], wordIds: string[], dryRun?: boolean, limit?: number }
+ *
+ * wordIds 必填（P27）：只导出用户在词库里勾选的词。不传或传空一律 400 ——
+ * 以前不传就导出整个词库，墨墨又删不掉卡，误推的代价太大。
  *
  * 幂等：exports 表上 (user_word_id, deck_id, card_type) 唯一。已在目标牌组推过的
  * 卡片直接跳过 —— 墨墨不提供删除端点，重复推送的垃圾卡只能在 App 里手删，
@@ -131,6 +135,12 @@ export async function POST(req: Request) {
   if (types.length === 0) {
     return NextResponse.json({ error: "至少选择一种卡片类型" }, { status: 400 });
   }
+  const wordIds = Array.isArray(body.wordIds)
+    ? body.wordIds.filter((x): x is string => typeof x === "string" && x.length > 0)
+    : [];
+  if (wordIds.length === 0) {
+    return NextResponse.json({ error: "先在词库勾选要导出的词" }, { status: 400 });
+  }
   if (!dryRun && !hasMarkjiToken()) {
     return NextResponse.json(
       { error: "未配置墨墨 Token，请在右上角头像 → 设置里填写后再导出" },
@@ -146,10 +156,8 @@ export async function POST(req: Request) {
     .orderBy(desc(userWords.createdAt))
     .all();
 
-  if (body.wordIds?.length) {
-    const wanted = new Set(body.wordIds);
-    wordRows = wordRows.filter((w) => wanted.has(w.id));
-  }
+  const wanted = new Set(wordIds);
+  wordRows = wordRows.filter((w) => wanted.has(w.id));
   wordRows = wordRows.slice(0, limit);
 
   // 2. 已推送过的（同一个牌组内的幂等键）
@@ -163,7 +171,7 @@ export async function POST(req: Request) {
       })
       .from(exports)
       .innerJoin(userWords, eq(exports.userWordId, userWords.id))
-      .where(and(eq(exports.deckId, deckId), eq(userWords.userId, user.id)))
+      .where(and(eq(exports.target, "markji"), eq(exports.deckId, deckId), eq(userWords.userId, user.id)))
       .all();
     for (const row of pushed) {
       if (row.status === "done") doneKeys.add(`${row.userWordId}:${row.cardType}`);
@@ -180,6 +188,7 @@ export async function POST(req: Request) {
     .where(
       and(
         eq(exports.status, "done"),
+        eq(exports.target, "markji"),
         eq(userWords.userId, user.id),
         gte(exports.pushedAt, todayStart.getTime()),
       ),
@@ -331,6 +340,7 @@ export async function POST(req: Request) {
           .values({
             id: randomUUID(),
             userWordId: w.id,
+            target: "markji",
             deckId,
             chapterId,
             cardId: card.id,
@@ -340,7 +350,7 @@ export async function POST(req: Request) {
             pushedAt: Date.now(),
           })
           .onConflictDoUpdate({
-            target: [exports.userWordId, exports.deckId, exports.cardType],
+            target: [exports.userWordId, exports.target, exports.deckId, exports.cardType],
             set: {
               chapterId,
               cardId: card.id,
@@ -368,6 +378,7 @@ export async function POST(req: Request) {
           .values({
             id: randomUUID(),
             userWordId: w.id,
+            target: "markji",
             deckId,
             chapterId,
             cardId: null,
@@ -377,7 +388,7 @@ export async function POST(req: Request) {
             pushedAt: null,
           })
           .onConflictDoUpdate({
-            target: [exports.userWordId, exports.deckId, exports.cardType],
+            target: [exports.userWordId, exports.target, exports.deckId, exports.cardType],
             set: { status: "failed", error: msg.slice(0, 300) },
           })
           .run();

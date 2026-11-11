@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -13,9 +13,52 @@ export const dynamic = "force-dynamic";
 
 const DAILY_CAP = 600;
 
-export default async function ExportPage() {
+/** 一次最多导出多少个词，和 /api/export 的 MAX_WORDS_PER_RUN 一致 */
+const MAX_SELECTED = 200;
+
+/**
+ * 只导出词库里勾选的词（P27）：词库页把选中的词 id 放在 ?ids=a,b,c 里带过来。
+ * 没带 ids 就不提供导出，引导回词库勾选 —— 不再默认导出整个词库。
+ */
+export default async function ExportPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ids?: string }>;
+}) {
+  const { ids = "" } = await searchParams;
   const user = await currentUser();
-  if (!user) redirect("/login?next=/export");
+  if (!user) redirect(`/login?next=${encodeURIComponent(ids ? `/export?ids=${ids}` : "/export")}`);
+  const requested = [...new Set(ids.split(",").map((x) => x.trim()).filter(Boolean))];
+  // 只认自己名下的词；顺序跟词库里勾选时一致
+  const found = requested.length
+    ? db
+        .select({ id: userWords.id, displayForm: userWords.displayForm })
+        .from(userWords)
+        .where(and(eq(userWords.userId, user.id), inArray(userWords.id, requested)))
+        .all()
+    : [];
+  const byId = new Map(found.map((w) => [w.id, w]));
+  const selected = requested.map((id) => byId.get(id)).filter((w) => !!w).slice(0, MAX_SELECTED);
+  const overLimit = requested.length > MAX_SELECTED;
+  const doneIds = new Set(
+    selected.length
+      ? db
+          .select({ id: exports.userWordId })
+          .from(exports)
+          .where(
+            and(
+              inArray(
+                exports.userWordId,
+                selected.map((w) => w.id),
+              ),
+              eq(exports.status, "done"),
+              eq(exports.target, "markji"),
+            ),
+          )
+          .all()
+          .map((r) => r.id)
+      : [],
+  );
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
@@ -30,7 +73,7 @@ export default async function ExportPage() {
     .select({ t: exports.cardType, c: sql<number>`count(*)` })
     .from(exports)
     .innerJoin(userWords, eq(exports.userWordId, userWords.id))
-    .where(and(eq(exports.status, "done"), eq(userWords.userId, user.id)))
+    .where(and(eq(exports.status, "done"), eq(exports.target, "markji"), eq(userWords.userId, user.id)))
     .groupBy(exports.cardType)
     .all();
 
@@ -41,6 +84,7 @@ export default async function ExportPage() {
     .where(
       and(
         eq(exports.status, "done"),
+        eq(exports.target, "markji"),
         eq(userWords.userId, user.id),
         gte(exports.pushedAt, todayStart.getTime()),
       ),
@@ -65,7 +109,7 @@ export default async function ExportPage() {
           导出到墨墨记忆卡
         </h1>
         <p className="text-[15px] font-medium text-ink-soft">
-          把词库里的词做成卡片推进墨墨。同一个词在同一个牌组只会推一次。
+          把词库里勾选的词做成卡片推进墨墨。同一个词在同一个牌组只会推一次。
         </p>
       </div>
 
@@ -75,14 +119,58 @@ export default async function ExportPage() {
         <Stat value={Number(todayPushed?.c ?? 0)} label="今日已推" icon="📅" />
       </div>
 
-      <ExportPanel
-        tokenReady={hasMarkjiToken()}
-        initialDeckId={deckId}
-        initialChapterId={chapterId}
-        wordCount={total}
-        todayPushed={Number(todayPushed?.c ?? 0)}
-        dailyCap={DAILY_CAP}
-      />
+      {selected.length === 0 ? (
+        <div className="duo-card duo-empty">
+          <div className="duo-empty-icon">☑️</div>
+          <p className="text-[17px] font-bold mb-1.5">还没有选要导出的词</p>
+          <p className="text-[14px] text-ink-faint">
+            到词库里勾选要导出的词，再点工具栏上的「导出选中的词到墨墨」。
+          </p>
+          <Link href="/words" className="duo-btn duo-btn-primary mt-5">
+            去词库勾选
+          </Link>
+        </div>
+      ) : (
+        <>
+          <div className="duo-card p-6 mb-5" data-testid="export-selection">
+            <div className="duo-section-title mb-3">
+              <span style={{ color: "var(--duo-green)" }}>☑️</span>
+              本次导出：选中的 {selected.length} 个词
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {selected.map((w) => (
+                <span
+                  key={w.id}
+                  className={`duo-badge ${doneIds.has(w.id) ? "duo-badge-green" : "duo-badge-blue"}`}
+                  title={doneIds.has(w.id) ? "已导出过，同牌组同类型的卡片会自动跳过" : undefined}
+                >
+                  {w.displayForm}
+                  {doneIds.has(w.id) ? " ✓" : ""}
+                </span>
+              ))}
+            </div>
+            {overLimit && (
+              <p className="text-[12.5px] font-bold mt-3" style={{ color: "var(--duo-orange-dark)" }}>
+                一次最多导出 {MAX_SELECTED} 个词，这次只导前 {MAX_SELECTED} 个，剩下的导完再选一次。
+              </p>
+            )}
+            {selected.some((w) => doneIds.has(w.id)) && (
+              <p className="text-[12.5px] font-medium text-ink-faint mt-3">
+                带 ✓ 的词已经导出过：同一牌组里已有的卡片类型会自动跳过，不会重复。
+              </p>
+            )}
+          </div>
+
+          <ExportPanel
+            tokenReady={hasMarkjiToken()}
+            initialDeckId={deckId}
+            initialChapterId={chapterId}
+            wordIds={selected.map((w) => w.id)}
+            todayPushed={Number(todayPushed?.c ?? 0)}
+            dailyCap={DAILY_CAP}
+          />
+        </>
+      )}
 
       <p className="text-[12.5px] font-medium text-ink-faint mt-6 leading-relaxed">
         卡片内容完全由数据库拼装，不经过 AI：词、音标、释义、原句都来自你收词时存下的数据。

@@ -10,7 +10,7 @@
  *  D. P23 起自动收词开关已移除 → 阅读设置里不再有该开关，点词恒定落库
  *  E. 批注卡内含 AI 释义入口
  *  E2. 拖选整句（起点在词中间）→ 吸附到完整词并出批注卡
- *  F. 词库页：状态筛选 / 星标 / 标记已掌握 / 搜索
+ *  F. 词库页：导出状态筛选 / 星标 / 搜索
  *  G. 词库「跳到原文」→ URL 带 ?p= 且目标段落高亮
  */
 import { chromium } from "playwright";
@@ -365,28 +365,21 @@ try {
   // ---------- F：词库页 ----------
   await page.goto(`${BASE}/words`, { waitUntil: "load" });
   await page.waitForTimeout(700);
-  const chips = await page.locator(".duo-filter-chip").allInnerTexts();
-  check("F1 词库有状态筛选", chips.length >= 5, chips.join(" / "));
+  const chips = await page.locator(".wl-side-item, .wl-type-btn").allInnerTexts();
+  check("F1 词库有筛选", chips.length >= 7, chips.join(" / "));
 
-  const rowCount0 = await page.locator("ul li.duo-text-item").count();
+  const rowCount0 = await page.locator("li.wl-row").count();
   // 星标第一个词
-  await page.locator(".word-action-btn").first().click();
+  await page.locator(".wl-star").first().click();
   await page.waitForTimeout(500);
   const starredNow = await page.evaluate(() =>
-    document.querySelectorAll(".word-action-btn")[0].textContent.trim(),
+    document.querySelectorAll(".wl-star")[0].textContent.trim(),
   );
   check("F2 星标切换", starredNow === "★", `图标=${starredNow}`);
 
-  // 标记已掌握
-  await page.locator(".word-action-btn").nth(1).click();
-  await page.waitForTimeout(500);
-  const learnedChip = await page.evaluate(() => {
-    const c = [...document.querySelectorAll(".duo-filter-chip")].find((e) =>
-      e.textContent.includes("已掌握"),
-    );
-    return c?.textContent.trim();
-  });
-  check("F3 标记已掌握后计数更新", /已掌握\s*[1-9]/.test(learnedChip || ""), learnedChip || "");
+  // P27：不再有「学习中 / 已掌握」，改为按导出状态筛选
+  const noLearned = chips.every((t) => !t.includes("已掌握") && !t.includes("学习中"));
+  check("F3 筛选是导出状态（未导出 / 已导出），没有学习中 / 已掌握", noLearned && chips.some((t) => t.includes("未导出")), chips.join(" / "));
 
   // 搜索
   await page.locator('input[placeholder*="搜索"]').fill("zzzzzznope");
@@ -397,7 +390,7 @@ try {
   await page.waitForTimeout(300);
 
   // ---------- G：跳回原文 ----------
-  const jump = page.locator("text=跳到原文").first();
+  const jump = page.locator(".wl-source a").first();
   const hasJump = await jump.count();
   if (hasJump) {
     await jump.click();

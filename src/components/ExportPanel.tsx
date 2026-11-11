@@ -34,14 +34,15 @@ export default function ExportPanel({
   tokenReady,
   initialDeckId,
   initialChapterId,
-  wordCount,
+  wordIds,
   todayPushed,
   dailyCap,
 }: {
   tokenReady: boolean;
   initialDeckId: string;
   initialChapterId: string;
-  wordCount: number;
+  /** 只导出这些词（词库里勾选的）；接口不再接受「全部」 */
+  wordIds: string[];
   todayPushed: number;
   dailyCap: number;
 }) {
@@ -91,6 +92,8 @@ export default function ExportPanel({
     setTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
   }, []);
 
+  const wordCount = wordIds.length;
+
   async function run(dryRun: boolean) {
     setError(null);
     setResult(null);
@@ -118,7 +121,7 @@ export default function ExportPanel({
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deckId, chapterId, types, dryRun }),
+        body: JSON.stringify({ deckId, chapterId, types, wordIds, dryRun }),
       });
       const data: ExportResult = await res.json();
       if (!res.ok && data.error) setError(data.error);
@@ -240,7 +243,7 @@ export default function ExportPanel({
         </div>
 
         <div className="flex items-center gap-3 text-[12.5px] font-bold text-ink-faint mt-4">
-          <span className="duo-badge duo-badge-blue">词库 {wordCount} 词</span>
+          <span className="duo-badge duo-badge-blue">选中 {wordCount} 个词</span>
           <span className="duo-badge duo-badge-orange">
             今日已推 {todayPushed} / {dailyCap}
           </span>

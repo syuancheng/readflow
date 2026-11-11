@@ -13,6 +13,7 @@
     "test:inline-gloss": "node scripts/e2e-inline-gloss.mjs",
     "test:cancel-record": "node scripts/e2e-cancel-record.mjs",
     "test:ask-thread": "node scripts/e2e-ask-thread.mjs",
+    "test:word-library": "node scripts/e2e-word-library.mjs",
     "test:extension": "node scripts/e2e-extension.mjs",
     "test:auto-explain": "node scripts/e2e-auto-explain.mjs",
     "test:gloss-persist": "node scripts/e2e-gloss-persist.mjs",
