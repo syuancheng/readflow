@@ -20,6 +20,8 @@ die()  { printf '\033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 [ -d "$NEW" ] || die "找不到 $NEW"
 [ -f "$ENV_FILE" ] || die "缺少 $ENV_FILE：先在 Mac 上运行 bash deploy/deploy.sh setup"
 cd "$NEW"
+# 产物是 root 解压的，npm ci 以 readflow 身份跑：先把目录交给 readflow，否则建 node_modules 会 EACCES
+chown -R readflow:readflow "$NEW"
 
 PORT="$(sed -n 's/^PORT=//p' "$ENV_FILE" | tail -1)"
 PORT="${PORT:-3000}"

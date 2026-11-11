@@ -57,7 +57,8 @@ ok "构建完成"
 # ---- 2. 打包（.next/cache 是 76MB 构建缓存，运行时不需要）----
 TGZ="$(mktemp -t rf-prebuilt).tgz"
 info "打包产物…"
-tar -czf "$TGZ" \
+# COPYFILE_DISABLE / --no-mac-metadata：不带 macOS 扩展属性，服务器解压时就不会刷 LIBARCHIVE.xattr 警告
+COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$TGZ" \
   --exclude '.next/cache' \
   --exclude '.next/trace' \
   .next package.json package-lock.json next.config.ts public src
@@ -71,7 +72,7 @@ rsync -az -e "$RSYNC_SSH" "$ROOT/deploy/" "$SERVER:/root/readflow-deploy/"
 # ---- 4. 远程安装 ----
 "${SSH[@]}" "set -e
   mkdir -p /opt/readflow/releases/$REL
-  tar -xzf /tmp/readflow-prebuilt.tgz -C /opt/readflow/releases/$REL
+  tar --no-same-owner -xzf /tmp/readflow-prebuilt.tgz -C /opt/readflow/releases/$REL
   bash /root/readflow-deploy/remote-prebuilt.sh $REL
   rm -f /tmp/readflow-prebuilt.tgz"
 rm -f "$TGZ"
