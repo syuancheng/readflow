@@ -1,4 +1,4 @@
-import { resolveProvider, STREAM_RESET, type SettingsMap } from "./config";
+import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
 import { streamChat, type ChatTurn } from "./providers";
@@ -33,6 +33,9 @@ export { NO_MODEL_NOTICE };
 export function currentSettings(): SettingsMap {
   return allSettings();
 }
+
+/** 这次调用用谁的模型配置（P28：按账号区分，见 lib/user-secrets.ts）；不传 = 站级配置 */
+export type AiConfig = { settings: SettingsMap; env: EnvMap };
 
 export type ExplainParams = {
   word: string;          // 要解释的词或短语（选区）
@@ -210,7 +213,8 @@ function observations(signals?: SelectionSignals): string {
  *   }
  */
 export async function* streamExplain(
-  params: ExplainParams
+  params: ExplainParams,
+  ai?: AiConfig,
 ): AsyncGenerator<string, void, unknown> {
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
@@ -219,15 +223,19 @@ export async function* streamExplain(
     { role: "user", content: buildUserMessage(params) },
   ];
 
-  yield* streamTurns(turns, {
-    temperature: 0.3, // 释义要准确，不要发散
-    maxTokens: 400,   // 短答案 + 2~3 行句子地图足够；也是防长篇大论的硬兜底
-  });
+  yield* streamTurns(
+    turns,
+    {
+      temperature: 0.3, // 释义要准确，不要发散
+      maxTokens: 400,   // 短答案 + 2~3 行句子地图足够；也是防长篇大论的硬兜底
+    },
+    ai,
+  );
 }
 
 /** 是否已配置可用的模型（小结接口据此决定「生成」还是「只提示去配置」） */
-export function hasModelConfigured(): boolean {
-  return resolveProvider(currentSettings(), process.env) !== null;
+export function hasModelConfigured(ai?: AiConfig): boolean {
+  return resolveProvider(ai?.settings ?? currentSettings(), ai?.env ?? process.env) !== null;
 }
 
 /**
@@ -238,8 +246,9 @@ export function hasModelConfigured(): boolean {
 async function* streamTurns(
   turns: ChatTurn[],
   opts: { temperature: number; maxTokens: number },
+  ai?: AiConfig,
 ): AsyncGenerator<string, void, unknown> {
-  const provider = resolveProvider(currentSettings(), process.env);
+  const provider = resolveProvider(ai?.settings ?? currentSettings(), ai?.env ?? process.env);
   if (!provider) {
     yield NO_MODEL_NOTICE;
     return;
@@ -287,7 +296,7 @@ export async function* streamSectionSummary(params: {
   /** 区间原文，段落之间用空行分隔 */
   body: string;
   paragraphCount: number;
-}): AsyncGenerator<string, void, unknown> {
+}, ai?: AiConfig): AsyncGenerator<string, void, unknown> {
   const turns: ChatTurn[] = [
     { role: "system", content: buildSummaryPrompt() },
     {
@@ -296,10 +305,14 @@ export async function* streamSectionSummary(params: {
     },
   ];
 
-  yield* streamTurns(turns, {
-    temperature: 0.3,
-    maxTokens: 400, // 120 字中文足够，留余量避免被截断
-  });
+  yield* streamTurns(
+    turns,
+    {
+      temperature: 0.3,
+      maxTokens: 400, // 120 字中文足够，留余量避免被截断
+    },
+    ai,
+  );
 }
 
 /**

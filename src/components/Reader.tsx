@@ -802,7 +802,10 @@ export default function Reader({
           ...(regenerate ? { regenerate: true } : {}),
         }),
       });
-      if (!res.ok) throw new Error(`请求失败（${res.status}）`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `请求失败（${res.status}）`);
+      }
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error("无法读取流");
@@ -1696,7 +1699,11 @@ function PickCard({
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      if (!res.ok) throw new Error("请求失败");
+      // 429 = 今天的免费 AI 次数用完（P28）：把服务端的原话显示出来，告诉用户怎么办
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? "请求失败");
+      }
       const reader = res.body?.getReader();
       if (!reader) throw new Error("无法读取流");
 

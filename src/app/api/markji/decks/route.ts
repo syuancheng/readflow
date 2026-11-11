@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { hasMarkjiToken, listChapters, listDecks, MarkjiError } from "@/lib/markji";
+import { listChapters, listDecks, MarkjiError } from "@/lib/markji";
+import { markjiTokenFor } from "@/lib/user-secrets";
 import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -15,7 +16,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ ok: false, error: "请先登录" }, { status: 401 });
-  if (!hasMarkjiToken()) {
+  // P28：每个账号用自己的墨墨 Token，普通账号不回退主账号的
+  const token = markjiTokenFor(user);
+  if (!token) {
     return NextResponse.json(
       {
         ok: false,
@@ -29,10 +32,10 @@ export async function GET(req: Request) {
 
   try {
     if (deckId) {
-      const chapters = await listChapters(deckId);
+      const chapters = await listChapters(deckId, token);
       return NextResponse.json({ ok: true, chapters });
     }
-    const decks = await listDecks();
+    const decks = await listDecks(token);
     return NextResponse.json({ ok: true, decks });
   } catch (err) {
     const msg = err instanceof MarkjiError ? err.message : String(err);

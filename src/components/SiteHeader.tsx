@@ -14,7 +14,7 @@ import ProfileMenu from "@/components/ProfileMenu";
 export default function SiteHeader() {
   const pathname = usePathname();
   if (pathname?.startsWith("/texts")) return null;
-  if (pathname === "/login" || pathname === "/setup") return null;
+  if (pathname === "/login" || pathname === "/setup" || pathname === "/register") return null;
 
   return (
     <header className="duo-nav sticky top-0 z-30">

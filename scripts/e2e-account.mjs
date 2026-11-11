@@ -287,14 +287,21 @@ try {
   });
   check("图片代理拒绝代理本机 / 内网地址", loopImg.status === 403, `status=${loopImg.status}`);
 
-  // ---- 6d. 站级密钥只有 owner 能改，插件 Token 只给 owner ----
+  // ---- 6d. P28：非 owner 的墨墨 Token / 模型 Key 写到自己名下，碰不到站级；插件 Token 只给 owner ----
   const bSetToken = await api("/api/settings", { method: "PUT", cookie: cookieB, body: { markjiToken: "b-token-123" } });
   const bRegen = await api("/api/settings", { method: "PUT", cookie: cookieB, body: { regenerateExtensionToken: true } });
   const bTest = await api("/api/settings/test", { method: "POST", cookie: cookieB, body: { target: "ai" } });
+  const tokDb = new Database(DB_PATH, { readonly: true });
+  const siteTok = tokDb.prepare("SELECT value FROM settings WHERE user_id = 'local' AND key = 'markji.token'").get()?.value;
+  const bOwnTok = tokDb
+    .prepare("SELECT s.value FROM settings s JOIN users u ON u.id = s.user_id WHERE u.username = ? AND s.key = 'markji.token'")
+    .get(BOB)?.value;
+  tokDb.close();
   check(
-    "非 owner 改墨墨 Token / 重置插件 Token / 测试模型 → 403",
-    bSetToken.status === 403 && bRegen.status === 403 && bTest.status === 403,
-    `token=${bSetToken.status} regen=${bRegen.status} test=${bTest.status}`,
+    "非 owner 改墨墨 Token 只写自己名下 / 重置插件 Token → 403 / 测试模型不借用站点的",
+    bSetToken.status === 200 && bOwnTok === "b-token-123" && siteTok !== "b-token-123" &&
+      bRegen.status === 403 && bTest.data.ok === false,
+    `token=${bSetToken.status} 自己名下=${bOwnTok} 站级=${siteTok} regen=${bRegen.status} test.ok=${bTest.data.ok}`,
   );
   const aRegen = await api("/api/settings", { method: "PUT", cookie: cookieA, body: { regenerateExtensionToken: true } });
   const bView = await api("/api/settings", { cookie: cookieB });

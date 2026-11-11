@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveProvider } from "@/lib/config";
-import { allSettings } from "@/lib/settings-store";
+import { allSettings, ownSettings } from "@/lib/settings-store";
+import { markjiTokenFor } from "@/lib/user-secrets";
 import { testProvider } from "@/lib/providers";
 import { withRetry } from "@/lib/retry";
 import { currentUser } from "@/lib/auth";
@@ -10,12 +11,10 @@ export const dynamic = "force-dynamic";
 
 /** POST /api/settings/test  { target: "ai", providerId?: string } */
 export async function POST(req: Request) {
-  // 测试连接会真实调用站级模型（花钱），与改密钥同级：只有 owner 能做
+  // 测试连接会真实调用模型（花钱）。主账号测站级配置；普通账号只能测自己填的 Key
+  // 和自己的墨墨 Token（P28），不能借测试接口白用站点的模型。
   const user = await currentUser();
   if (!user) return NextResponse.json({ ok: false, error: "请先登录" }, { status: 401 });
-  if (!user.isOwner) {
-    return NextResponse.json({ ok: false, error: "只有站点管理员可以测试模型配置" }, { status: 403 });
-  }
   let body: { target?: string; providerId?: string };
   try {
     body = (await req.json()) as typeof body;
@@ -24,7 +23,9 @@ export async function POST(req: Request) {
   }
 
   if (body.target === "ai") {
-    const p = resolveProvider(allSettings(), process.env, body.providerId);
+    const p = user.isOwner
+      ? resolveProvider(allSettings(), process.env, body.providerId)
+      : resolveProvider(ownSettings(user.id), {}, body.providerId);
     if (!p) {
       return NextResponse.json({
         ok: false,
@@ -53,7 +54,9 @@ export async function POST(req: Request) {
   if (body.target === "markji") {
     const { listDecks } = await import("@/lib/markji");
     try {
-      const decks = await withRetry(() => listDecks(), { attempts: 3 });
+      const token = markjiTokenFor(user);
+      if (!token) return NextResponse.json({ ok: false, error: "还没有填墨墨 Token" });
+      const decks = await withRetry(() => listDecks(token), { attempts: 3 });
       return NextResponse.json({ ok: true, detail: `墨墨连接成功，读到 ${decks.length} 个牌组` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

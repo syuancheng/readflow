@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 /**
- * 登录 / 首次建号的共用表单（P20）。
- * 关闭开放注册：唯一建号入口是 /setup，且只有 users 表为空时接口才接受。
+ * 登录 / 首次建号 / 邀请码注册的共用表单。
+ * 不开放注册：/setup 只在没有任何账号时可用（建主账号）；
+ * 之后新用户必须拿主账号发的邀请码到 /register 注册（P28）。
  */
-export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
+export default function AuthForm({ mode }: { mode: "login" | "setup" | "register" }) {
   const router = useRouter();
   const params = useSearchParams();
+  const [inviteCode, setInviteCode] = useState(() => params.get("code") ?? "");
   const [username, setUsername] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -17,6 +20,8 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
+  /** 建主账号与邀请码注册都是「新建账号」：要手机号、要确认密码 */
+  const isNew = mode !== "login";
 
   useEffect(() => {
     let alive = true;
@@ -25,7 +30,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
       .then((s) => {
         if (!alive || !s) return;
         // 没有账号只能去建号；已有账号不能直接访问 /setup
-        if (s.needsSetup && mode === "login") router.replace("/setup");
+        if (s.needsSetup && mode !== "setup") router.replace("/setup");
         else if (!s.needsSetup && mode === "setup") router.replace("/login");
         else setChecking(false);
       })
@@ -38,15 +43,19 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (!username.trim() || !password) {
-      setError(mode === "setup" ? "请填写用户名和密码" : "请填写用户名或手机号，以及密码");
+    if (mode === "register" && !inviteCode.trim()) {
+      setError("请填写邀请码");
       return;
     }
-    if (mode === "setup" && !phone.trim()) {
+    if (!username.trim() || !password) {
+      setError(isNew ? "请填写用户名和密码" : "请填写用户名或手机号，以及密码");
+      return;
+    }
+    if (isNew && !phone.trim()) {
       setError("请填写手机号");
       return;
     }
-    if (mode === "setup" && password !== confirm) {
+    if (isNew && password !== confirm) {
       setError("两次输入的密码不一致");
       return;
     }
@@ -58,7 +67,9 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
         body: JSON.stringify(
           mode === "setup"
             ? { username: username.trim(), phone: phone.trim(), password, displayName: username.trim() }
-            : { account: username.trim(), password },
+            : mode === "register"
+              ? { inviteCode: inviteCode.trim(), username: username.trim(), phone: phone.trim(), password }
+              : { account: username.trim(), password },
         ),
       });
       const data = await res.json().catch(() => ({}));
@@ -103,27 +114,43 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
           READFLOW
         </div>
         <h1 style={{ fontSize: 26, fontWeight: 800, margin: "10px 0 6px", color: "var(--duo-ink, #3c3c3c)" }}>
-          {isSetup ? "创建你的账号" : "欢迎回来"}
+          {isSetup ? "创建你的账号" : mode === "register" ? "用邀请码注册" : "欢迎回来"}
         </h1>
         <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--duo-ink-soft, #777)", marginBottom: 22 }}>
           {isSetup
-            ? "这是本机的第一个账号，你现有的文章、词库和设置会自动归到它名下。之后不再开放自由注册。"
-            : "登录后继续阅读。数据全部保存在这台电脑里，不经过任何第三方服务。"}
+            ? "这是站点的第一个账号（主账号），你现有的文章、词库和设置会自动归到它名下。之后新用户凭你发的邀请码注册。"
+            : mode === "register"
+              ? "ReadFlow 目前只接受邀请注册。填上朋友发给你的邀请码，建一个自己的账号。"
+              : "登录后继续阅读。"}
         </p>
 
         <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
+          {mode === "register" && (
+            <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+              邀请码
+              <input
+                autoComplete="off"
+                autoCapitalize="characters"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="8 位，例如 K7QM-3XPA"
+                disabled={checking || busy}
+                style={{ ...inputStyle, letterSpacing: "0.08em", fontWeight: 700 }}
+              />
+            </label>
+          )}
           <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
-            {isSetup ? "用户名" : "用户名 / 手机号"}
+            {isNew ? "用户名" : "用户名 / 手机号"}
             <input
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder={isSetup ? "中英文、数字均可" : "输入用户名或手机号"}
+              placeholder={isNew ? "中英文、数字均可" : "输入用户名或手机号"}
               disabled={checking || busy}
               style={inputStyle}
             />
           </label>
-          {isSetup && (
+          {isNew && (
             <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
               手机号
               <input
@@ -145,15 +172,15 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
             密码
             <input
               type="password"
-              autoComplete={isSetup ? "new-password" : "current-password"}
+              autoComplete={isNew ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={isSetup ? "至少 8 位" : "输入密码"}
+              placeholder={isNew ? "至少 8 位" : "输入密码"}
               disabled={checking || busy}
               style={inputStyle}
             />
           </label>
-          {isSetup && (
+          {isNew && (
             <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
               确认密码
               <input
@@ -190,13 +217,29 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" }) {
               opacity: checking || busy ? 0.6 : 1,
             }}
           >
-            {busy ? "请稍候…" : isSetup ? "创建并进入" : "登录"}
+            {busy ? "请稍候…" : isSetup ? "创建并进入" : mode === "register" ? "注册并进入" : "登录"}
           </button>
         </form>
 
-        {!isSetup && (
-          <p style={{ marginTop: 18, fontSize: 12, color: "var(--duo-ink-faint, #afafaf)", lineHeight: 1.6 }}>
-            忘记密码？在项目目录运行 <code>npm run reset-password -- 用户名或手机号</code> 重置。
+        {mode === "login" && (
+          <>
+            <p style={{ marginTop: 18, fontSize: 14, fontWeight: 700, textAlign: "center" }}>
+              还没有账号？
+              <Link href="/register" style={{ color: "var(--duo-blue, #1cb0f6)" }}>
+                有邀请码，去注册 →
+              </Link>
+            </p>
+            <p style={{ marginTop: 10, fontSize: 12, color: "var(--duo-ink-faint, #afafaf)", lineHeight: 1.6 }}>
+              忘记密码？请联系邀请你的人（站点管理员）帮你重置。
+            </p>
+          </>
+        )}
+        {mode === "register" && (
+          <p style={{ marginTop: 18, fontSize: 14, fontWeight: 700, textAlign: "center" }}>
+            已经有账号了？
+            <Link href="/login" style={{ color: "var(--duo-blue, #1cb0f6)" }}>
+              去登录 →
+            </Link>
           </p>
         )}
       </div>

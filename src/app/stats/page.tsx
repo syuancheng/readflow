@@ -33,8 +33,8 @@ export default async function StatsPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-8">
+      {/* 页面标题由顶部导航高亮表达，这里只留一句说明（不重复写「战绩」） */}
       <div className="mb-7">
-        <h1 className="text-[28px] font-extrabold tracking-tight mb-1.5">我的战绩</h1>
         <p className="text-[15px] text-ink-soft font-medium">看看你读了多少、记住了多少。</p>
       </div>
 

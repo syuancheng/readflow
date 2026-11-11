@@ -7,7 +7,7 @@
  * 会在那里被挡，所有页面与 API 都必须调用它，不能把这里当成安全边界——
  * 只带一个假 cookie 就能穿过这一层。
  *
- * 公开入口：/login、/setup、/api/auth/*（status 判断是否需要首次建号）。
+ * 公开入口：/login、/setup、/register（邀请码注册）、/api/auth/*。
  * 插件链路用站级 extension token 鉴权，不拦。
  */
 import { NextResponse, type NextRequest } from "next/server";
@@ -21,9 +21,9 @@ export function proxy(req: NextRequest) {
   if (pathname.startsWith("/api/auth/")) return NextResponse.next();
   if (pathname.startsWith("/api/extension/")) return NextResponse.next();
 
-  if (pathname === "/login" || pathname === "/setup") {
-    // 已登录就不该再看到登录页；/setup 保持可访问由接口自己判 hasAnyUser
-    if (hasCookie && pathname === "/login") {
+  if (pathname === "/login" || pathname === "/setup" || pathname === "/register") {
+    // 已登录就不该再看到登录 / 注册页；/setup 保持可访问由接口自己判 hasAnyUser
+    if (hasCookie && (pathname === "/login" || pathname === "/register")) {
       return NextResponse.redirect(new URL("/", req.url));
     }
     return NextResponse.next();

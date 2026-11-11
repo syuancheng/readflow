@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { paragraphs, sectionSummaries, texts } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
+import { aiContextFor } from "@/lib/user-secrets";
+import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import { hasModelConfigured, NO_MODEL_NOTICE, streamSectionSummary } from "@/lib/ai";
 import { STREAM_RESET } from "@/lib/config";
 import { isProse, type BlockKind } from "@/lib/import/types";
@@ -148,14 +150,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // P28：按账号选模型配置；普通账号用站点 Key 时扣每日免费次数
+  const user = (await currentUser())!;
+  const ai = aiContextFor(user);
   // 没配模型：如实提示去配置，不落库
-  if (!hasModelConfigured()) {
+  if (!hasModelConfigured(ai)) {
     return streamText(
       async function* () {
         yield NO_MODEL_NOTICE;
       },
       { "x-summary-cached": "0" },
     );
+  }
+
+  if (ai.metered) {
+    const q = consumeAiQuota(user.id);
+    if (!q.ok) return Response.json({ error: quotaExceededMessage(q.limit), quota: q }, { status: 429 });
   }
 
   const encoder = new TextEncoder();
@@ -167,7 +177,7 @@ export async function POST(req: NextRequest) {
         for await (const chunk of streamSectionSummary({
           body: span.map((r) => r.content).join("\n\n"),
           paragraphCount: span.length,
-        })) {
+        }, ai)) {
           acc += chunk;
           controller.enqueue(encoder.encode(chunk));
         }

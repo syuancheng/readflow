@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { exports, userWords } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
 import { getSetting } from "@/lib/settings-store";
-import { hasMarkjiToken } from "@/lib/markji";
+import { markjiTokenFor } from "@/lib/user-secrets";
 import { CARD_TYPES } from "@/lib/cardgen";
 import ExportPanel from "@/components/ExportPanel";
 
@@ -162,7 +162,7 @@ export default async function ExportPage({
           </div>
 
           <ExportPanel
-            tokenReady={hasMarkjiToken()}
+            tokenReady={Boolean(markjiTokenFor(user))}
             initialDeckId={deckId}
             initialChapterId={chapterId}
             wordIds={selected.map((w) => w.id)}

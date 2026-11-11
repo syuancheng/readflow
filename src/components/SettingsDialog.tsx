@@ -15,6 +15,7 @@ import {
   type ProfileErrors,
 } from "@/lib/profile-form";
 import VoicePicker from "./VoicePicker";
+import InvitePanel from "./InvitePanel";
 import {
   applyModelOption,
   CUSTOM_MODEL_OPTION,
@@ -49,8 +50,10 @@ type SettingsPayload = {
   providers: ProviderRow[];
   markji: { configured: boolean; maskedToken: string; fromEnv: boolean };
   extension: { token: string | null };
-  /** 站级配置（模型 / 墨墨 / 插件）只有主账号能改 */
+  /** 主账号：改的是站级配置（所有人共用的默认模型等）；普通账号改的是自己的 Key / Token */
   canEditSite?: boolean;
+  /** 普通账号才有：自己有没有 Key、站点模型每天的免费次数（P28） */
+  aiQuota?: { ownKey: boolean; siteAvailable: boolean; limit: number; usedToday: number };
   profile?: Profile;
 };
 
@@ -223,6 +226,7 @@ function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
 
 const NAV_ICON: Record<NavId, string> = {
   profile: "user",
+  invites: "user",
   models: "model",
   markji: "book",
   reading: "speaker",
@@ -540,7 +544,10 @@ export default function SettingsDialog({
 
   const current = data?.providers.find((p) => p.id === active) ?? null;
   const isBusy = busy !== null;
-  const groups = filterNavGroups(query);
+  // 「邀请朋友」只有主账号能用
+  const groups = filterNavGroups(query)
+    .map((g) => ({ ...g, items: g.items.filter((it) => it.id !== "invites" || data?.canEditSite === true) }))
+    .filter((g) => g.items.length > 0);
   const options = editor ? modelOptionsFor(editor.id) : [];
 
   return (
@@ -597,17 +604,35 @@ export default function SettingsDialog({
                 {notice.text}
               </div>
             )}
-            {data?.canEditSite === false &&
-              (tab === "models" || tab === "markji" || tab === "extension") && (
-                <div className="st-notice st-notice-err">
-                  这里是全站共用的配置，只有主账号可以修改。
-                </div>
-              )}
+            {data?.canEditSite === false && tab === "extension" && (
+              <div className="st-notice st-notice-err">浏览器插件目前只给主账号使用。</div>
+            )}
+            {data?.canEditSite === false && tab === "markji" && (
+              <div className="st-notice st-notice-info">
+                这里填的是<b>你自己的</b>墨墨 Token，导出的卡片会进你自己的墨墨账号，只有你能用。
+              </div>
+            )}
+            {data?.canEditSite === false && tab === "models" && data.aiQuota && (
+              <div className="st-notice st-notice-info" data-testid="ai-quota">
+                {data.aiQuota.ownKey
+                  ? "你在用自己填的模型 Key，不限次数，费用由你的模型服务商结算。"
+                  : data.aiQuota.siteAvailable
+                    ? `你在用站点提供的模型：每天免费 ${data.aiQuota.limit} 次 AI 讲解，今天已用 ${Math.min(data.aiQuota.usedToday, data.aiQuota.limit)} 次。填上自己的 API Key 就不受次数限制（Key 只给你的账号用）。`
+                    : "站点目前没有可用的模型。填上你自己的 API Key 就能使用 AI 讲解。"}
+              </div>
+            )}
+            {data?.canEditSite === true && tab === "models" && (
+              <div className="st-notice st-notice-info">
+                你是主账号：这里的模型也是受邀朋友的默认模型（他们没填自己的 Key 时用，每人每天有次数上限）。
+              </div>
+            )}
 
             {loading ? (
               <p className="st-loading">读取配置中…</p>
             ) : (
               <>
+                {tab === "invites" && data?.canEditSite === true && <InvitePanel />}
+
                 {tab === "profile" && (
                   <section className="st-section">
                     <div className="st-panel">

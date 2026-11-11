@@ -44,6 +44,29 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
   }
   sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_phone ON users(phone)");
 
+  // 邀请码注册（P28）：只有 owner 能发码；每个码可用 max_uses 次，可随时作废。
+  // users.invite_code 记下这个人是用哪个码注册的，方便 owner 在设置里看「谁用了」。
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS invites (
+      code TEXT PRIMARY KEY,
+      created_by TEXT NOT NULL,
+      note TEXT,
+      max_uses INTEGER NOT NULL DEFAULT 1,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      revoked INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      user_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day)
+    );
+  `);
+  if (!userCols.some((c) => c.name === "invite_code")) {
+    sqlite.exec("ALTER TABLE users ADD COLUMN invite_code TEXT");
+  }
+
   const table = sqlite
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
     .get() as { name: string } | undefined;

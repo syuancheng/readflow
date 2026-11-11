@@ -8,7 +8,8 @@ import { getSetting, setSetting } from "@/lib/settings-store";
 import { resolveAnchor } from "@/lib/tokenize";
 import { sentenceAround } from "@/lib/split";
 import { buildCard, lintCard, CARD_TYPES, type CardType } from "@/lib/cardgen";
-import { createCard, hasMarkjiToken, MarkjiError } from "@/lib/markji";
+import { createCard, MarkjiError } from "@/lib/markji";
+import { markjiTokenFor } from "@/lib/user-secrets";
 import { distractors } from "@/lib/dict";
 
 export const runtime = "nodejs";
@@ -80,7 +81,7 @@ export async function GET() {
     .get();
 
   return NextResponse.json({
-    tokenReady: hasMarkjiToken(),
+    tokenReady: Boolean(markjiTokenFor(user)),
     deckId: getSetting("markji.deck", user.id) ?? "",
     chapterId: getSetting("markji.chapter", user.id) ?? "",
     deckName: getSetting("markji.deckName", user.id) ?? "",
@@ -141,7 +142,9 @@ export async function POST(req: Request) {
   if (wordIds.length === 0) {
     return NextResponse.json({ error: "先在词库勾选要导出的词" }, { status: 400 });
   }
-  if (!dryRun && !hasMarkjiToken()) {
+  // P28：卡片写进当前账号自己的墨墨；普通账号没填就不能导，绝不回退主账号的 Token
+  const markjiToken = markjiTokenFor(user);
+  if (!dryRun && !markjiToken) {
     return NextResponse.json(
       { error: "未配置墨墨 Token，请在右上角头像 → 设置里填写后再导出" },
       { status: 400 },
@@ -333,7 +336,7 @@ export async function POST(req: Request) {
       }
 
       try {
-        const card = await createCard(deckId, chapterId, content);
+        const card = await createCard(deckId, chapterId, content, markjiToken);
         remainingToday--;
 
         db.insert(exports)

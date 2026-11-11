@@ -69,6 +69,16 @@ export function allSettings(userId?: string): SettingsMap {
   return out;
 }
 
+/** 只读这个账号自己写的行，不回退站级（P28：普通账号的密钥只认自己的） */
+export function ownSettings(userId: string): SettingsMap {
+  const rows = sqlite
+    .prepare("SELECT key, value FROM settings WHERE user_id = ?")
+    .all(userId) as { key: string; value: string }[];
+  const out: SettingsMap = {};
+  for (const r of rows) out[r.key] = r.value;
+  return out;
+}
+
 /**
  * 首次建号时把老库的个人资料从站级迁到 owner 名下。
  * 只迁 profile.*，密钥类留在站级供所有人（含插件链路）使用。

@@ -78,8 +78,12 @@ function serialize<T>(fn: () => Promise<T>, minGap = 600): Promise<T> {
   return run;
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = markjiToken();
+/**
+ * token：调用方按账号传（lib/user-secrets.ts 的 markjiTokenFor）；
+ * 不传（undefined）= 站级 Token，仅供命令行脚本使用；传 null = 这个账号没配。
+ */
+async function call<T>(path: string, init?: RequestInit, tokenArg?: string | null): Promise<T> {
+  const token = tokenArg === undefined ? markjiToken() : tokenArg;
   if (!token) throw new MarkjiError("未配置墨墨 Token。请在右上角头像 → 设置里填入", 401);
 
   // 读操作遇到限流/网络抖动/服务端繁忙自动重试；写操作不重试，
@@ -121,8 +125,8 @@ async function request<T>(path: string, token: string, init?: RequestInit): Prom
 }
 
 /** 列牌组。用户可能有很多牌组，取前 100 个够用（单用户场景）。 */
-export async function listDecks(): Promise<MarkjiDeck[]> {
-  const data = await call<{ decks?: MarkjiDeck[] }>("/decks?limit=100");
+export async function listDecks(token?: string | null): Promise<MarkjiDeck[]> {
+  const data = await call<{ decks?: MarkjiDeck[] }>("/decks?limit=100", undefined, token);
   return (data.decks ?? []).map((d) => ({
     id: d.id,
     name: d.name,
@@ -132,9 +136,11 @@ export async function listDecks(): Promise<MarkjiDeck[]> {
 }
 
 /** 列某个牌组下的章节 */
-export async function listChapters(deckId: string): Promise<MarkjiChapter[]> {
+export async function listChapters(deckId: string, token?: string | null): Promise<MarkjiChapter[]> {
   const data = await call<{ chapters?: MarkjiChapter[] }>(
     `/decks/${encodeURIComponent(deckId)}/chapters`,
+    undefined,
+    token,
   );
   return (data.chapters ?? []).map((c) => ({
     id: c.id,
@@ -153,6 +159,7 @@ export async function createCard(
   deckId: string,
   chapterId: string,
   content: string,
+  token?: string | null,
 ): Promise<MarkjiCard> {
   const data = await serialize(() =>
     call<{ card: MarkjiCard }>(
@@ -163,6 +170,7 @@ export async function createCard(
           card: { content, grammar_version: 3 },
         }),
       },
+      token,
     ),
   );
 

@@ -7,13 +7,18 @@ import {
   maskSecret,
   providerStatuses,
   resolveMarkjiToken,
+  resolveProvider,
 } from "@/lib/config";
 import {
   allSettings,
   deleteSetting,
   getSetting,
+  ownSettings,
   setSetting,
 } from "@/lib/settings-store";
+import { GLOBAL_USER } from "@/db/ensure-auth";
+import { hasOwnModel } from "@/lib/user-secrets";
+import { aiUsedToday, dailyAiQuota } from "@/lib/ai-quota";
 import { currentUser } from "@/lib/auth";
 import {
   isAvatarImage,
@@ -41,6 +46,29 @@ export async function GET() {
   // 站级默认（AI / 墨墨 / 插件）+ 本人覆盖；profile.* 不回退站级。
   // 必须与 PUT 写入时用同一个 userId，否则「保存成功但读回默认值」。
   const settings = allSettings(user.id);
+
+  // P28：普通账号只看到、只改自己的模型 Key 和墨墨 Token（主账号的站级密钥一概不露），
+  // 没填自己的 Key 时用站点模型、按天限次，这里一并返回额度情况
+  if (!user.isOwner) {
+    const own = ownSettings(user.id);
+    const ownMarkji = own[SETTINGS_KEYS.markjiToken]?.trim() || null;
+    return NextResponse.json({
+      ok: true,
+      activeProvider: own[SETTINGS_KEYS.activeProvider] ?? null,
+      providers: providerStatuses(own, {}),
+      markji: { configured: Boolean(ownMarkji), maskedToken: maskSecret(ownMarkji), fromEnv: false },
+      extension: { token: null },
+      canEditSite: false,
+      aiQuota: {
+        ownKey: hasOwnModel(user.id),
+        siteAvailable: resolveProvider(allSettings(), process.env) !== null,
+        limit: dailyAiQuota(),
+        usedToday: aiUsedToday(user.id),
+      },
+      profile: profileFromSettings(settings),
+    });
+  }
+
   const markji = resolveMarkjiToken(settings, process.env);
   return NextResponse.json({
     ok: true,
@@ -79,23 +107,6 @@ type PutBody = {
   profileReset?: boolean;
 };
 
-/** 这次请求是否会改动站级密钥（脱敏回传值不算改动）。 */
-function touchesSiteSecrets(body: PutBody): boolean {
-  if (body.activeProvider !== undefined) return true;
-  if (body.markjiClear === true || body.regenerateExtensionToken === true) return true;
-  const token = str(body.markjiToken);
-  if (token && !isMaskedValue(token)) return true;
-  if (body.providers && typeof body.providers === "object") {
-    for (const patch of Object.values(body.providers)) {
-      if (!patch || typeof patch !== "object") continue;
-      if (patch.clear === true || str(patch.model) || str(patch.baseUrl)) return true;
-      const key = str(patch.apiKey);
-      if (key && !isMaskedValue(key)) return true;
-    }
-  }
-  return false;
-}
-
 /**
  * PUT /api/settings
  * 保存配置。脱敏值原样回传时忽略（防止把 "••••abcd" 写进 DB）。
@@ -117,14 +128,18 @@ export async function PUT(req: Request) {
   // 这样所有账号共用一份额度配置，插件链路（无 cookie）也能读到同一个 token。
   // 正因为是共享的，只有 owner 能改：否则任何账号都能换掉别人在用的 Key、
   // 把墨墨导出指到自己的账户，或重置插件 Token 拿到 owner 的词库。
-  if (!user.isOwner && touchesSiteSecrets(body)) {
-    return NextResponse.json({ error: "只有主账号可以修改模型、墨墨与插件配置" }, { status: 403 });
+  // 主账号改站级行（所有人共用的默认模型、主账号自己的墨墨、插件 Token）；
+  // 普通账号改自己的行（P28）：自己的模型 Key、自己的墨墨 Token，碰不到站级密钥。
+  // 插件 Token 能读写主账号的整个词库，只有主账号能重置。
+  const scope = user.isOwner ? GLOBAL_USER : user.id;
+  if (!user.isOwner && body.regenerateExtensionToken === true) {
+    return NextResponse.json({ error: "只有主账号可以管理插件 Token" }, { status: 403 });
   }
   if (body.activeProvider !== undefined) {
     if (body.activeProvider === null || body.activeProvider === "") {
-      deleteSetting(SETTINGS_KEYS.activeProvider);
+      deleteSetting(SETTINGS_KEYS.activeProvider, scope);
     } else if (PROVIDERS.some((p) => p.id === body.activeProvider)) {
-      setSetting(SETTINGS_KEYS.activeProvider, body.activeProvider);
+      setSetting(SETTINGS_KEYS.activeProvider, body.activeProvider, scope);
     } else {
       return NextResponse.json({ error: "未知的模型 provider" }, { status: 400 });
     }
@@ -134,25 +149,25 @@ export async function PUT(req: Request) {
     for (const [id, patch] of Object.entries(body.providers)) {
       if (!PROVIDERS.some((p) => p.id === id) || !patch || typeof patch !== "object") continue;
       if (patch.clear === true) {
-        deleteSetting(SETTINGS_KEYS.providerKey(id));
-        deleteSetting(SETTINGS_KEYS.providerModel(id));
-        deleteSetting(SETTINGS_KEYS.providerBaseUrl(id));
+        deleteSetting(SETTINGS_KEYS.providerKey(id), scope);
+        deleteSetting(SETTINGS_KEYS.providerModel(id), scope);
+        deleteSetting(SETTINGS_KEYS.providerBaseUrl(id), scope);
         continue;
       }
       const apiKey = str(patch.apiKey);
-      if (apiKey && !isMaskedValue(apiKey)) setSetting(SETTINGS_KEYS.providerKey(id), apiKey);
+      if (apiKey && !isMaskedValue(apiKey)) setSetting(SETTINGS_KEYS.providerKey(id), apiKey, scope);
       const model = str(patch.model);
-      if (model) setSetting(SETTINGS_KEYS.providerModel(id), model);
+      if (model) setSetting(SETTINGS_KEYS.providerModel(id), model, scope);
       const baseUrl = str(patch.baseUrl);
-      if (baseUrl) setSetting(SETTINGS_KEYS.providerBaseUrl(id), baseUrl);
+      if (baseUrl) setSetting(SETTINGS_KEYS.providerBaseUrl(id), baseUrl, scope);
     }
   }
 
   if (body.markjiClear === true) {
-    deleteSetting(SETTINGS_KEYS.markjiToken);
+    deleteSetting(SETTINGS_KEYS.markjiToken, scope);
   } else {
     const token = str(body.markjiToken);
-    if (token && !isMaskedValue(token)) setSetting(SETTINGS_KEYS.markjiToken, token);
+    if (token && !isMaskedValue(token)) setSetting(SETTINGS_KEYS.markjiToken, token, scope);
   }
 
   if (body.regenerateExtensionToken === true) {

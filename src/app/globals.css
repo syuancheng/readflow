@@ -511,8 +511,9 @@ body {
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.02em;
-  padding: 8px 16px;
-  border-radius: 10px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  border: 2px solid transparent;
   transition: background-color 120ms ease;
   cursor: pointer;
 }
@@ -521,9 +522,12 @@ body {
   background: var(--duo-surface);
 }
 
-.duo-nav-link-active {
+/* 当前 tab：和词库左侧筛选的选中态同一套（浅绿底 + 绿边） */
+.duo-nav-link-active,
+.duo-nav-link-active:hover {
   color: var(--duo-green-dark);
   background: var(--duo-green-soft);
+  border-color: var(--duo-green);
 }
 
 /* 文本列表项 */
@@ -3327,3 +3331,73 @@ body {
     display: none;
   }
 }
+
+/* 设置 → 邀请朋友（P28） */
+.st-invite-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+}
+.st-invite-form .st-label {
+  display: grid;
+  gap: 6px;
+}
+.st-invite-note {
+  flex: 1;
+  min-width: 160px;
+}
+.st-invites {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+.st-invite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-line);
+  border-radius: 12px;
+}
+.st-invite-off {
+  background: #fafbfc;
+  opacity: 0.75;
+}
+.st-invite-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.st-invite-code {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--wb-ink);
+}
+.st-invite-state {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: var(--wb-muted);
+}
+.st-invite-state-on {
+  background: #eaf7f1;
+  color: #137a55;
+}
+.st-invite-meta {
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+.st-invite-actions {
+  display: flex;
+  gap: 6px;
+}
+.st-notice-info { background: #eef4ff; color: #2c5fc4; }

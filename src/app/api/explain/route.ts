@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { streamExplain, type ExplainParams } from "@/lib/ai";
-import { currentUser } from "@/lib/auth";
+import { currentUser, type AuthUser } from "@/lib/auth";
+import { aiContextFor } from "@/lib/user-secrets";
+import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
 
 export const dynamic = "force-dynamic";
@@ -68,9 +70,15 @@ function narrowSignals(v: unknown): SelectionSignals | undefined {
   };
 }
 
-async function handle(params: ExplainParams) {
+async function handle(params: ExplainParams, user: AuthUser) {
+  // P28：按账号选模型配置；普通账号用站点 Key 时扣每日免费次数
+  const ai = aiContextFor(user);
+  if (ai.metered) {
+    const q = consumeAiQuota(user.id);
+    if (!q.ok) return Response.json({ error: quotaExceededMessage(q.limit), quota: q }, { status: 429 });
+  }
   const encoder = new TextEncoder();
-  const iter = streamExplain(params)[Symbol.asyncIterator]();
+  const iter = streamExplain(params, ai)[Symbol.asyncIterator]();
   let cancelled = false;
   const stream = new ReadableStream({
     async start(controller) {
@@ -121,7 +129,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "word is required" }, { status: 400 });
   }
 
-  return handle({ word, context, language, monolingual, prompt, prefix, suffix });
+  return handle({ word, context, language, monolingual, prompt, prefix, suffix }, user);
 }
 
 export async function POST(req: NextRequest) {
@@ -151,5 +159,5 @@ export async function POST(req: NextRequest) {
     prompt: str(body.prompt)?.trim() || undefined,
     withPrevSentence: body.withPrevSentence === true,
     signals: narrowSignals(body.signals),
-  });
+  }, user);
 }
