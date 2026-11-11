@@ -1181,7 +1181,53 @@ body {
   background: var(--duo-green-soft);
 }
 
-/* 追问小按钮（AI 内容标题行右侧） */
+.rf-ai-mini:disabled {
+  opacity: 0.5;
+  cursor: default;
+  border-color: var(--duo-border);
+  color: var(--duo-ink-soft);
+  background: var(--duo-bg);
+}
+
+/* 「问 AI」展开后的选项面板（P26） */
+.rf-ask-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 2px solid var(--duo-border);
+  border-radius: 14px;
+  background: var(--duo-bg);
+}
+.rf-ask-menu > div {
+  width: 100%;
+}
+.rf-ask-chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1.5px solid var(--duo-border);
+  background: var(--duo-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--duo-ink);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.rf-ask-chip:hover {
+  border-color: var(--duo-green);
+  background: var(--duo-green-soft);
+  color: var(--duo-green-dark);
+}
+
+/* 对话串里追问那一段的标题：你问：整句没看懂 */
+.rf-turn-ask {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--duo-ink-soft);
+}
+
+/* 重试小按钮（AI 内容标题行右侧） */
 .rf-ask-mini {
   margin-left: auto;
   padding: 2px 10px;
@@ -1326,6 +1372,21 @@ body {
   border-right: 4px solid transparent;
   border-top: 4px solid var(--duo-green-dark);
   pointer-events: none;
+}
+
+/* 中文默认收起（P26）：重读时眼睛不会直接扫到答案，留住「试着想起来」的机会。
+   鼠标停在这条划线的任意一个词上（整条带 .w-ann-hover），或它正是右栏在看的那条
+   （.w-anchor），才浮出来。 */
+.w-annotated-l[data-gloss]::before,
+.w-annotated-l[data-gloss]::after {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.w-annotated-l.w-ann-hover[data-gloss]::before,
+.w-annotated-l.w-ann-hover[data-gloss]::after,
+.w-annotated-l.w-anchor[data-gloss]::before,
+.w-annotated-l.w-anchor[data-gloss]::after {
+  opacity: 1;
 }
 
 /* 悬停到已存批注区间内的任意一个词：整条一起铺浅绿底，连成一条而不是逐词亮。

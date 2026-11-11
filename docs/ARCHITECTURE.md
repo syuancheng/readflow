@@ -418,6 +418,11 @@ tokenize("She sat on the river bank.")
 
 回看不再查词典，也不再问 AI：`contexts.dict_entry` 存查词当时的词典结果快照（`{entry, originalForm, lemmaForm}`，由 `saveWordAndContext()` 落库），`/api/annotations` 随批注下发；右栏的 `recall` 由「点的是不是一条已存记录」决定，不再要求有 AI 释义。快照上线前的老记录在 `/api/annotations` 首次读取时按原文补查一次并写回。删除后仍沿用 P24 的教训：`cancelRecord()` 显式 `loadAnnotations()`，正文划线和行内中文由 `annotations` 派生，不刷新就是陈旧的。回归脚本 `scripts/e2e-cancel-record.mjs`（隔离库）：点词落库 → 再点只收起 → 回看零请求 → 取消记录后三者消失 → 跨文章只删本文 → 短语整条回看与取消。
 
+**行内中文、逐级加深与「问 AI」（P26）**
+- 行内中文：系统提示要求 AI 第一行固定写「释义：<最直接的中文>」，`inlineGloss()` 只取这一行；旧答案按几种常见句式取含中文的那对引号（跳过英文原词、否定句里的词），取不到干净的短释义就不显示，绝不截半句加「…」。标签默认 `opacity: 0`，只在整条悬停（`.w-ann-hover`）或正在右栏看（`.w-anchor`）时显示——重读时不让眼睛直接扫到答案。
+- 同句计数：`noteSelection()` 以「这句里已存的记录」为准，并上本次会话还没落库的选区；旧版只在内存里记最近一句，跨句来回、刷新都会清零。`shouldAutoExplain()` 新增 `repeatCount ≥ 2` 时即使词典命中也自动请教——第二个卡点出现时才有整句大意 / 结构可给。
+- 「问 AI」：合并原「AI 释义」「追问」。回答是对话串（`lib/ai-thread.ts`）：第一段默认讲解，之后每段以「【追问】问题」开头，整串存进同一条 `contexts.ai_gloss`；新回答只追加不覆盖，词典内容始终在最上面。行内中文和卡片背面只从默认讲解那一段取。「整句没看懂」以整句为选区提问。回归：`scripts/e2e-ask-thread.mjs`（拦截 `/api/explain` 返回模拟回答，不花钱）。
+
 ### 4.2 选词：按下即整词，按词扩展（对齐 Readlang）
 
 **不用浏览器原生选区。** 原生选区按字符走：从 "defined" 的 d 后面按下，高亮从 e 开始，

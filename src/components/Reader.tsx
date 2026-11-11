@@ -11,6 +11,7 @@ import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
 import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
 import { inlineGloss } from "@/lib/gloss";
+import { parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
 import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
@@ -59,6 +60,24 @@ type Pick = {
   /** 这次选区采集的客观信号，随 /api/explain 送给模型（不是结论） */
   signals?: SelectionSignals;
 };
+
+/** 右栏 AI 对话串里的一段（P26） */
+type AskReq = {
+  /** 问题标题（显示为「你问：…」）；默认讲解为空 */
+  ask?: string;
+  /** 送给模型的具体问题 */
+  prompt?: string;
+  /** 整句提问时送给模型的选区（整句原文） */
+  word?: string;
+  wholeSentence?: boolean;
+  /** 把同句加深清零，只讲这个词 */
+  forceWord?: boolean;
+};
+type Turn = ThreadTurn & { status: "loading" | "streaming" | "done" | "error"; req?: AskReq };
+
+function turnsFrom(raw: string | null | undefined): Turn[] {
+  return parseThread(raw).map((t) => ({ ...t, status: "done" as const }));
+}
 
 /** 一篇文本里已保存的句子/短语批注（来自 contexts 表） */
 type Annotation = {
@@ -688,15 +707,12 @@ export default function Reader({
     }
   }
 
-  // 场景 4：同一句里连续请教的次数 + 历史。只放内存、不落库——「这句卡了三次」是
-  // 阅读会话内的瞬时状态，不该变成被永久记住的用户数据。
-  // key 用「段落 + 句子区间」：换句自动归零，翻页/刷新随组件重挂载清零。
-  // history 记录每次选区的原文（不存 AI 生成内容），让模型判断是并列卡点还是同词复用。
-  const sentenceAskRef = useRef<{
-    key: string;
-    count: number;
-    history: { selection: string }[];
-  }>({ key: "", count: 0, history: [] });
+  // 场景 4：同一句里请教过几次、问过哪些选区（P26 重写）。
+  // 旧版只在内存里记「最近一句」：在 A 句查一个词、去 B 句查一个、再回 A 句就从 1 重数，
+  // 刷新页面也清零 —— 逐级加深经常不生效。现在以「这句里已经存下的记录」为准
+  // （P23 起每次查词都落库，刷新、跨句来回都不丢），再并上本次会话里还没落库的那几次。
+  // 只记选区原文，不存 AI 生成内容，让模型判断是并列卡点还是同词复用。
+  const sentenceAskRef = useRef<Map<string, string[]>>(new Map());
 
   function noteSelection(
     sig: SelectionSignals,
@@ -704,17 +720,23 @@ export default function Reader({
     selection: string,
   ): { count: number; priorAsks: { selection: string }[] } {
     const key = `${paragraphId}:${sig.sentenceStart}:${sig.sentenceEnd}`;
-    const cur = sentenceAskRef.current;
-    if (cur.key === key) {
-      // 先取 priorAsks（不含本次），再把本次选区推入历史
-      const priorAsks = [...cur.history];
-      cur.history.push({ selection });
-      cur.count += 1;
-      return { count: cur.count, priorAsks };
+    const norm = (x: string) => x.trim().toLowerCase();
+    const mine = norm(selection);
+    const saved = annotationsRef.current
+      .filter(
+        (a) =>
+          a.paragraphId === paragraphId &&
+          a.start >= sig.sentenceStart &&
+          a.end <= sig.sentenceEnd,
+      )
+      .map((a) => a.quote.trim());
+    const session = sentenceAskRef.current.get(key) ?? [];
+    const prior: string[] = [];
+    for (const q of [...saved, ...session]) {
+      if (norm(q) !== mine && !prior.some((p) => norm(p) === norm(q))) prior.push(q);
     }
-    const history = [{ selection }];
-    sentenceAskRef.current = { key, count: 1, history };
-    return { count: 1, priorAsks: [] };
+    sentenceAskRef.current.set(key, [...session.filter((q) => norm(q) !== mine), selection]);
+    return { count: prior.length + 1, priorAsks: prior.map((q) => ({ selection: q })) };
   }
 
   // 已收词表（含状态），键为小写 displayForm / lemma
@@ -1510,26 +1532,23 @@ function PickCard({
   const [dict, setDict] = useState<DictResult | null>(null);
   const [dictLoading, setDictLoading] = useState(true);
 
-  // AI 释义
-  const [aiText, setAiText] = useState(initialGloss ?? "");
-  const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">(
-    initialGloss ? "done" : "idle",
-  );
-  const [showAskInput, setShowAskInput] = useState(false);
+  // AI 回答对话串（P26）：每次提问追加一段，词典内容和之前的回答都不覆盖
+  const [turns, setTurns] = useState<Turn[]>(() => turnsFrom(initialGloss));
+  const turnsRef = useRef(turns);
+  const updateTurns = (fn: (prev: Turn[]) => Turn[]) => {
+    turnsRef.current = fn(turnsRef.current);
+    setTurns(turnsRef.current);
+  };
+  const [menuOpen, setMenuOpen] = useState(false);
   const [askPrompt, setAskPrompt] = useState("");
-  /** 用户主动把「整句模式」改回按词回答（只影响本次弹层） */
-  const [forceWordMode, setForceWordMode] = useState(false);
+  const busy = turns.some((t) => t.status === "loading" || t.status === "streaming");
+  const hasDefault = turns.some((t) => !t.ask);
 
   // 进行中的 AI 流：切到别的词（弹层按锚点 key 卸载）或重新提问时中止，
   // 服务端随之关掉上游模型流，不再为没人看的答案付费。
   const aiAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => aiAbortRef.current?.abort(), []);
 
-  // 场景 4：同句连续请教 ≥3 次时模型会按整句分析，这里给一个可撤销的入口
-  const wholeSentenceMode = (pick.signals?.repeatCount ?? 0) >= 3 && !forceWordMode;
-
-  /** 没配模型时服务端返回的是引导文案：给重试入口，别把它当答案，也不写回批注 */
-  const needsSetup = aiStatus === "done" && isNotAGloss(aiText);
 
   // 是短语（含空格）还是单词
   const isPhrase = /\s/.test(anchor.quote.trim());
@@ -1539,6 +1558,7 @@ function PickCard({
     dictHit: Boolean(dict?.entry),
     hasInitialGloss: Boolean(initialGloss),
     fromAnnotation: Boolean(pick.fromAnnotation),
+    repeatCount: pick.signals?.repeatCount,
   });
 
   /** 回看（P25）：点的是「以前查过的那一条」，不是新选区 —— 词典和 AI 都不再请求，
@@ -1551,11 +1571,10 @@ function PickCard({
   useEffect(() => {
     setDict(recall ? (initialDict ?? null) : null);
     setDictLoading(!recall);
-    setAiText(initialGloss ?? "");
-    setAiStatus(initialGloss ? "done" : "idle");
-    setShowAskInput(false);
+    turnsRef.current = turnsFrom(initialGloss);
+    setTurns(turnsRef.current);
+    setMenuOpen(false);
     setAskPrompt("");
-    setForceWordMode(false);
 
     // 回看：一次请求都不发（词典 / AI 都不查），直接展示存下来的结果。
     if (recall) return;
@@ -1574,6 +1593,7 @@ function PickCard({
             dictHit: Boolean(data?.entry),
             hasInitialGloss: Boolean(initialGloss),
             fromAnnotation: Boolean(pick.fromAnnotation),
+            repeatCount: pick.signals?.repeatCount,
           })
         ) {
           // 词典给不出答案：用户已经停下来请教了，别再让他多点一次按钮。
@@ -1590,35 +1610,84 @@ function PickCard({
     };
   }, [anchor.quote, initialGloss, recall]);
 
-  /** 触发 AI 释义（流式）。forceWord = 把「按整句分析」临时改回按词回答。 */
-  async function triggerAI(prompt?: string, forceWord = false) {
-    aiAbortRef.current?.abort();
+  /** 选区所在的整句（「整句没看懂」用）：采集信号时已经算好；回看时由 AI 上下文拼回 */
+  const sentence = (
+    pick.signals?.sentence || `${aiContext.prefix}${anchor.quote}${aiContext.suffix}`
+  ).trim();
+  const isWholeSentence = sentence.length > 0 && quote.length >= sentence.length - 2;
+
+  /** 「问 AI」里的选项：只列这一刻有意义的 */
+  const askOptions: { label: string; req: AskReq }[] = [
+    ...(!hasDefault
+      ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: {} }]
+      : (pick.signals?.repeatCount ?? 1) >= 2
+        ? [{ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true } }]
+        : []),
+    ...(!isWholeSentence
+      ? [
+          {
+            label: "整句没看懂",
+            req: {
+              ask: "整句没看懂",
+              word: sentence,
+              wholeSentence: true,
+              prompt:
+                "这句话里的词我基本都认识，但整句没看懂。第一行按「释义：」格式给出整句的中文翻译；" +
+                "然后用一两行点明这句难在哪里（结构、指代、搭配或背景知识），帮我下次自己能拆开；必要时再给句子地图。",
+            },
+          },
+        ]
+      : []),
+    {
+      label: "讲讲句子结构",
+      req: {
+        ask: "讲讲句子结构",
+        prompt: `讲讲这句话的结构：主干（主语、谓语、宾语或表语）是什么，「${quote}」在其中充当什么、修饰谁。`,
+      },
+    },
+    {
+      label: "再给个例句",
+      req: {
+        ask: "再给个例句",
+        prompt: `用「${quote}」在这句里的这个意思，再给一个简单的英文例句，并附中文翻译。`,
+      },
+    },
+  ];
+
+  /**
+   * 向 AI 提一个问题（流式），回答追加在对话串末尾。
+   * req 为空 = 默认讲解（点词自动触发的那次）；forceWord = 把同句加深清零，只讲这个词。
+   */
+  async function triggerAI(req: AskReq = {}) {
     const controller = new AbortController();
     aiAbortRef.current = controller;
-    setAiStatus("loading");
-    setAiText("");
+    const index = turnsRef.current.length;
+    updateTurns((prev) => [...prev, { ask: req.ask, text: "", status: "loading", req }]);
+    const patch = (p: Partial<Turn>) =>
+      updateTurns((prev) => prev.map((t, i) => (i === index ? { ...t, ...p } : t)));
 
-    // 客观信号：前端只采集证据，不下结论。词典命中在这里补（构造 Pick 时还没查词典）。
-    // forceWord = 用户点了「改按词答」，把 repeatCount/priorAsks 清零，让模型按第 1 次的深度走。
-    const signals = pick.signals
-      ? {
-          ...pick.signals,
-          dictHit: Boolean(dict?.entry),
-          ...(forceWord ? { repeatCount: 0, priorAsks: undefined } : {}),
-        }
-      : undefined;
+    // 客观信号：前端只采集证据，不下结论。整句提问不带选区信号（选区就是整句）。
+    const signals =
+      pick.signals && !req.wholeSentence
+        ? {
+            ...pick.signals,
+            dictHit: Boolean(dict?.entry),
+            ...(req.forceWord ? { repeatCount: 0, priorAsks: undefined } : {}),
+          }
+        : undefined;
 
-    // 段落级上下文：选区 + 段内完整前文/后文（保证句子完整，不被锚点窗口截断）
-    const body = {
-      word: anchor.quote,
-      prefix: aiContext.prefix,
-      suffix: aiContext.suffix,
-      ...(aiContext.withPrevSentence ? { withPrevSentence: true } : {}),
-      language: "en",
-      monolingual: false,
-      ...(prompt ? { prompt } : {}),
-      ...(signals ? { signals } : {}),
-    };
+    const body = req.wholeSentence
+      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt }
+      : {
+          word: anchor.quote,
+          prefix: aiContext.prefix,
+          suffix: aiContext.suffix,
+          ...(aiContext.withPrevSentence ? { withPrevSentence: true } : {}),
+          language: "en",
+          monolingual: false,
+          ...(req.prompt ? { prompt: req.prompt } : {}),
+          ...(signals ? { signals } : {}),
+        };
 
     try {
       const res = await fetch("/api/explain", {
@@ -1628,36 +1697,44 @@ function PickCard({
         signal: controller.signal,
       });
       if (!res.ok) throw new Error("请求失败");
-
       const reader = res.body?.getReader();
       if (!reader) throw new Error("无法读取流");
 
-      setAiStatus("streaming");
+      patch({ status: "streaming" });
       const decoder = new TextDecoder();
       let text = "";
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         text += decoder.decode(value, { stream: true });
-        // 服务端遇到限流/繁忙会自动重试，重开前吐一个重置标记：
-        // 丢掉上一次的半成品，避免两段释义拼接显示
-        if (text.includes(STREAM_RESET)) {
-          text = text.split(STREAM_RESET).pop() ?? "";
-        }
-        setAiText(text);
+        // 服务端遇到限流/繁忙会自动重试，重开前吐一个重置标记：丢掉上一次的半成品
+        if (text.includes(STREAM_RESET)) text = text.split(STREAM_RESET).pop() ?? "";
+        patch({ text });
       }
-
-      setAiStatus("done");
-      // 生成完成即写回该批注，翻回去看时不用重新请求 AI。
-      // 但「没配模型」的引导文案 / 报错文案不是释义，存进去会被当成已存释义展示。
-      if (!isNotAGloss(text)) onAIGloss?.(text);
+      patch({ text, status: "done" });
+      // 整串写回这条记录：回看时原样还原。「没配模型」的引导 / 报错不是答案，不入串
+      const keep = turnsRef.current.filter((t) => t.status === "done" && !isNotAGloss(t.text));
+      if (!isNotAGloss(text)) onAIGloss?.(serializeThread(keep));
     } catch (err) {
-      // 被主动中止（切词 / 重新提问）不是错误：不覆盖新一轮的状态，半截答案也不写回
+      // 被主动中止（切词 / 卸载）不是错误：半截答案不写回
       if (controller.signal.aborted) return;
-      setAiText(`[Error: ${err instanceof Error ? err.message : "AI 释义失败"}]`);
-      setAiStatus("error");
+      patch({ text: `[Error: ${err instanceof Error ? err.message : "AI 释义失败"}]`, status: "error" });
     }
+  }
+
+  /** 失败或「没配模型」的那一段：去掉它，用同一个问题再问一次 */
+  function retry(index: number) {
+    const req = turnsRef.current[index]?.req ?? {};
+    updateTurns((prev) => prev.filter((_, i) => i !== index));
+    void triggerAI(req);
+  }
+
+  function askCustom() {
+    const q = askPrompt.trim();
+    if (!q || busy) return;
+    setAskPrompt("");
+    setMenuOpen(false);
+    void triggerAI({ ask: q, prompt: q });
   }
 
   return (
@@ -1743,100 +1820,85 @@ function PickCard({
         </p>
       )}
 
-      {/* 新选区在词典未命中时已自动触发；这个手动入口留给回看旧批注 / 请求失败重试 */}
-      {aiStatus === "idle" && (
-        <button className="rf-ai-mini mt-3" onClick={() => triggerAI()}>
-          ✨ AI 释义
-        </button>
-      )}
-
-      {/* AI 内容：平铺展示 */}
-      {aiStatus !== "idle" && (
-        <div className="mt-4">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="duo-badge duo-badge-green">AI 释义</span>
-            {aiStatus === "loading" && (
-              <span className="text-[12px] font-bold text-ink-faint">正在思考…</span>
-            )}
-            {aiStatus === "streaming" && (
-              <span className="text-[12px] font-bold" style={{ color: "var(--duo-green-dark)" }}>
-                生成中…
-              </span>
-            )}
-            {aiStatus === "error" && (
-              <button className="rf-ask-mini" onClick={() => void triggerAI()}>
-                重试
-              </button>
-            )}
-            {needsSetup && (
-              <button className="rf-ask-mini" onClick={() => void triggerAI()}>
-                配置好模型后重试
-              </button>
-            )}
-            {aiStatus === "done" && !needsSetup && !showAskInput && (
-              <>
-                {wholeSentenceMode && (
-                  <button
-                    className="rf-ask-mini"
-                    title="这句连续请教了多次，已按整句分析；点这里改回按词回答"
-                    onClick={() => {
-                      setForceWordMode(true);
-                      void triggerAI(undefined, true);
-                    }}
-                  >
-                    已按整句分析 · 改按词答
-                  </button>
-                )}
-                <button className="rf-ask-mini" onClick={() => setShowAskInput(true)}>
-                  追问
+      {/* AI 对话串：每段一个问题，新回答追加在下面，不覆盖词典和之前的回答 */}
+      {turns.map((t, i) => {
+        const failed = t.status === "error" || (t.status === "done" && isNotAGloss(t.text));
+        return (
+          <div className="mt-4" key={i}>
+            <div className="flex items-center gap-2 mb-1.5">
+              {t.ask ? (
+                <span className="rf-turn-ask">你问：{t.ask}</span>
+              ) : (
+                <span className="duo-badge duo-badge-green">AI 释义</span>
+              )}
+              {t.status === "loading" && (
+                <span className="text-[12px] font-bold text-ink-faint">正在思考…</span>
+              )}
+              {t.status === "streaming" && (
+                <span className="text-[12px] font-bold" style={{ color: "var(--duo-green-dark)" }}>
+                  生成中…
+                </span>
+              )}
+              {failed && (
+                <button className="rf-ask-mini" onClick={() => retry(i)}>
+                  {t.status === "error" ? "重试" : "配置好模型后重试"}
                 </button>
-              </>
-            )}
+              )}
+            </div>
+            <div className="rf-md text-[14px] leading-relaxed text-ink">
+              <MarkdownText text={t.text} />
+              {t.status === "streaming" && (
+                <span
+                  className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
+                  style={{ background: "var(--duo-green)" }}
+                />
+              )}
+            </div>
           </div>
-          <div className="rf-md text-[14px] leading-relaxed text-ink">
-            <MarkdownText text={aiText} />
-            {aiStatus === "streaming" && (
-              <span
-                className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
-                style={{ background: "var(--duo-green)" }}
-              />
-            )}
-          </div>
-        </div>
-      )}
+        );
+      })}
 
-      {showAskInput && (
-        <div className="mt-3">
-          <input
-            className="duo-input mb-2 !text-[14px]"
-            placeholder="例如：这个词还有别的用法吗？"
-            value={askPrompt}
-            onChange={(e) => setAskPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && askPrompt.trim()) {
-                triggerAI(askPrompt.trim());
-                setShowAskInput(false);
-              }
-            }}
-          />
-          <div className="flex gap-2">
-            <button
-              className="rf-ai-mini"
-              onClick={() => {
-                if (askPrompt.trim()) {
-                  triggerAI(askPrompt.trim());
-                  setShowAskInput(false);
-                }
-              }}
-            >
-              提问
-            </button>
-            <button className="rf-ai-mini" onClick={() => setShowAskInput(false)}>
-              取消
-            </button>
+      {/* 唯一的 AI 入口（P26）：合并原来的「AI 释义」和「追问」。展开后选一个常见问题，或自己输入 */}
+      <div className="mt-3">
+        <button
+          className="rf-ai-mini"
+          disabled={busy}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ✨ 问 AI {menuOpen ? "▴" : "▾"}
+        </button>
+        {menuOpen && !busy && (
+          <div className="rf-ask-menu">
+            {askOptions.map((o) => (
+              <button
+                key={o.label}
+                className="rf-ask-chip"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void triggerAI(o.req);
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
+            <div className="flex gap-2 mt-1">
+              <input
+                className="duo-input !text-[14px] flex-1"
+                placeholder="或者直接问：比如这里为什么用过去时？"
+                value={askPrompt}
+                onChange={(e) => setAskPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") askCustom();
+                }}
+              />
+              <button className="rf-ai-mini" disabled={!askPrompt.trim()} onClick={askCustom}>
+                提问
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 锚点信息 */}
       <details className="mt-4">

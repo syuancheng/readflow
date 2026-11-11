@@ -30,6 +30,14 @@ test("控制变量三：只改成「从已存批注回看」 → 不自动，不
   assert.equal(shouldAutoExplain({ ...BASE, fromAnnotation: true }), false);
 });
 
+test("P26 同一句第 2 次及以上：词典命中也自动追加老师的讲解（逐级加深）", () => {
+  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 2 }), true);
+  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 3 }), true);
+  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 1 }), false);
+  // 回看 / 已有答案仍然不发请求
+  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 3, fromAnnotation: true }), false);
+});
+
 test("三个例外同时成立仍不自动；纯函数不改动入参", () => {
   const input = { dictHit: true, hasInitialGloss: true, fromAnnotation: true };
   assert.equal(shouldAutoExplain(input), false);

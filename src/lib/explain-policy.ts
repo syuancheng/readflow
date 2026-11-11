@@ -37,10 +37,15 @@ export function shouldAutoExplain(input: {
   dictHit: boolean;
   hasInitialGloss: boolean;
   fromAnnotation: boolean;
+  /** 同一句里这是第几次请教（含本次）；缺省视为 1 */
+  repeatCount?: number;
 }): boolean {
-  if (input.dictHit) return false;
   if (input.hasInitialGloss) return false;
   if (input.fromAnnotation) return false;
+  // P26：同一句查到第 2 个及以上选区，说明卡的不止一个词 —— 即使词典查得到，
+  // 也自动在词典下面追加老师的整句大意 / 句子结构，否则逐级加深永远不会发生。
+  if ((input.repeatCount ?? 1) >= 2) return true;
+  if (input.dictHit) return false;
   return true;
 }
 

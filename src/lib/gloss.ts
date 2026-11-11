@@ -1,67 +1,141 @@
 import { isNotAGloss } from "./explain-policy";
+import { defaultTurnText } from "./ai-thread";
 
-/** 词典释义开头的词性前缀：n. / vt. / adj. / abbr. 等 */
-const POS_PREFIX = /^\s*(?:n|v|vt|vi|adj|adv|prep|conj|pron|int|num|art|aux|abbr)\.\s*/i;
+/**
+ * 词典释义开头的词性前缀：n. / vt. / adj. / abbr. 等。
+ * ECDICT 的形容词、副词写作 a. / ad.，复数 pl.，也要认。
+ */
+const POS_PREFIX =
+  /^\s*(?:n|v|vt|vi|a|adj|ad|adv|prep|conj|pron|int|interj|num|art|aux|abbr|pl|s)\.\s*/i;
 
-/** 解释性长句不适合当行内标签，拿不准就回退到词典义 */
-const EXPLANATORY = /(?:不是|而是|这里|整句|这句话|指的是|形容|表示主语|语法)/;
+const HAS_CJK = /[\u3400-\u9fff]/;
 
-function clipInline(s: string, cap: number): string {
-  const chars = Array.from(s.trim());
-  if (!chars.length) return "";
-  return chars.length > cap ? `${chars.slice(0, cap).join("")}…` : chars.join("");
-}
+/** AI 第一行的固定格式（P26）：「释义：超智能的」 */
+const GLOSS_LINE = /^\s*释义\s*[：:]\s*(.+)$/;
 
-function cleanInline(raw: string | null | undefined, cap: number, fromAI: boolean): string {
-  if (!raw || !raw.trim() || isNotAGloss(raw)) return "";
-  const lines = raw
+/**
+ * 旧答案里「选区在这句的意思」常见句式。前面带「不」的是否定（mining 在这里不是「采矿」），不能取。
+ */
+const SELECTION_PATTERNS = [
+  /在这(?:句|里)[^「]{0,8}?(?<!不)(?:是|指|译作|意思是)「([^」]+)」/,
+  /这里[^「。]{0,40}?(?<!不)是「([^」]+)」/,
+  /(?<!不)(?:中文叫|中文是|译作|译为|翻译成|意思是)「([^」]+)」/,
+];
+
+/** 行内标签上限：超过就不显示，绝不截半句挂到正文上 */
+const INLINE_CAP = 12;
+
+function splitLines(raw: string): string[] {
+  return raw
     .replace(/```[\s\S]*?```/g, " ")
+    // ECDICT 导入时把真实换行存成了字面量 \n，两种都要当分隔
     .replace(/\\n/g, "\n")
     .split(/\r?\n/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const head = lines[0] ?? "";
-  if (!head) return "";
+}
 
-  // P13 的第一屏常写成「语境义」——在这里…；引号贴行首时它就是要显示的那部分
-  if (fromAI) {
-    const quoted = head.match(/^「([^」]{1,24})」/);
-    if (quoted) return clipInline(quoted[1], cap);
-    // 一整句解释（含「不是…而是…」之类）放进行内会又长又误导，让词典义兜底
-    if (EXPLANATORY.test(head) || Array.from(head).length > cap + 8) return "";
+/** 去掉引号 / 强调记号 / 句末标点，只留中文意思本身 */
+function tidy(s: string): string {
+  let out = s.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  // 「受益于」。 这类：句末标点和引号交替出现，剥到不再变化为止
+  for (let prev = ""; prev !== out; ) {
+    prev = out;
+    out = out
+      .replace(/[。．.；;，,、！!？?]+$/, "")
+      .replace(/^[「『“"'（(]+|[」』”"'）)]+$/g, "")
+      .trim();
   }
+  return out;
+}
 
-  const cleaned = head
-    .replace(/==[^：\n]*：([^==]+)==/g, "$1")
-    .replace(/==/g, "")
-    .replace(/[#*>`_]/g, " ")
-    .replace(/^\s*\[[^\]]{1,8}\]\s*/, "") // [医] / [计] 等学科标签
-    .replace(POS_PREFIX, "")
-    .replace(/^[-•]\s*/, "")
-    .replace(/^\d+\.\s*/, "")
-    .replace(/——[\s\S]*$/, "")
-    .split(/[；;，,]/)[0]
-    .replace(/\s+/g, " ")
-    .trim();
-  return clipInline(cleaned, cap);
+/** 只留最直接的一个说法：去掉开头的括号限定，「做出来、解得出」只取「做出来」 */
+function primary(s: string): string {
+  return tidy(
+    s
+      .replace(/^\s*[（(][^）)]{1,12}[）)]\s*/, "")
+      .split(/[、／/]|\s或\s/)[0],
+  );
+}
+
+function fits(s: string, cap: number): string {
+  return s && HAS_CJK.test(s) && Array.from(s).length <= cap ? s : "";
 }
 
 /**
- * 正文划线上方那一行中文短释义（P23）。
+ * 从 AI 释义里取「选区在这句里的中文意思」。
  *
- * 与 cardGloss() 不同：卡片背面要「可脱离原句」，行内标签只要「这一处是什么意思」，
- * 所以更短、更保守。优先级是 AI 语境义 > 词典义 —— 同一个选区后来问过 AI 时，
- * 语境义比词典的通用释义更贴切（对齐 P13 的输出契约）。
+ * 新答案（P26 起）第一行固定是「释义：…」，直接取。之前存下的旧答案没有这一行，
+ * 按老师常见的几种写法找：「X」在这句里是「Y」/ 中文叫「Y」/ 译作「Y」/ 行首「Y」——。
+ * 只认**含中文**的那对引号：旧规则取第一对「」，会把英文原词 ultraintelligent 当成释义。
+ * 找不到、或是整句大意这类长句时返回空，由调用方回退词典义。
+ */
+export function aiInlineMeaning(rawThread: string | null | undefined, cap = INLINE_CAP): string {
+  // 只看默认讲解那一段：后面追问（整句没看懂 / 例句）的第一行不是这个词的意思
+  const raw = defaultTurnText(rawThread);
+  if (!raw || !raw.trim() || isNotAGloss(raw)) return "";
+  const lines = splitLines(raw);
+  for (const line of lines.slice(0, 3)) {
+    const m = line.match(GLOSS_LINE);
+    if (m) return fits(primary(m[1]), cap);
+  }
+  // 更早的答案用「**在这里的意思**」小标题：取它下面那一行的第一个分句
+  const hereAt = lines.findIndex((l) => /^\**\s*在这里的意思\s*\**[：:]?$/.test(l));
+  if (hereAt >= 0 && lines[hereAt + 1]) {
+    const first = lines[hereAt + 1].replace(/^[*_]+|[*_]+$/g, "").split(/[，,。；;：:]/)[0];
+    const g = fits(primary(first), cap);
+    if (g) return g;
+  }
+
+  // 前三行里找（开头是「整句大意：」时，选区自己的意思通常在下一行）
+  const candidates = lines
+    .slice(0, 3)
+    .filter((l) => !/^(?:整句大意|这句话的意思是|这句话是说|整句在说)/.test(l));
+  for (const line of candidates) {
+    // 行首「中文」——解释：老师最常见的写法，优先于句中的其它引号
+    const lead = line.match(/^「([^」]+)」/);
+    if (lead && HAS_CJK.test(lead[1])) return fits(primary(lead[1]), cap);
+    for (const re of SELECTION_PATTERNS) {
+      const m = line.match(re);
+      if (m && HAS_CJK.test(m[1])) return fits(primary(m[1]), cap);
+    }
+  }
+  return "";
+}
+
+/** 词典义：去学科标签和词性前缀，只取第一个义项 */
+function dictInlineMeaning(raw: string | null | undefined, cap: number): string {
+  if (!raw || !raw.trim() || isNotAGloss(raw) || raw.trim() === "(待补充释义)") return "";
+  // 早期规则把 AI 答案的小标题错存成了词条释义，这些不是意思
+  if (/^\**\s*(?:通常意思|在这里的意思|本句中的意思|语境义)\s*\**$/.test(raw.trim())) return "";
+  const head = splitLines(raw)[0] ?? "";
+  const first = head
+    .replace(/[*_`#>]/g, " ")
+    .replace(/^\s*\[[^\]]{1,8}\]\s*/, "") // [医] / [计] 等学科标签
+    .replace(POS_PREFIX, "")
+    .replace(/^[-•]\s*/, "")
+    // (两者之中)任一的 → 任一的：义项前的括号限定不是意思本身
+    .replace(/^\s*[（(][^）)]{1,12}[）)]\s*/, "")
+    .split(/[；;，,]/)[0]
+    // 帕雷托（意大利经济学家… 这类补充说明被逗号切断后括号不闭合，整段去掉
+    .replace(/\s*[（(][^）)]*$/, "");
+  return fits(tidy(first), cap);
+}
+
+/**
+ * 正文划线上方那一行中文（P23，P26 重写）。
  *
- * AI 释义形态不稳定：第一屏若是一整句解释而不是短语，宁可回退词典义，
- * 也不要把半句话截断挂到正文上。纯函数，无副作用，可直接单测。
+ * 只要「这一处最直接的中文意思」，一个词或一个短语，不带任何解释。
+ * 优先 AI 的「释义：」行（按这句语境译的），没有再用词典第一个义项。
+ * 取不到干净的短释义就返回空 —— 宁可不显示，也不把截断的半句话挂到正文上。
+ * 纯函数，无副作用，可直接单测。
  */
 export function inlineGloss(
   aiGloss: string | null | undefined,
   translation: string | null | undefined,
-  cap = 10,
+  cap = INLINE_CAP,
 ): string {
-  return cleanInline(aiGloss, cap, true) || cleanInline(translation, cap, false);
+  return aiInlineMeaning(aiGloss, cap) || dictInlineMeaning(translation, cap);
 }
 
 /** 词库释义可能是长段词典文本或 AI Markdown，插件小标签只留一行短释义 */
@@ -122,10 +196,22 @@ function isLabelledSentence(line: string): boolean {
  *
  * 纯函数、确定性、无副作用；提炼不出内容时返回 undefined，由调用方用占位符。
  */
-export function cardGloss(raw: string | null | undefined, cap = 100): string | undefined {
+export function cardGloss(rawThread: string | null | undefined, cap = 100): string | undefined {
+  // 卡片背面只要这个词的意思：取默认讲解那一段，追问的内容不进卡片
+  const raw = defaultTurnText(rawThread);
   if (!raw || !raw.trim()) return undefined;
   // 无模型 / 出错时的提示文案不是释义，不能进词库（与前端写回批注共用同一判断）
   if (isNotAGloss(raw)) return undefined;
+
+  // P26 起 AI 第一行是「释义：…」：那就是选区的中文意思，卡片背面直接用它
+  const glossLine = splitLines(raw)
+    .slice(0, 3)
+    .map((l) => l.match(GLOSS_LINE)?.[1])
+    .find(Boolean);
+  if (glossLine) {
+    const g = tidy(glossLine);
+    if (g) return Array.from(g).length > cap ? `${Array.from(g).slice(0, cap).join("")}…` : g;
+  }
 
   const lines = raw
     .replace(/```[\s\S]*?```/g, " ")
