@@ -19,6 +19,7 @@
     "src/lib/gloss.ts",
     "src/lib/markdown-inline.ts",
     "src/lib/explain-policy.ts",
+    "src/lib/annotation-range.ts",
     "src/lib/cefr.ts",
     "src/lib/split.ts",
     "src/lib/tokenize.ts",

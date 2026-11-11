@@ -408,6 +408,14 @@ tokenize("She sat on the river bank.")
 - 一段 100 词 ≈ 200 个 DOM 节点。视口内 10 段也就 2000 个，无压力。
 - `Tokens` 用 `memo` + `useMemo` 按 `content` 缓存分词结果，同段落不会重复切；代码块不生成 `.w`。
 
+**行内中文短释义（P23）**：查过的选区在绿色下划线上方常驻一行中文短义，点划线仍在右栏看详解。短义随 `rangeKey` 编码成 `start-end:<encodeURIComponent(短义)>` 传给 memo 化的 `Tokens`；区间左端词（`.w-annotated-l`）带 `data-gloss`，由 CSS `::before { content: attr(data-gloss) }` 生成小字、`::after` 生成指向三角，两者都 `pointer-events: none`。
+
+关键是**绝不插真实文本节点**：`.rf-callout::before` 与 P17 行内公式早已定下这条契约——插入的中文会被 `Range.toString()` 算进段落偏移，`data-s/data-e` 与 `contexts.start/end` 随即错位。伪元素不进 `textContent`、不进选区，锚点零改动。短义由 `inlineGloss()` 从 `contexts.ai_gloss`（语境义优先）或 `user_words.translation`（词典义兜底）提炼；`/api/annotations` 必须把 `translation` 一起下发，因为前端 `savedWords` 是 SSR 快照，刚落库的新词不在里面。AI 释义第一屏若是一整句解释而非短语，宁可回退词典义，也不把半句话挂到正文上。
+
+同一版还**移除了「自动收词」开关**：点词 / 拖选恒定落库，「查过 = 已有批注 = 显示标签」三者等价。反悔靠 delete-on-deselect（只删本次新建的词条），`/api/contexts/gloss` 的服务端按锚点补建逻辑保留——并发竞态与时序错位仍会用到它。
+
+**撤销必须连带清掉正文标记（P24）**：delete-on-deselect 有两条路径——卡片里的显式「撤销」按钮，和「再点同一个词 = 收起并撤销」这个手势。两条都必须走 `unsaveWord().then(() => loadAnnotations())`。P24 实测发现手势那条漏了刷新：服务端把 `contexts` 删干净了，前端 `annotations` 还是旧快照，正文里的绿色下划线和 P23 的行内中文标签留在原地——用户看到的是「词没了但划线还在」。教训是**删除动作要显式声明它刷新了哪份数据**，不能靠「服务端已经删了」想当然；正文的划线/标签由 `annotations` 派生，不刷新就是陈旧的。回归脚本 `scripts/e2e-undo-cleanup.mjs` 同时覆盖两条路径，各自断言「库里删干净」+「正文划线消失」+「行内标签消失」。
+
 ### 4.2 选词：按下即整词，按词扩展（对齐 Readlang）
 
 **不用浏览器原生选区。** 原生选区按字符走：从 "defined" 的 d 后面按下，高亮从 e 开始，
@@ -429,10 +437,10 @@ mouseup             → from === to ? pickWord(那个词) : pickRange(pEl, words
 - 松手后浏览器补发的 `click` 被吞掉，`onClick` 只负责「点空白收起」和挡住链接跳转。
 - **按住 Option（⌥）拖动**交还原生选区，用来复制原文，不弹卡片。
 
-**颜色只有一种底色。** 悬停、拖动中（`.w-drag`）、当前选中（`.w-anchor`）都是 `--duo-green-soft`；
-当前选中另加深绿底线；已存批注（`.w-annotated`）只画浅绿下划线、不铺底色。
-「当前选中」和批注都由 `Tokens` 按 `rangeKey`（`批注区间,…|选中区间`）渲染，不命令式改 class——
-否则批注首次落库时整段重渲染会把手动加的选中样式冲掉。只有拖动预览是命令式的（每跨一个词重涂，走 React 会让长文卡顿）。
+**颜色只有一种底色。** 悬停、拖动中（`.w-drag`）、当前选中（`.w-anchor`）、悬停到已存批注（`.w-ann-hover`）都是 `--duo-green-soft`；当前选中 / 已存批注另加主题绿底线（`.w-annotated` 是常驻的 3px 实线）。
+「当前选中」「拖动预览」「已存批注」「整条悬停」都由 `Tokens` 按 `rangeKey`（`批注区间,…|选中区间|拖动预览|悬停区间`）渲染，不命令式改 class——否则批注首次落库时整段重渲染会把手动加的样式冲掉。
+
+**已存批注是一等交互单位。** 短语/整句批注的下划线覆盖整段区间（含词间空白），所以悬停到区间内任意一个词，整条一起亮；单击区间内的词则直接回看当初那条短语存下的释义（词典与 AI 都不再请求，`PickCard` 的 `recall` 模式跳过自动查询），而不是把这个词当成新选区再查一遍。用户点短语里的词往往说明当初那条答案没把它讲清楚，属于答案质量问题，不该用「再查一遍」生成另一条答案；答案质量本身留给 prompt 单独迭代。多条批注重叠时取区间最短、起点最早的一条；单词批注仍走原来的点词路径（查词典 + 摊开已存释义）。
 
 ### 4.4 锚点三件套（`lib/tokenize.ts`）
 
@@ -493,7 +501,7 @@ maxHeight = min(vh - top - 16, 560)              // 硬约束：永不溢出视�
 ```
 点词 / 拖选短语
  │
- ├─▶ 自动收词开 → POST /api/contexts/ensure {锚点}（P12）
+ ├─▶ 点词 / 拖选一律 → POST /api/contexts/ensure {锚点}（P12；P23 起无开关）
  │      服务端 ensureContextByAnchor() 按 (textId, paragraphId, start, end) 幂等
  │      已有 context 原样返回 / 没有就补建 → 「本文这一处」一定有批注
  │      ⚠️ 不看 savedMap（全量词库）、也不看前端 annotations 快照
@@ -655,7 +663,7 @@ AI 全文
 | 触发条件 | 为什么没有 context |
 |---|---|
 | 词在别的文章里收过 | `savedWords` 是**全量词库**，`savedMap` 命中后点词直接 `return`，不会为本文这一处新建 context |
-| 自动收词关闭 | 点词只出卡片，不落库 |
+| 前端还没来得及落库（并发 / 时序错位） | `contextId` 此刻还不存在（P23 前还包括「关掉自动收词」，该开关已移除） |
 | 连续点两个词 | 两次 `loadAnnotations()` 并发，旧响应晚到会覆盖含新批注的列表（偶发） |
 
 **修法是把「存得下」变成服务端契约，而不是前端时序**：新增 `POST /api/contexts/gloss`，客户端只送锚点 + 释义全文；`lib/word-store.ts` 的 `persistGlossByAnchor()` 按 `(textId, paragraphId, start, end)` 找 context，命中就 update，没命中就按 `/api/words` 的同一套规则补建词条 + context。同一个锚点重复写（重试、追问）只覆盖，不堆重复批注；`isNotAGloss()` 在服务端再挡一次降级文案。
@@ -1188,9 +1196,9 @@ BASE=http://127.0.0.1:3000 npm run test:e2e   # 全量回归：删词/撤销/收
 
 **P13 的真模型 A/B 控制变量**：同一模型（`deepseek-chat`）、同一 user message、同一 `temperature: 0.3` / `max_tokens: 400`，只换 system，跑用户截图里两个真实选区（`over rich states and artifacts`、`benefits from`）。量三件事：第一屏有没有选区译法、语法术语出现次数、有没有越界把选区外英文译成中文。结果：旧 prompt 语法术语 6~13 次、语义夹在中间；新 prompt 降到 0~4 次，两例第一屏都给译法、都带 `==` 主干下划线，还顺手纠正了旧版把 `and thus` 说成「两个谓语共用一个主语」的错误。中途发现删掉旧禁令后模型用「整句在说：」「这里说的是：」越界，补了「点名句式 + 正例」才收敛——**这一条是单测替代不了的，改 prompt 必须真调一次**。
 
-`test:spine-render` 为什么不靠真模型：模型是否给句子地图是它自己的判断（轻答可以不写），拿它验渲染器会随机假阴性。脚本改为通过 `/api/contexts/gloss` 确定性注入一条带 `==...==` 的 `aiGloss`，再从「已存批注」回看，断言 `.rf-md-spine` 数量、computed `text-decoration-line`、页面无裸 `==`、卡片背面无记号。它抓到过一次真实问题：全局 CSS 增量构建缓存没把新规则带进产物，class 在但样式不在，于是改成组件内联样式（5.3）。
+`test:spine-render` 为什么不靠真模型：模型是否给句子地图是它自己的判断（轻答可以不写），拿它验渲染器会随机假阴性。脚本改为通过 `/api/contexts/gloss` 确定性注入一条带 `==...==` 的 `aiGloss`，再点正文的绿色标记回看，断言 `.rf-md-spine` 数量、computed `text-decoration-line`、页面无裸 `==`、卡片背面无记号。它抓到过一次真实问题：全局 CSS 增量构建缓存没把新规则带进产物，class 在但样式不在，于是改成组件内联样式（5.3）。
 
-历史数据说明：P12 之前丢失的 `ai_gloss` 无法追回（答案当时就没落库），在别的文章收过但本文没有 context 的老词也不会自动补批注。在正文里再点那个词会重新请教一次 / 补上批注，这次会存下来；从「已存批注」列表回看仍不自动发起请求。
+历史数据说明：P12 之前丢失的 `ai_gloss` 无法追回（答案当时就没落库），在别的文章收过但本文没有 context 的老词也不会自动补批注。在正文里再点那个词会重新请教一次 / 补上批注，这次会存下来；点回正文的绿色标记仍不自动发起请求。
 
 ---
 
@@ -1241,7 +1249,8 @@ P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整�
 | 改句子地图 / 主干标记 | `MarkdownText.tsx` 的 `==...==` 分支 + `lib/markdown-inline.ts` 的 `stripUnclosedSpine()` | 下划线样式内联在组件里，别挪回 `globals.css`（增量构建缓存会漏规则）；改完跑 `npm run test:spine-render` |
 | 改卡片背面释义 | `lib/gloss.ts` 的 `cardGloss()` | `/api/words`、`/api/contexts/[id]`、`/api/contexts/gloss` 三个写入口都依赖它（统一在 `word-store.ts`）；改完跑 `tests/unit/card-gloss.test.ts` |
 | 改 AI 释义落库 | `lib/word-store.ts` 的 `persistGlossByAnchor()` / `applyGlossToContext()` + `Reader.tsx` 的 `persistGloss()` | 别把写回重新绑回 `contextId`：按锚点幂等是「答案一定存得下」的保证；改完跑 `npm run test:gloss-persist` |
-| 改自动收词 / 已存批注 | `lib/word-store.ts` 的 `ensureContextByAnchor()` + `POST /api/contexts/ensure` + `Reader.tsx` 的 `ensureAnnotation()` | `savedMap` 是全量词库、`annotations` 是异步快照，两者都不能用来裁决「本文这一处有没有 context」；改完必须跑全量 `test:e2e`（撤销按钮那条会抓到快照过期） |
+| 改自动收词 / 已存批注 | `lib/word-store.ts` 的 `ensureContextByAnchor()` + `POST /api/contexts/ensure` + `Reader.tsx` 的 `ensureAnnotation()` | P23 起开关已移除、点词恒定落库；`savedMap` 是全量词库、`annotations` 是异步快照，两者都不能用来裁决「本文这一处有没有 context」；改完必须跑全量 `test:e2e`（撤销按钮那条会抓到快照过期） |
+| 改行内中文标签 | `lib/gloss.ts` 的 `inlineGloss()` + `Reader.tsx` 的 `rangeKey` / `renderTokens()` + `globals.css` 的 `.w-annotated-l[data-gloss]::before` | 中文只能用伪元素 + 属性生成，绝不插真实文本节点；`/api/annotations` 要带 `translation`；改完跑 `tests/unit/inline-gloss.test.ts` 与全量 `test:e2e` |
 | 改「再点开不重问」 | `Reader.tsx` 的 `savedGlossFor()` / `glossCacheRef` / `forgetGloss()` | 缓存键是 `${paragraphId}:${start}:${end}`，跨文章不算同一个锚点；删词删批注要同步清 |
 | 改阅读器证据 | `lib/sentence.ts` 的 `selectionSignals()` + `/api/explain` 的 `narrowSignals()` | 只送证据不送结论；新字段要同步白名单裁剪 |
 | 改「何时自动问 AI」 | `lib/explain-policy.ts` 的 `shouldAutoExplain()` + `Reader.tsx` 词典 fetch 回调 | 自动触发必须挂在请求回调里（state 会残留上一次结果）；改完跑 `npm run test:auto-explain` |

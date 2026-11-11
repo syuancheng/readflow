@@ -264,7 +264,6 @@ export default function SettingsDialog({
   const [notice, setNotice] = useState<Note | null>(null);
   const [profileDraft, setProfileDraft] = useState<Profile>(DEFAULT_PROFILE);
   const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
-  const [autoSave, setAutoSave] = useState(true);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
@@ -285,21 +284,6 @@ export default function SettingsDialog({
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // 阅读偏好存 localStorage（与阅读页 Reader 共用同一份约定）
-  useEffect(() => {
-    setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
-  }, []);
-
-  /** 立即生效：写 localStorage + 广播，阅读页监听后即时切换，不用刷新 */
-  function toggleAutoSave() {
-    setAutoSave((v) => {
-      const next = !v;
-      localStorage.setItem("readflow.autoSave", next ? "1" : "0");
-      window.dispatchEvent(new CustomEvent("readflow.autosave", { detail: next }));
-      return next;
-    });
-  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -864,26 +848,17 @@ export default function SettingsDialog({
                         <div>
                           <h3 className="st-panel-title">阅读设置</h3>
                           <p className="st-panel-desc">
-                            影响阅读页的收词与朗读，改动立即生效，不需要点保存。
+                            影响阅读页的朗读，改动立即生效，不需要点保存。
                           </p>
                         </div>
                       </div>
 
-                      <button
-                        id="st-autosave"
-                        className="st-reading-row"
-                        role="switch"
-                        aria-checked={autoSave}
-                        onClick={toggleAutoSave}
-                      >
+                      <div className="st-reading-row st-reading-row-static">
                         <span className="st-reading-text">
-                          <b>自动收词</b>
-                          <span>点词 / 划句后自动存入词库；关掉后只在批注卡里手动收词</span>
+                          <b>收词</b>
+                          <span>点词 / 划句后自动存入词库；再点一次或点卡片里的撤销即可取消本次收词</span>
                         </span>
-                        <span className={`st-switch ${autoSave ? "on" : ""}`} aria-hidden>
-                          <span className="st-switch-knob" />
-                        </span>
-                      </button>
+                      </div>
 
                       <div className="st-reading-row st-reading-row-static">
                         <span className="st-reading-text">
@@ -897,7 +872,7 @@ export default function SettingsDialog({
                       </div>
                     </div>
                     <p className="st-security">
-                      这两项保存在这台电脑的浏览器里（localStorage），不上传云端；换浏览器或清空站点数据会恢复默认。
+                      发音音色保存在这台电脑的浏览器里（localStorage），不上传云端；换浏览器或清空站点数据会恢复默认。
                     </p>
                   </section>
                 )}

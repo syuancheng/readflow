@@ -7,7 +7,7 @@
  *  A. 点词 → 右侧批注栏出现释义卡（黄金分割双栏）
  *  B. 自动收词开 → 点词即入库（API 计数 +1）
  *  C. 再点同一词 → 批注卡收起且词被移除（delete on deselect）
- *  D. 自动收词关 → 只出批注卡不入库，手动收词可用
+ *  D. P23 起自动收词开关已移除 → 阅读设置里不再有该开关，点词恒定落库
  *  E. 批注卡内含 AI 释义入口
  *  E2. 拖选整句（起点在词中间）→ 吸附到完整词并出批注卡
  *  F. 词库页：状态筛选 / 星标 / 标记已掌握 / 搜索
@@ -54,8 +54,7 @@ try {
   await page.goto(`${BASE}/texts/${TEXT_ID}`, { waitUntil: "load" });
   await page.waitForTimeout(600);
 
-  // 确保自动收词是开的
-  await page.evaluate(() => localStorage.setItem("readflow.autoSave", "1"));
+  // P23：自动收词开关已移除，点词恒定落库
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(600);
 
@@ -142,34 +141,27 @@ try {
   );
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
-  // E 步骤（自动收词仍开着）会顺带收词，清掉，保证 D 阶段起点干净
+  // E 步骤会顺带收词，清掉，保证 D 阶段起点干净
   await cleanup(keepIds);
 
-  // ---------- D：关掉自动收词（开关已收进设置中心 → 阅读设置；阅读页无顶栏 → 去首页操作再回来） ----------
-  await page.evaluate(() => localStorage.setItem("readflow.autoSave", "0"));
+  // ---------- D：P23 自动收词开关已移除，阅读设置里不该再有它 ----------
   await page.goto(`${BASE}/`, { waitUntil: "load" });
   await page.click(".pm-trigger");
   await page.waitForSelector(".pm-dropdown", { timeout: 5000 });
   const menuSwitch = await page.locator(".pm-dropdown .pm-switch").count();
-  check("D0 右上角菜单不再放阅读开关（已迁到设置中心）", menuSwitch === 0, `${menuSwitch} 个`);
+  check("D0 右上角菜单不放阅读开关", menuSwitch === 0, `${menuSwitch} 个`);
   await page.locator('.pm-row:has-text("设置")').click();
   await page.waitForSelector(".st-modal", { timeout: 5000 });
   await page.locator('.st-nav-item:has-text("阅读设置")').click();
   await page.waitForSelector("#st-reading-panel", { timeout: 5000 });
-  const switchOn = await page
-    .locator("#st-autosave .st-switch")
-    .evaluate((e) => e.classList.contains("on"));
-  check("D0b 阅读设置里自动收词显示关闭态", !switchOn, switchOn ? "on" : "off");
-
-  await page.locator("#st-autosave").click();
-  const switchedOn = await page
-    .locator("#st-autosave .st-switch")
-    .evaluate((e) => e.classList.contains("on"));
-  const storedOn = await page.evaluate(() => localStorage.getItem("readflow.autoSave"));
-  check("D0c 切换开关立即写入本地", switchedOn && storedOn === "1", `localStorage=${storedOn}`);
-  await page.locator("#st-autosave").click();
-  const storedOff = await page.evaluate(() => localStorage.getItem("readflow.autoSave"));
-  check("D0d 再切回关闭", storedOff === "0", `localStorage=${storedOff}`);
+  const autosaveSwitch = await page.locator("#st-autosave").count();
+  check(
+    "D1 阅读设置里不再有自动收词开关（恒定自动收词）",
+    autosaveSwitch === 0,
+    `${autosaveSwitch} 个`,
+  );
+  const voiceRow = await page.locator(".st-reading-voice").count();
+  check("D2 阅读设置仍保留发音音色", voiceRow > 0, `${voiceRow} 个`);
 
   await page.locator(".st-head .st-close").click();
   await page.waitForTimeout(150);

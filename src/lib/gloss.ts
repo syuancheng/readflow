@@ -1,5 +1,69 @@
 import { isNotAGloss } from "./explain-policy";
 
+/** 词典释义开头的词性前缀：n. / vt. / adj. / abbr. 等 */
+const POS_PREFIX = /^\s*(?:n|v|vt|vi|adj|adv|prep|conj|pron|int|num|art|aux|abbr)\.\s*/i;
+
+/** 解释性长句不适合当行内标签，拿不准就回退到词典义 */
+const EXPLANATORY = /(?:不是|而是|这里|整句|这句话|指的是|形容|表示主语|语法)/;
+
+function clipInline(s: string, cap: number): string {
+  const chars = Array.from(s.trim());
+  if (!chars.length) return "";
+  return chars.length > cap ? `${chars.slice(0, cap).join("")}…` : chars.join("");
+}
+
+function cleanInline(raw: string | null | undefined, cap: number, fromAI: boolean): string {
+  if (!raw || !raw.trim() || isNotAGloss(raw)) return "";
+  const lines = raw
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\\n/g, "\n")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const head = lines[0] ?? "";
+  if (!head) return "";
+
+  // P13 的第一屏常写成「语境义」——在这里…；引号贴行首时它就是要显示的那部分
+  if (fromAI) {
+    const quoted = head.match(/^「([^」]{1,24})」/);
+    if (quoted) return clipInline(quoted[1], cap);
+    // 一整句解释（含「不是…而是…」之类）放进行内会又长又误导，让词典义兜底
+    if (EXPLANATORY.test(head) || Array.from(head).length > cap + 8) return "";
+  }
+
+  const cleaned = head
+    .replace(/==[^：\n]*：([^==]+)==/g, "$1")
+    .replace(/==/g, "")
+    .replace(/[#*>`_]/g, " ")
+    .replace(/^\s*\[[^\]]{1,8}\]\s*/, "") // [医] / [计] 等学科标签
+    .replace(POS_PREFIX, "")
+    .replace(/^[-•]\s*/, "")
+    .replace(/^\d+\.\s*/, "")
+    .replace(/——[\s\S]*$/, "")
+    .split(/[；;，,]/)[0]
+    .replace(/\s+/g, " ")
+    .trim();
+  return clipInline(cleaned, cap);
+}
+
+/**
+ * 正文划线上方那一行中文短释义（P23）。
+ *
+ * 与 cardGloss() 不同：卡片背面要「可脱离原句」，行内标签只要「这一处是什么意思」，
+ * 所以更短、更保守。优先级是 AI 语境义 > 词典义 —— 同一个选区后来问过 AI 时，
+ * 语境义比词典的通用释义更贴切（对齐 P13 的输出契约）。
+ *
+ * AI 释义形态不稳定：第一屏若是一整句解释而不是短语，宁可回退词典义，
+ * 也不要把半句话截断挂到正文上。纯函数，无副作用，可直接单测。
+ */
+export function inlineGloss(
+  aiGloss: string | null | undefined,
+  translation: string | null | undefined,
+  cap = 10,
+): string {
+  return cleanInline(aiGloss, cap, true) || cleanInline(translation, cap, false);
+}
+
 /** 词库释义可能是长段词典文本或 AI Markdown，插件小标签只留一行短释义 */
 export function shortGloss(raw: string | null | undefined, cap = 24): string {
   if (!raw) return "";

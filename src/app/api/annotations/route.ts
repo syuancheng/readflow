@@ -44,6 +44,9 @@ export async function GET(req: Request) {
       prefix: contexts.prefix,
       suffix: contexts.suffix,
       aiGloss: contexts.aiGloss,
+      // P23 行内中文标签：词典命中的词没有 aiGloss，中文只能从词条拿。
+      // 必须随批注一起下发 —— 前端 savedWords 是 SSR 快照，刚落库的新词不在里面。
+      translation: userWords.translation,
       createdAt: contexts.createdAt,
     })
     .from(contexts)

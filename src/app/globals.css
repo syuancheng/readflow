@@ -1128,11 +1128,15 @@ body {
   padding: 36px 40px;
 }
 
-/* 批注栏：滚动文章时吸附在顶栏下方，内容超高时栏内自滚 */
+/* 批注栏：滚动文章时吸附在顶栏下方。
+   top / max-height 都要扣掉常驻顶栏（P19 加了 .rf-topbar，旧的 16px 会把顶部 38px 盖住）。
+   右栏只放当前这一次的一句话释义，正常不需要滚动；overflow 仅作超长释义的兜底，
+   不设 overscroll-behavior —— 滚轮照常交给唯一的主滚动容器，别把鼠标停在右栏时
+   的滚动吞掉。 */
 .reader-aside {
   position: sticky;
-  top: 16px; /* 阅读页无顶栏，吸附在视口顶部附近 */
-  max-height: calc(100vh - 32px);
+  top: calc(var(--rf-bar-h) + 16px);
+  max-height: calc(100vh - var(--rf-bar-h) - 32px);
   overflow-y: auto;
   min-width: 0;
   scrollbar-width: thin;
@@ -1272,125 +1276,76 @@ body {
   padding: 0 4px;
 }
 
-/* ====== 已存句子/短语批注：正文标记 + 右栏回看列表 ====== */
+/* ====== 已存句子/短语批注：正文标记（唯一的回看入口）====== */
 
-/* 已存批注的持久标记：只画下划线、不铺底色（底色留给「悬停 / 选中」这一种状态）。
-   词与词间空白都带下划线，连成一整条；当前选中（.w-anchor）在下面覆盖成底色 + 深绿底线。 */
+/* 已存批注的持久标记：主题绿实线下划线、不铺底色（底色留给「悬停 / 选中」）。
+   词与词间空白也带下划线，连成一整条；当前选中（.w-anchor）在下面覆盖成底色 + 深绿底线。
+   右栏「已存批注」列表已移除，点回这条标记是唯一的回看入口。 */
 .w-annotated {
-  box-shadow: inset 0 -2px 0 rgba(88, 204, 2, 0.45);
+  box-shadow: inset 0 -3px 0 var(--duo-green);
 }
 
-.rf-annots {
-  margin-top: 18px;
-  padding-top: 12px;
-  border-top: 2px solid var(--duo-border);
+/* ====== P23 划线上方的中文短释义 ======
+   只挂在批注区间左端词（.w-annotated-l）上，用 CSS 伪元素 + attr() 生成。
+   伪元素不是 DOM 文本节点：Range.toString()、data-s/data-e 坐标、contexts
+   锚点全都不受影响（这是 Block IR 的硬契约，见文件开头的结构化正文注释）。
+   下划线样式保持不动，底色仍然只表示「当前悬停 / 选中」。 */
+.w-annotated-l[data-gloss] {
+  position: relative;
 }
 
-.rf-annots-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 2px 2px 10px;
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--duo-ink);
-  cursor: pointer;
-}
-
-.rf-annots-head b {
-  color: var(--duo-green-dark);
-  margin-left: 3px;
-}
-
-.rf-annots-toggle {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--duo-ink-faint);
-}
-
-.rf-annots-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 260px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.rf-annots-empty {
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--duo-ink-faint);
-  padding: 4px 2px 8px;
-}
-
-.rf-annot-item {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  border: 2px solid var(--duo-border);
-  border-radius: 10px;
-  background: var(--duo-bg);
-  transition: border-color 120ms ease, background 120ms ease;
-}
-
-.rf-annot-item:hover {
-  border-color: var(--duo-green);
-}
-
-.rf-annot-item.is-active {
-  border-color: var(--duo-green);
-  background: var(--duo-green-soft);
-}
-
-.rf-annot-open {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.rf-annot-quote {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.4;
-  color: var(--duo-ink);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.rf-annot-meta {
+.w-annotated-l[data-gloss]::before {
+  content: attr(data-gloss);
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 0;
+  z-index: 2;
+  font-family: var(--font-sans), "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 11px;
   font-weight: 700;
-  color: var(--duo-ink-faint);
+  line-height: 1.1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  color: var(--duo-green-dark);
+  /* 点击必须穿透到 .w，右侧照常展开详解 */
+  pointer-events: none;
+  user-select: none;
 }
 
-.rf-annot-del {
-  padding: 0 9px;
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--duo-ink-faint);
-  cursor: pointer;
-  border-radius: 0 8px 8px 0;
+/* 指向划线的小尖角 */
+.w-annotated-l[data-gloss]::after {
+  content: "";
+  position: absolute;
+  bottom: calc(100% - 2px);
+  left: 6px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid var(--duo-green-dark);
+  pointer-events: none;
 }
 
-.rf-annot-del:hover {
-  color: var(--duo-ink);
-  background: var(--duo-surface);
+/* 悬停到已存批注区间内的任意一个词：整条一起铺浅绿底，连成一条而不是逐词亮。
+   短语里的几个词属于同一条批注，交互单位就是这条区间。 */
+.w-ann-hover {
+  background: var(--duo-green-soft);
+  border-radius: 0;
+}
+.w-ann-hover-l {
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+.w-ann-hover-r {
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
 }
 
 /* 正文当前批注锚点的高亮 */
 .w-anchor,
 .w-anchor:hover {
   background: var(--duo-green-soft);
-  box-shadow: inset 0 -2px 0 var(--duo-green);
+  box-shadow: inset 0 -3px 0 var(--duo-green);
   border-radius: 0;
 }
 .w-anchor-l {

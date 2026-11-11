@@ -31,7 +31,7 @@ export const NO_MODEL_NOTICE =
  * 三个例外，都不该替用户发起请求：
  * - `dictHit`：词典已经够用；
  * - `hasInitialGloss`：这条批注存过 AI 释义，回看时原样展示即可；
- * - `fromAnnotation`：从「已存批注」列表点开旧批注，用户只是想看一眼，不是在请教。
+ * - `fromAnnotation`：点回正文里已存批注的绿色标记，用户只是想看一眼，不是在请教。
  */
 export function shouldAutoExplain(input: {
   dictHit: boolean;

@@ -11,8 +11,9 @@
  *
  * 四组控制变量：
  *   1. 原始操作序列：A（词典命中）→ B（词典未命中、自动问 AI）→ 回 A → 再点 B
- *   2. B 已在全局词库、但在新文章里没有 context：点词不再自动收词，服务端必须补建
- *   3. 自动收词关闭：点词不落库，服务端仍必须把答案存下来
+ *   2. B 已在全局词库、但在新文章里没有 context：服务端必须补建这一处批注
+ *   3. 前端没有先落库（异步竞态 / 时序错位）：直接写回 /api/contexts/gloss，
+ *      服务端仍必须补建词条与批注（P23 移除自动收词开关后改从 API 验证）
  *   4. delegate 案例：全局已收过的词在新文章第一次点开也要进「已存批注」，
  *      且同一锚点重复 ensure 只能有 1 条 context（只读 SQLite 校验）
  *
@@ -107,12 +108,9 @@ async function clickWord(w) {
   if (!r) throw new Error(`找不到词 span: ${w}`);
   await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
 }
-async function openReader(textId, autoSave = true) {
+async function openReader(textId) {
   await page.goto(`${BASE}/texts/${textId}`, { waitUntil: "load" });
-  await page.evaluate(
-    (v) => localStorage.setItem("readflow.autoSave", v),
-    autoSave ? "1" : "0",
-  );
+  // P23：自动收词开关已移除，点词恒定落库，不再设置 localStorage
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(700);
   const hydrated = await page.evaluate(() => {
@@ -170,12 +168,19 @@ try {
   );
   ok(reopenMd.length > 30, "再点 B 直接看到已存释义");
   ok(explainCount === afterB, "再点 B 不需要重新查一次 AI");
-  const listText = await page.evaluate(() => document.querySelector(".rf-annots-list")?.innerText ?? "");
-  ok(listText.includes("已存 AI 释义"), "已存批注列表出现「已存 AI 释义」标记");
+  // 列表已移除：改为确认正文里 B 带着已存批注的绿色标记
+  const marked = await page.evaluate(
+    (w) =>
+      [...document.querySelectorAll("[data-pid] .w.w-annotated")].some((e) =>
+        (e.textContent ?? "").toLowerCase().includes(w.toLowerCase()),
+      ),
+    B,
+  );
+  ok(marked, "正文里 B 带已存批注的绿色标记");
   await collectWords(text1);
 
   // ===== 场景 2：词已在全局词库、本文没有 context =====
-  console.log("\n[场景 2] 同一个 B 出现在新文章（点词不再自动收词）");
+  console.log("\n[场景 2] 同一个 B 出现在新文章（服务端补建这一处批注）");
   const text2 = await createText(`[E2E] gloss persist 2 ${stamp}`, BODY_B);
   await openReader(text2);
   ok((await annotations(text2)).length === 0, "新文章初始没有 B 的批注");
@@ -184,13 +189,34 @@ try {
   ok(a2.aiGloss.length > 30, `服务端补建批注并写入释义（${a2.aiGloss.length} 字）`);
   await collectWords(text2);
 
-  // ===== 场景 3：自动收词关闭 =====
-  console.log("\n[场景 3] 自动收词关闭时点 D");
+  // ===== 场景 3：服务端按锚点补建（前端没先落库也应存下答案）=====
+  // P23 起自动收词开关已移除，这个场景改从 API 直接验证：异步竞态 / 词在别处
+  // 收过 / 前端时序错位时，/api/contexts/gloss 仍要补建词条与批注。
+  console.log("\n[场景 3] 直接写回 AI 释义，服务端补建批注");
   const text3 = await createText(`[E2E] gloss persist 3 ${stamp}`, BODY_D);
-  await openReader(text3, false);
-  await clickWord(D);
+  const detail3 = await j(await fetch(`${BASE}/api/texts/${text3}`));
+  const para3 = (detail3.paragraphs ?? []).find((p) => p.content.includes(D));
+  if (!para3) throw new Error("场景 3 找不到目标段落");
+  const s3 = para3.content.indexOf(D);
+  const e3 = s3 + D.length;
+  const glossRes = await fetch(`${BASE}/api/contexts/gloss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      word: D,
+      quote: D,
+      textId: text3,
+      paragraphId: para3.id,
+      start: s3,
+      end: e3,
+      prefix: para3.content.slice(0, s3),
+      suffix: para3.content.slice(e3),
+      aiGloss: `「${D}」是测试用的语境义，服务端应在没有前端收词的情况下补建批注并保存。`,
+    }),
+  });
+  ok(glossRes.ok, "写回接口返回成功");
   const a3 = await waitForGloss(text3, D);
-  ok(a3.aiGloss.length > 30, `自动收词关闭时释义仍被保存（${a3.aiGloss.length} 字）`);
+  ok(a3.aiGloss.length > 10, `服务端补建批注并写入释义（${a3.aiGloss.length} 字）`);
   await collectWords(text3);
 
   // ===== 场景 4：全局已收过的词，在另一篇文章里也要能进「已存批注」 =====

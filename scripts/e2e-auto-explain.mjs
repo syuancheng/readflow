@@ -69,7 +69,7 @@ try {
   if (!textId) throw new Error(`创建测试文本失败：${JSON.stringify(created)}`);
 
   await page.goto(`${BASE}/texts/${textId}`, { waitUntil: "load" });
-  await page.evaluate(() => localStorage.setItem("readflow.autoSave", "1"));
+  // P23：自动收词开关已移除，点词恒定落库，不需要再设置 localStorage
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(800);
 
@@ -178,19 +178,20 @@ try {
   const before = explainCount;
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(800);
+  // 列表已移除：点正文里那条已存批注的绿色标记来回看
   const opened = await page.evaluate(() => {
-    const btn = [...document.querySelectorAll(".rf-annot-open")].find((b) =>
-      (b.textContent ?? "").includes("tradition"),
+    const el = [...document.querySelectorAll("[data-pid] .w.w-annotated")].find((b) =>
+      (b.textContent ?? "").toLowerCase().includes("tradition"),
     );
-    if (!btn) return false;
-    btn.click();
+    if (!el) return false;
+    el.click();
     return true;
   });
   await page.waitForTimeout(1500);
   const manualBtn = await page.evaluate(() =>
     [...document.querySelectorAll(".reader-note button")].some((b) => b.textContent.includes("✨ AI 释义")),
   );
-  check("D1 回看列表里能点开这条词典命中、无 AI 释义的旧批注", opened);
+  check("D1 点正文绿色标记能打开这条词典命中、无 AI 释义的旧批注", opened);
   check("D2 回看旧批注 → 不自动发 /api/explain", explainCount === before, `before=${before} after=${explainCount}`);
   check("D3 手动「✨ AI 释义」入口仍可用（不把回看路径堵死）", manualBtn);
 } catch (e) {

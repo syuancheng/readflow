@@ -3,7 +3,7 @@
  *
  * 为什么不用真模型跑：模型是否给句子地图是它自己的判断（轻答可以不给），
  * 拿它验证渲染器会得到不稳定的假阴性。这里改成通过 /api/contexts/gloss
- * 确定性注入一条带 ==...== 的 aiGloss，再从「已存批注」回看检查 DOM。
+ * 确定性注入一条带 ==...== 的 aiGloss，再点正文绿色标记回看检查 DOM。
  *
  * 运行前需要生产服务在 3000 端口，且是最新构建：
  *   npm run test:spine-render
@@ -86,15 +86,20 @@ try {
   });
   check("页面已 hydrate（生产构建交互验证的前提）", hydrated);
 
-  const opened = await page.evaluate((w) => {
-    const btn = [...document.querySelectorAll(".rf-annot-open")].find((b) =>
-      (b.textContent ?? "").includes(w),
-    );
-    if (!btn) return false;
-    btn.click();
-    return true;
-  }, WORD);
-  check("能从「已存批注」打开这条注入的释义", opened);
+  // 右栏「已存批注」列表已移除，回看改走正文的绿色标记（.w-annotated）。
+  // 阅读器用原生 pointer/mouse 事件选词，el.click() 派发的合成 click 不会触发 pickWord；
+  // 必须用真实鼠标坐标点击（与其它 E2E 的 clickWord() 一致），否则后面全是假阴性。
+  const marked = page
+    .locator("[data-pid] .w.w-annotated")
+    .filter({ hasText: WORD })
+    .first();
+  const opened = (await marked.count()) > 0;
+  if (opened) {
+    const box = await marked.boundingBox();
+    if (!box) throw new Error("拿不到绿色标记的位置");
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  check("点正文绿色标记能打开这条注入的释义", opened);
   await page.waitForTimeout(700);
 
   const dom = await page.evaluate(() => {

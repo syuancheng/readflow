@@ -10,6 +10,8 @@ import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
 import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
+import { inlineGloss } from "@/lib/gloss";
+import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 
@@ -48,7 +50,7 @@ type Pick = {
   justSaved?: boolean;
   /** 拖选自动入库后对应的 context id，用于回填 AI 释义 / 回看 */
   contextId?: string;
-  /** 从「已存批注」列表回看旧批注：不是新选区，不自动发起 AI 请求 */
+  /** 点回正文里已存批注的绿色标记：不是新选区，不自动发起 AI 请求 */
   fromAnnotation?: boolean;
   /** 从已存批注回看时，直接展示当时保存的 AI 释义，不重新请求 */
   initialGloss?: string;
@@ -68,6 +70,8 @@ type Annotation = {
   prefix: string;
   suffix: string;
   aiGloss: string | null;
+  /** P23 行内标签：词典命中时中文从这里来（/api/annotations 随批注下发） */
+  translation: string | null;
   createdAt: number;
 };
 
@@ -129,20 +133,25 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
   const ranges = p.inlineRanges ?? [];
   const links = ranges.filter((r) => r.kind === "link" && r.href);
   const mathRanges = ranges.filter((r) => r.kind === "math");
-  // rangeKey = "已存批注区间,...|当前选中区间|拖动预览区间"：三种样式都由渲染决定，
-  // 不再命令式改 DOM class（批注首次落库时整段重渲染会把手动加的选中样式冲掉）
-  const [annKey, anchorKey = "", dragKey = ""] = rangeKey.split("|");
+  // rangeKey = "已存批注区间,...|当前选中区间|拖动预览区间|悬停的批注区间"：
+  // 四种样式都由渲染决定，不命令式改 DOM class（重渲染会把手动加的 class 冲掉）。
+  // 第 4 段让「悬停到短语里某个词」时整条批注一起亮，而不是只亮那一个词。
+  const [annKey, anchorKey = "", dragKey = "", hoverKey = ""] = rangeKey.split("|");
+  // P23：批注区间后面可跟 ":短释义"（encodeURIComponent 过，不会撞 , | - 分隔符）。
+  // 短释义只用来给区间左端 span 生成 CSS 伪元素，绝不作为文本节点插进 DOM。
   const parseRanges = (k: string) =>
     k
       .split(",")
       .filter(Boolean)
       .map((s) => {
-        const [a, b] = s.split("-").map(Number);
-        return { start: a, end: b };
+        const [range, gloss = ""] = s.split(":");
+        const [a, b] = range.split("-").map(Number);
+        return { start: a, end: b, gloss: gloss ? decodeURIComponent(gloss) : "" };
       });
   const annotatedRanges = parseRanges(annKey);
   const anchor = parseRanges(anchorKey)[0];
   const dragSel = parseRanges(dragKey)[0];
+  const hoverSel = parseRanges(hoverKey)[0];
 
   /** 一条连续底色的 class：区间内 + 两端圆角标记 */
   const runCls = (t: Token, word: boolean, list: { start: number; end: number }[], name: string) => {
@@ -157,6 +166,7 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
   };
   const anchorList = anchor ? [anchor] : [];
   const dragList = dragSel ? [dragSel] : [];
+  const hoverList = hoverSel ? [hoverSel] : [];
 
   const one = (t: Token): React.ReactNode => {
     if (!t.word) {
@@ -168,6 +178,7 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
         ...runCls(t, false, annotatedRanges, "w-annotated"),
         ...runCls(t, false, anchorList, "w-anchor"),
         ...runCls(t, false, dragList, "w-drag"),
+        ...runCls(t, false, hoverList, "w-ann-hover"),
       ].join(" ");
       return (
         <span
@@ -198,12 +209,24 @@ function renderTokens(p: Para, rangeKey: string): React.ReactNode[] {
       ...runCls(t, true, annotatedRanges, "w-annotated"),
       ...runCls(t, true, anchorList, "w-anchor"),
       ...runCls(t, true, dragList, "w-drag"),
+      ...runCls(t, true, hoverList, "w-ann-hover"),
       styleClassesFor(t, ranges),
     ]
       .filter(Boolean)
       .join(" ");
+    // 行内中文标签只挂在批注区间的左端词上（.w-annotated-l 就是那个词）。
+    // 属性 + CSS 伪元素生成，data-s/data-e 与可见文本节点一个字都不变。
+    const gloss = annotatedRanges.find(
+      (r) => r.gloss && t.start <= r.start && t.end > r.start && t.start < r.end,
+    )?.gloss;
     return (
-      <span key={`t${t.start}`} className={cls} data-s={t.start} data-e={t.end}>
+      <span
+        key={`t${t.start}`}
+        className={cls}
+        data-s={t.start}
+        data-e={t.end}
+        data-gloss={gloss || undefined}
+      >
         {t.text}
       </span>
     );
@@ -593,9 +616,15 @@ export default function Reader({
   /** 拖动中的预览范围（按下即整词）；松手清空 */
   const [dragSel, setDragSel] = useState<{ pid: string; start: number; end: number } | null>(null);
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
-  const [autoSave, setAutoSave] = useState(true);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [showAnnotations, setShowAnnotations] = useState(true);
+  /** 悬停命中的已存批注区间：短语里的几个词属于同一条批注，整条一起亮 */
+  const [hoverAnn, setHoverAnn] = useState<{
+    paragraphId: string;
+    start: number;
+    end: number;
+    id: string;
+  } | null>(null);
+  const hoverAnnRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // 用 ref 拿最新的批注列表，避免回看 / 复用释义时闭包停在弹层打开时的快照。
@@ -621,6 +650,11 @@ export default function Reader({
       )?.aiGloss ??
       undefined
     );
+  }
+
+  /** 这个词落在哪条已存批注里：多条重叠时取区间最短、起点最早的一条 */
+  function findCoveringAnnotation(pid: string, s: number, en: number): Annotation | undefined {
+    return findCoveringRange(annotationsRef.current, pid, s, en);
   }
 
   /** 删词 / 删批注后抹掉内存索引，避免「已经删掉的词」还摊开旧答案 */
@@ -774,7 +808,7 @@ export default function Reader({
     void runSummary(sec, false);
   }
 
-  /** 拉取本文已保存的句子/短语批注（回看列表） */
+  /** 拉取本文已保存的句子/短语批注：正文绿色标记与 AI 释义缓存的唯一数据源 */
   // 连续点两个词会并发发两次请求；旧的响应晚到会覆盖掉含新批注的列表，
   // 于是「AI 释义找不到该写回哪条」变成偶发问题。用序号丢弃过期响应。
   const annotSeq = useRef(0);
@@ -787,24 +821,13 @@ export default function Reader({
       if (seq !== annotSeq.current) return;
       setAnnotations(data.annotations ?? []);
     } catch {
-      /* 静默失败：批注列表是增强功能，不影响正文阅读 */
+      /* 静默失败：标记与释义缓存是增强功能，不影响正文阅读 */
     }
   }, [textId]);
 
   useEffect(() => {
     void loadAnnotations();
   }, [loadAnnotations]);
-
-  useEffect(() => {
-    setAutoSave(localStorage.getItem("readflow.autoSave") !== "0");
-    // 自动收词开关已挪到右上角用户菜单；菜单变更时广播事件，这里同步状态
-    function onAutoSaveChange(e: Event) {
-      const next = (e as CustomEvent<boolean>).detail;
-      if (typeof next === "boolean") setAutoSave(next);
-    }
-    window.addEventListener("readflow.autosave", onAutoSaveChange);
-    return () => window.removeEventListener("readflow.autosave", onAutoSaveChange);
-  }, []);
 
   /** 关闭右侧批注：清空选区 + 去掉正文锚点高亮 */
   const close = useCallback(() => {
@@ -835,22 +858,38 @@ export default function Reader({
   const anchorStart = pick?.anchor.start;
   const anchorEnd = pick?.anchor.end;
   const rangeKeyByPara = useMemo(() => {
-    const m = new Map<string, string>();
+    const annByPara = new Map<string, string>();
     for (const a of annotations) {
-      m.set(a.paragraphId, (m.get(a.paragraphId) ?? "") + `${a.start}-${a.end},`);
+      // P23：短释义跟着区间一起编码进 key。AI 释义写回后 gloss 变化 → 该段 key 变化
+      // → 只有这一段重渲染，长文其余段落不受影响（memo 化机制不变）。
+      const g = encodeURIComponent(inlineGloss(a.aiGloss, a.translation));
+      annByPara.set(
+        a.paragraphId,
+        (annByPara.get(a.paragraphId) ?? "") + `${a.start}-${a.end}:${g},`,
+      );
     }
-    // 当前选中 / 拖动预览拼在「|」后面：只有涉及的段落 key 变化，其它段落的 memo 块不重渲染。
-    // 拖动中先隐藏上一次的选中，页面上只有正在拖的这一条。
-    const add = (pid: string, anchorPart: string, dragPart: string) => {
-      const [ann = ""] = (m.get(pid) ?? "").split("|");
-      m.set(pid, `${ann}|${anchorPart}|${dragPart}`);
-    };
-    if (!dragSel && anchorPid && anchorStart !== undefined && anchorEnd !== undefined) {
-      add(anchorPid, `${anchorStart}-${anchorEnd}`, "");
+    // 四段统一格式：已存批注(含短释义) | 当前选中 | 拖动预览 | 悬停的批注区间。
+    // 只有涉及的那一段落 key 会变，其它段落字符串不变 → memo 块不重渲染。
+    const pids = new Set(annByPara.keys());
+    if (anchorPid) pids.add(anchorPid);
+    if (dragSel) pids.add(dragSel.pid);
+    if (hoverAnn && !dragSel) pids.add(hoverAnn.paragraphId);
+    const m = new Map<string, string>();
+    for (const pid of pids) {
+      const ann = annByPara.get(pid) ?? "";
+      const anchorPart =
+        !dragSel && pid === anchorPid && anchorStart !== undefined && anchorEnd !== undefined
+          ? `${anchorStart}-${anchorEnd}`
+          : "";
+      const dragPart = dragSel && pid === dragSel.pid ? `${dragSel.start}-${dragSel.end}` : "";
+      const hoverPart =
+        hoverAnn && !dragSel && pid === hoverAnn.paragraphId
+          ? `${hoverAnn.start}-${hoverAnn.end}`
+          : "";
+      m.set(pid, `${ann}|${anchorPart}|${dragPart}|${hoverPart}`);
     }
-    if (dragSel) add(dragSel.pid, "", `${dragSel.start}-${dragSel.end}`);
     return m;
-  }, [annotations, anchorPid, anchorStart, anchorEnd, dragSel]);
+  }, [annotations, anchorPid, anchorStart, anchorEnd, dragSel, hoverAnn]);
 
   // 分组是纯函数（服务端/客户端结果一致），不会引入 hydration 差异
   const groups = useMemo(
@@ -876,11 +915,44 @@ export default function Reader({
     const displayForm = wordEl.textContent ?? "";
     const key = displayForm.toLowerCase();
 
+    // 点在已存短语/整句批注里的某个词：整条回看，一次请求都不发。
+    // 用户会去点短语里的词，往往是因为当初那条答案没把这个词讲清楚 —— 这是答案
+    // 质量问题，不是「又查一个新词」，不该重新走词典 + AI 再生成另一条答案。
+    const covering = findCoveringAnnotation(pid, s, en);
+    if (covering && /\s/.test(covering.quote.trim())) {
+      if (pick?.contextId === covering.id) {
+        close();
+        return;
+      }
+      setPick({
+        paragraphId: pid,
+        paragraphIdx: covering.paragraphIdx,
+        anchor: {
+          start: covering.start,
+          end: covering.end,
+          quote: covering.quote,
+          prefix: covering.prefix,
+          suffix: covering.suffix,
+        },
+        x: rect.left + rect.width / 2,
+        y: rect.bottom,
+        source: "select",
+        contextId: covering.id,
+        fromAnnotation: true,
+        initialGloss:
+          covering.aiGloss ?? savedGlossFor(pid, covering.start, covering.end) ?? undefined,
+      });
+      return;
+    }
+
     // 再点同一个词 = 收起批注（本次自动新建的词随之撤销，delete-on-deselect）
     if (pick && pick.source === "word" && pick.anchor.quote.toLowerCase() === key) {
       const victim = pick.justSaved ? savedMap.get(key) : null;
       close();
-      if (victim) void unsaveWord(victim, key);
+      // ⚠️ 必须刷新批注列表：服务端删了 context，但前端 annotations 还是旧快照，
+      // 不刷新的话正文里的绿色划线和行内中文标签会留在原地（看着像「删了词但标记还在」）。
+      // 卡片里的显式「撤销」按钮走的也是同一个 unsaveWord，那里已经带上了刷新。
+      if (victim) void unsaveWord(victim, key).then(() => loadAnnotations());
       return;
     }
 
@@ -908,7 +980,7 @@ export default function Reader({
     }
     setPick(pickData);
 
-    if (!autoSave) return;
+    // P23：自动收词开关已移除，点词一律落库 —— 「查过 = 已有批注 = 显示行内中文标签」。
     // ⚠️ savedMap 是**全量词库**，不是「本文这一处有没有批注」。
     // 以前这里写 `if (savedMap.get(key)) return`，结果一个词在别的文章收过，
     // 在当前文章再点就既不建 context 也不刷新列表 —— 绿色 ✓ 有了，
@@ -952,14 +1024,14 @@ export default function Reader({
     }
     setPick(pickData);
 
-    // 与点词一致：自动收词开时，拖选的句子/短语也自动入库。
-    // 关掉批注后仍能从「已存批注」翻回去看，不用重新选中。
-    if (autoSave && /\s/.test(pickData.anchor.quote.trim())) {
+    // 与点词一致（P23 起不再有开关）：拖选的句子/短语也自动入库。
+    // 关掉批注后仍能点正文的绿色标记翻回去看，不用重新选中。
+    if (/\s/.test(pickData.anchor.quote.trim())) {
       void ensureAnnotation(pickData);
     }
   }
 
-  // 原生事件监听只挂一次，闭包里的 pick / autoSave 会过期：每次渲染后把最新的处理函数放进 ref
+  // 原生事件监听只挂一次，闭包里的 pick 会过期：每次渲染后把最新的处理函数放进 ref
   const pickRef = useRef({ pickWord, pickRange });
   useEffect(() => {
     pickRef.current = { pickWord, pickRange };
@@ -1098,6 +1170,36 @@ export default function Reader({
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // Option 拖动出来的原生选区：留给复制
     if (!target.closest(".w")) close();
+  }
+
+  /** 悬停到已存批注里的任意位置：整条区间一起亮（走 rangeKey 渲染，不命令式改 class）。
+      用 [data-s] 统一取「词 / 词间空白」，避免鼠标经过短语中间空格时高亮闪一下。 */
+  function onBodyMouseOver(e: React.MouseEvent) {
+    if (dragSel) return;
+    const token = (e.target as HTMLElement).closest<HTMLElement>("[data-s]");
+    const pEl = token?.closest<HTMLElement>("[data-pid]");
+    if (!token || !pEl?.dataset.pid) {
+      clearAnnHover();
+      return;
+    }
+    const ann = findCoveringAnnotation(
+      pEl.dataset.pid,
+      Number(token.dataset.s),
+      Number(token.dataset.e),
+    );
+    if (!ann) {
+      clearAnnHover();
+      return;
+    }
+    if (hoverAnnRef.current === ann.id) return;
+    hoverAnnRef.current = ann.id;
+    setHoverAnn({ paragraphId: ann.paragraphId, start: ann.start, end: ann.end, id: ann.id });
+  }
+
+  function clearAnnHover() {
+    if (hoverAnnRef.current === null) return;
+    hoverAnnRef.current = null;
+    setHoverAnn(null);
   }
 
   function celebrate(x: number, y: number, label: string) {
@@ -1293,66 +1395,8 @@ export default function Reader({
     }
   }
 
-  /** 从「已存批注」列表回看：重建批注卡 + 滚动到原文 + 显示已存释义 */
-  function openAnnotation(a: Annotation) {
-    const para = paragraphs.find((x) => x.id === a.paragraphId);
-    const sig = para ? selectionSignals(para.content, a.start, a.end, "select") : undefined;
-    const pd: Pick = {
-      signals: sig,
-      paragraphId: a.paragraphId,
-      paragraphIdx: a.paragraphIdx,
-      anchor: {
-        start: a.start,
-        end: a.end,
-        quote: a.quote,
-        prefix: a.prefix,
-        suffix: a.suffix,
-      },
-      x: 0,
-      y: 0,
-      source: "select",
-      contextId: a.id,
-      fromAnnotation: true,
-      initialGloss: savedGlossFor(a.paragraphId, a.start, a.end) ?? a.aiGloss ?? undefined,
-    };
-    const pEl = document.querySelector<HTMLElement>(`[data-pid="${a.paragraphId}"]`);
-    if (pEl) {
-      pEl.scrollIntoView({ block: "center", behavior: "smooth" });
-    }
-    setPick(pd);
-  }
-
-  /**
-   * 移除一条已存批注（×）。
-   * 批注按词去重后一条记录代表这个词在本文的标记，
-   * 所以删的是该词在本文的全部 context，避免更早的记录重新浮出来。
-   * 若占位词条（句子/短语）已无任何 context，服务端会连带删掉词条。
-   * 前端同步：批注列表、正文高亮、savedMap 三处一起清。
-   */
-  async function removeAnnotation(a: Annotation) {
-    let prunedWord = false;
-    try {
-      const res = await fetch(`/api/words/${a.wordId}?textId=${textId}`, { method: "DELETE" });
-      if (!res.ok) return;
-      const data = await res.json().catch(() => ({}));
-      prunedWord = data.prunedWord === true;
-    } catch {
-      return;
-    }
-    forgetGloss({ wordId: a.wordId });
-    setAnnotations((prev) => prev.filter((x) => x.wordId !== a.wordId));
-    if (prunedWord) {
-      // 占位词条已被服务端删除：从 savedMap 移除，保持 ✓/+ 状态一致
-      setSavedMap((prev) => {
-        const next = new Map(prev);
-        for (const [k, v] of next) {
-          if (v.id === a.wordId) next.delete(k);
-        }
-        return next;
-      });
-    }
-    if (pick?.contextId === a.id) close();
-  }
+  // 回看入口改为正文的绿色标记：pickWord / pickRange 命中 savedGlossFor 时，
+  // 把上次的释义作为 initialGloss 带进 PickCard，右栏直接摊开、不重新请求模型。
 
   /**
    * 撤销本次自动收词（Readlang 的 delete-on-deselect）。
@@ -1398,7 +1442,13 @@ export default function Reader({
       {/* 左栏（61.8%）：正文 */}
       <div className="reader-main">
         <div className="duo-card reader-article-card">
-          <div className="reading-body" ref={bodyRef} onClick={onClick}>
+          <div
+            className="reading-body"
+            ref={bodyRef}
+            onClick={onClick}
+            onMouseOver={onBodyMouseOver}
+            onMouseLeave={clearAnnHover}
+          >
             {groups.map((g, gi) => {
               // 小结标记按自然段 idx 落点；一个分组可能含多个 idx（表格/列表），
               // 取组内最后一个命中，保证标记不会因为分组被吞掉
@@ -1484,44 +1534,7 @@ export default function Reader({
           <p className="reader-hint">点击文中单词，或拖住一句话 —— 释义会显示在这里</p>
         )}
 
-        {/* 已存批注：拖选过的句子/短语自动入库，点一条即可翻回去看 */}
-        <div className="rf-annots">
-          <button className="rf-annots-head" onClick={() => setShowAnnotations((v) => !v)}>
-            <span>
-              已存批注 <b>{annotations.length}</b>
-            </span>
-            <span className="rf-annots-toggle">{showAnnotations ? "收起" : "展开"}</span>
-          </button>
-          {showAnnotations && (
-            <div className="rf-annots-list">
-              {annotations.length === 0 ? (
-                <p className="rf-annots-empty">点过的词、划过的句子都会存到这里，随时翻回去看</p>
-              ) : (
-                annotations.map((a) => (
-                  <div
-                    key={a.id}
-                    className={`rf-annot-item${pick?.contextId === a.id ? " is-active" : ""}`}
-                  >
-                    <button className="rf-annot-open" onClick={() => openAnnotation(a)} title={a.quote}>
-                      <span className="rf-annot-quote">{a.quote.trim()}</span>
-                      <span className="rf-annot-meta">
-                        第 {a.paragraphIdx + 1} 段{a.aiGloss ? " · 已存 AI 释义" : ""}
-                      </span>
-                    </button>
-                    <button
-                      className="rf-annot-del"
-                      onClick={() => void removeAnnotation(a)}
-                      aria-label="移除这条批注"
-                      title="移除这条批注"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+        {/* 右栏只放当前这一次的一句话释义；历史回看走正文的绿色标记 */}
       </aside>
 
       {floats.map((f) => (
@@ -1613,17 +1626,24 @@ function PickCard({
     fromAnnotation: Boolean(pick.fromAnnotation),
   });
 
+  /** 纯回看：已有完整旧答案时连词典都不查，直接摊开结果。
+      用户点的是「以前查过的那一条」，不是新选区，不该再发任何请求。 */
+  const recall = Boolean(pick.fromAnnotation && initialGloss);
+
   // 弹层打开时自动查词典；查不到就顺着第 2 层直接开始 AI 释义。
   // 自动触发挂在 fetch 回调里而不是一个「看 dict state」的 effect：
   // 组件复用时 state 会短暂残留上一次的结果，只有请求自己确认「这次没命中」才可靠。
   useEffect(() => {
     setDict(null);
-    setDictLoading(true);
+    setDictLoading(!recall);
     setAiText(initialGloss ?? "");
     setAiStatus(initialGloss ? "done" : "idle");
     setShowAskInput(false);
     setAskPrompt("");
     setForceWordMode(false);
+
+    // 回看已存答案：一次请求都不发（词典 / AI 都不查），直接展示。
+    if (recall) return;
 
     // 选区切换后，旧请求的回调不能再替新的选区发起 AI 请求
     let cancelled = false;
@@ -1653,7 +1673,7 @@ function PickCard({
     return () => {
       cancelled = true;
     };
-  }, [anchor.quote, initialGloss]);
+  }, [anchor.quote, initialGloss, recall]);
 
   /** 触发 AI 释义（流式）。forceWord = 把「按整句分析」临时改回按词回答。 */
   async function triggerAI(prompt?: string, forceWord = false) {
@@ -1822,17 +1842,18 @@ function PickCard({
         </button>
       )}
 
-      {/* 词典释义：无框平铺 */}
-      {dictLoading ? (
-        <p className="text-[14px] font-bold text-ink-faint mt-4">查词典中…</p>
-      ) : dict?.entry ? (
-        <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
-      ) : (
-        <p className="text-[13px] font-bold text-ink-faint mt-4">
-          {isPhrase ? "短语不在词典中" : "词典未收录"} ·{" "}
-          {autoExplain ? "交给 AI 老师解释" : "可用 AI 解释"}
-        </p>
-      )}
+      {/* 词典释义：无框平铺。回看已存答案时不查词典，也不引导再问一次 */}
+      {!recall &&
+        (dictLoading ? (
+          <p className="text-[14px] font-bold text-ink-faint mt-4">查词典中…</p>
+        ) : dict?.entry ? (
+          <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
+        ) : (
+          <p className="text-[13px] font-bold text-ink-faint mt-4">
+            {isPhrase ? "短语不在词典中" : "词典未收录"} ·{" "}
+            {autoExplain ? "交给 AI 老师解释" : "可用 AI 解释"}
+          </p>
+        ))}
 
       {/* 新选区在词典未命中时已自动触发；这个手动入口留给回看旧批注 / 请求失败重试 */}
       {aiStatus === "idle" && (
