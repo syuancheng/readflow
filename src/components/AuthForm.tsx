@@ -96,27 +96,27 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
         display: "grid",
         placeItems: "center",
         padding: 24,
-        background: "var(--duo-bg, #fff)",
+        background: "var(--duo-bg)",
       }}
     >
       <div
         style={{
           width: "100%",
           maxWidth: 400,
-          padding: "32px 30px",
-          border: "2px solid var(--duo-border, #e5e5e5)",
-          borderRadius: 18,
-          background: "#fff",
-          boxShadow: "0 6px 0 var(--duo-border, #e5e5e5)",
+          padding: "32px 32px",
+          border: "1px solid var(--rf-border-strong)",
+          borderRadius: "var(--rf-radius-lg)",
+          background: "var(--rf-bg-surface)",
+          boxShadow: "none",
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: "0.08em", color: "var(--duo-blue, #1cb0f6)" }}>
+        <div style={{ fontSize: "var(--rf-text-sm)", fontWeight: 700, letterSpacing: "0.08em", color: "var(--rf-accent-text)" }}>
           READFLOW
         </div>
-        <h1 style={{ fontSize: 26, fontWeight: 800, margin: "10px 0 6px", color: "var(--duo-ink, #3c3c3c)" }}>
+        <h1 style={{ fontSize: "var(--rf-text-2xl)", fontWeight: 700, margin: "12px 0 8px", color: "var(--duo-ink)" }}>
           {isSetup ? "创建你的账号" : mode === "register" ? "用邀请码注册" : "欢迎回来"}
         </h1>
-        <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--duo-ink-soft, #777)", marginBottom: 22 }}>
+        <p style={{ fontSize: "var(--rf-text-sm)", lineHeight: 1.6, color: "var(--duo-ink-soft)", marginBottom: 24 }}>
           {isSetup
             ? "这是站点的第一个账号（主账号），你现有的文章、词库和设置会自动归到它名下。之后新用户凭你发的邀请码注册。"
             : mode === "register"
@@ -124,9 +124,9 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
               : "登录后继续阅读。"}
         </p>
 
-        <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
+        <form onSubmit={submit} style={{ display: "grid", gap: 16 }}>
           {mode === "register" && (
-            <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+            <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
               邀请码
               <input
                 autoComplete="off"
@@ -139,7 +139,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
               />
             </label>
           )}
-          <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+          <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
             {isNew ? "用户名" : "用户名 / 手机号"}
             <input
               autoComplete="username"
@@ -151,7 +151,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
             />
           </label>
           {isNew && (
-            <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+            <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
               手机号
               <input
                 type="tel"
@@ -163,12 +163,12 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
                 disabled={checking || busy}
                 style={inputStyle}
               />
-              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--duo-ink-faint, #afafaf)" }}>
+              <span style={{ fontSize: "var(--rf-text-xs)", fontWeight: 600, color: "var(--duo-ink-faint)" }}>
                 只用作登录名，不会发送验证码。
               </span>
             </label>
           )}
-          <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+          <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
             密码
             <input
               type="password"
@@ -181,7 +181,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
             />
           </label>
           {isNew && (
-            <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+            <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
               确认密码
               <input
                 type="password"
@@ -196,7 +196,7 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
           )}
 
           {error && (
-            <p style={{ margin: 0, fontSize: 13, color: "#d33", fontWeight: 600 }} role="alert">
+            <p style={{ margin: 0, fontSize: "var(--rf-text-sm)", color: "var(--rf-danger-text)", fontWeight: 600 }} role="alert">
               {error}
             </p>
           )}
@@ -208,11 +208,12 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
               marginTop: 4,
               padding: "12px 16px",
               border: "none",
-              borderRadius: 12,
-              background: "var(--duo-blue, #1cb0f6)",
-              color: "#fff",
-              fontSize: 15,
-              fontWeight: 800,
+              borderBottom: "4px solid var(--rf-accent-edge)",
+              borderRadius: "var(--rf-radius-md)",
+              background: "var(--rf-accent)",
+              color: "var(--rf-text-inverse)",
+              fontSize: "var(--rf-text-md)",
+              fontWeight: 700,
               cursor: checking || busy ? "not-allowed" : "pointer",
               opacity: checking || busy ? 0.6 : 1,
             }}
@@ -223,21 +224,21 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
 
         {mode === "login" && (
           <>
-            <p style={{ marginTop: 18, fontSize: 14, fontWeight: 700, textAlign: "center" }}>
+            <p style={{ marginTop: 20, fontSize: "var(--rf-text-sm)", fontWeight: 700, textAlign: "center" }}>
               还没有账号？
-              <Link href="/register" style={{ color: "var(--duo-blue, #1cb0f6)" }}>
+              <Link href="/register" style={{ color: "var(--rf-info-text)" }}>
                 有邀请码，去注册 →
               </Link>
             </p>
-            <p style={{ marginTop: 10, fontSize: 12, color: "var(--duo-ink-faint, #afafaf)", lineHeight: 1.6 }}>
+            <p style={{ marginTop: 12, fontSize: "var(--rf-text-xs)", color: "var(--duo-ink-faint)", lineHeight: 1.6 }}>
               忘记密码？请联系邀请你的人（站点管理员）帮你重置。
             </p>
           </>
         )}
         {mode === "register" && (
-          <p style={{ marginTop: 18, fontSize: 14, fontWeight: 700, textAlign: "center" }}>
+          <p style={{ marginTop: 20, fontSize: "var(--rf-text-sm)", fontWeight: 700, textAlign: "center" }}>
             已经有账号了？
-            <Link href="/login" style={{ color: "var(--duo-blue, #1cb0f6)" }}>
+            <Link href="/login" style={{ color: "var(--rf-info-text)" }}>
               去登录 →
             </Link>
           </p>
@@ -250,10 +251,10 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
 const inputStyle: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  padding: "10px 12px",
-  border: "2px solid var(--duo-border, #e5e5e5)",
-  borderRadius: 10,
-  fontSize: 14,
+  padding: "12px 12px",
+  border: "1px solid var(--rf-border-strong)",
+  borderRadius: "var(--rf-radius-md)",
+  fontSize: "var(--rf-text-sm)",
   fontFamily: "inherit",
   outline: "none",
 };

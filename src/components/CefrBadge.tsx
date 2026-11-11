@@ -26,13 +26,14 @@ type Props = {
   detail: CefrDetail | null;
 };
 
+/** CEFR 难度专用色（规范 §1.1）：A 绿 / B 蓝 / C 紫，同一大级同色 */
 const LEVEL_STYLE: Record<CefrLevel, { bg: string; fg: string }> = {
-  A1: { bg: "var(--duo-green-soft)", fg: "var(--duo-green-dark)" },
-  A2: { bg: "var(--duo-green-soft)", fg: "var(--duo-green-dark)" },
-  B1: { bg: "var(--duo-blue-soft)", fg: "var(--duo-blue-dark)" },
-  B2: { bg: "var(--duo-orange-soft)", fg: "var(--duo-orange-dark)" },
-  C1: { bg: "var(--duo-purple-soft)", fg: "var(--duo-purple-dark)" },
-  C2: { bg: "var(--duo-red-soft)", fg: "var(--duo-red)" },
+  A1: { bg: "var(--rf-level-a-bg)", fg: "var(--rf-level-a-text)" },
+  A2: { bg: "var(--rf-level-a-bg)", fg: "var(--rf-level-a-text)" },
+  B1: { bg: "var(--rf-level-b-bg)", fg: "var(--rf-level-b-text)" },
+  B2: { bg: "var(--rf-level-b-bg)", fg: "var(--rf-level-b-text)" },
+  C1: { bg: "var(--rf-level-c-bg)", fg: "var(--rf-level-c-text)" },
+  C2: { bg: "var(--rf-level-c-bg)", fg: "var(--rf-level-c-text)" },
 };
 
 const BAND_COLOR: Record<VocabBandKey, string> = {

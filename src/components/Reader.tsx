@@ -1751,7 +1751,7 @@ function PickCard({
       onMouseUp={(e) => e.stopPropagation()}
     >
       {/* 标题行：词 + 音标 + 发音，右侧收词/关闭 */}
-      <div className="flex items-start justify-between gap-2.5">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p
             className="font-extrabold leading-snug break-words text-ink"
@@ -1769,7 +1769,7 @@ function PickCard({
           <div className="flex items-center gap-2 mt-1">
             {dict?.entry?.phonetic && (
               <button
-                className="text-[13px] font-mono text-ink-soft hover:text-ink cursor-pointer leading-none"
+                className="rf-ipa hover:text-ink cursor-pointer"
                 onClick={() => speak(quote)}
                 title="点击朗读"
               >
@@ -1817,11 +1817,11 @@ function PickCard({
 
       {/* 词典释义：无框平铺。回看时用存下的快照，不查词典，也不引导再问一次 */}
       {dictLoading ? (
-        <p className="text-[14px] font-bold text-ink-faint mt-4">查词典中…</p>
+        <p className="text-sm font-bold text-ink-faint mt-4">查词典中…</p>
       ) : dict?.entry ? (
         <DictView entry={dict.entry} lemmaForm={dict.lemmaForm} originalForm={dict.originalForm} />
       ) : recall ? null : (
-        <p className="text-[13px] font-bold text-ink-faint mt-4">
+        <p className="text-sm font-bold text-ink-faint mt-4">
           {isPhrase ? "短语不在词典中" : "词典未收录"} ·{" "}
           {autoExplain ? "交给 AI 老师解释" : "可用 AI 解释"}
         </p>
@@ -1832,17 +1832,17 @@ function PickCard({
         const failed = t.status === "error" || (t.status === "done" && isNotAGloss(t.text));
         return (
           <div className="mt-4" key={i}>
-            <div className="flex items-center gap-2 mb-1.5">
+            <div className="flex items-center gap-2 mb-2">
               {t.ask ? (
                 <span className="rf-turn-ask">你问：{t.ask}</span>
               ) : (
                 <span className="duo-badge duo-badge-green">AI 释义</span>
               )}
               {t.status === "loading" && (
-                <span className="text-[12px] font-bold text-ink-faint">正在思考…</span>
+                <span className="text-xs font-bold text-ink-faint">正在思考…</span>
               )}
               {t.status === "streaming" && (
-                <span className="text-[12px] font-bold" style={{ color: "var(--duo-green-dark)" }}>
+                <span className="text-xs font-bold" style={{ color: "var(--duo-green-dark)" }}>
                   生成中…
                 </span>
               )}
@@ -1852,11 +1852,11 @@ function PickCard({
                 </button>
               )}
             </div>
-            <div className="rf-md text-[14px] leading-relaxed text-ink">
+            <div className="rf-md text-sm leading-relaxed text-ink">
               <MarkdownText text={t.text} />
               {t.status === "streaming" && (
                 <span
-                  className="inline-block w-1.5 h-4 ml-0.5 align-middle animate-pulse"
+                  className="inline-block w-1.5 h-4 ml-1 align-middle animate-pulse"
                   style={{ background: "var(--duo-green)" }}
                 />
               )}
@@ -1925,10 +1925,10 @@ function PickCard({
 
       {/* 锚点信息 */}
       <details className="mt-4">
-        <summary className="text-[11px] font-bold uppercase tracking-wide text-ink-faint cursor-pointer">
+        <summary className="text-xs font-bold uppercase tracking-wide text-ink-faint cursor-pointer">
           上下文锚点
         </summary>
-        <div className="space-y-1.5 mt-2">
+        <div className="space-y-2 mt-2">
           <Row label="前文" value={anchor.prefix || "（段首）"} />
           <Row label="后文" value={anchor.suffix || "（段尾）"} />
           <Row label="位置" value={`第 ${paragraphIdx + 1} 段 · ${anchor.start}–${anchor.end}`} />
@@ -1955,24 +1955,24 @@ function DictView({
   return (
     <div className="mt-3">
       {showLemma && (
-        <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="flex items-center gap-2 mb-2">
           <span className="duo-badge duo-badge-green">{lemmaForm}</span>
-          <span className="text-[12px] font-bold text-ink-faint">← 原形</span>
+          <span className="text-xs font-bold text-ink-faint">← 原形</span>
         </div>
       )}
 
       {entry.translation && (
-        <p className="text-[15px] font-medium leading-relaxed text-ink whitespace-pre-line">
+        <p className="text-base font-semibold leading-relaxed text-ink whitespace-pre-line">
           {normalizeTranslation(entry.translation)}
         </p>
       )}
 
       {entry.definition && entry.definition.length > 0 && (
         <details className="mt-2">
-          <summary className="text-[12px] font-bold text-ink-faint cursor-pointer">
+          <summary className="text-xs font-bold text-ink-faint cursor-pointer">
             英文释义
           </summary>
-          <p className="text-[13px] leading-relaxed text-ink-soft mt-1.5 whitespace-pre-line">
+          <p className="text-sm leading-relaxed text-ink-soft mt-2 whitespace-pre-line">
             {normalizeTranslation(entry.definition)}
           </p>
         </details>
@@ -1980,9 +1980,9 @@ function DictView({
 
       {entry.collins && entry.collins > 0 && (
         <div className="flex items-center gap-1 mt-2">
-          <span className="text-[11px] font-bold text-ink-faint">柯林斯</span>
+          <span className="text-xs font-bold text-ink-faint">柯林斯</span>
           {"★".repeat(Math.min(entry.collins, 5)).split("").map((s, i) => (
-            <span key={i} className="text-[12px]" style={{ color: "var(--duo-orange)" }}>{s}</span>
+            <span key={i} className="text-xs" style={{ color: "var(--duo-orange)" }}>{s}</span>
           ))}
         </div>
       )}
@@ -1992,7 +1992,7 @@ function DictView({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex gap-2 text-[12px] leading-relaxed">
+    <div className="flex gap-2 text-xs leading-relaxed">
       <span className="text-ink-faint shrink-0 w-9 font-bold">{label}</span>
       <span className="text-ink-soft font-mono break-all">{value}</span>
     </div>

@@ -100,15 +100,15 @@ export default async function ExportPage({
   const types = CARD_TYPES.length;
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-8">
+    <div className="rf-container rf-page rf-page-narrow">
       <div className="mb-6">
         <Link href="/words" className="duo-nav-link inline-block">
           ← 返回词库
         </Link>
-        <h1 className="text-[28px] font-extrabold tracking-tight mt-3 mb-2">
+        <h1 className="text-3xl font-extrabold tracking-tight mt-3 mb-2">
           导出到墨墨记忆卡
         </h1>
-        <p className="text-[15px] font-medium text-ink-soft">
+        <p className="text-base font-semibold text-ink-soft">
           把词库里勾选的词做成卡片推进墨墨。同一个词在同一个牌组只会推一次。
         </p>
       </div>
@@ -122,8 +122,8 @@ export default async function ExportPage({
       {selected.length === 0 ? (
         <div className="duo-card duo-empty">
           <div className="duo-empty-icon">☑️</div>
-          <p className="text-[17px] font-bold mb-1.5">还没有选要导出的词</p>
-          <p className="text-[14px] text-ink-faint">
+          <p className="text-lg font-bold mb-2">还没有选要导出的词</p>
+          <p className="text-sm text-ink-faint">
             到词库里勾选要导出的词，再点工具栏上的「导出选中的词到墨墨」。
           </p>
           <Link href="/words" className="duo-btn duo-btn-primary mt-5">
@@ -150,12 +150,12 @@ export default async function ExportPage({
               ))}
             </div>
             {overLimit && (
-              <p className="text-[12.5px] font-bold mt-3" style={{ color: "var(--duo-orange-dark)" }}>
+              <p className="text-xs font-bold mt-3" style={{ color: "var(--duo-orange-dark)" }}>
                 一次最多导出 {MAX_SELECTED} 个词，这次只导前 {MAX_SELECTED} 个，剩下的导完再选一次。
               </p>
             )}
             {selected.some((w) => doneIds.has(w.id)) && (
-              <p className="text-[12.5px] font-medium text-ink-faint mt-3">
+              <p className="text-xs font-semibold text-ink-faint mt-3">
                 带 ✓ 的词已经导出过：同一牌组里已有的卡片类型会自动跳过，不会重复。
               </p>
             )}
@@ -172,7 +172,7 @@ export default async function ExportPage({
         </>
       )}
 
-      <p className="text-[12.5px] font-medium text-ink-faint mt-6 leading-relaxed">
+      <p className="text-xs font-semibold text-ink-faint mt-6 leading-relaxed">
         卡片内容完全由数据库拼装，不经过 AI：词、音标、释义、原句都来自你收词时存下的数据。
         最多可选 {types} 种卡片类型，每种类型每个词一张。
       </p>
@@ -183,9 +183,9 @@ export default async function ExportPage({
 function Stat({ value, label, icon }: { value: number; label: string; icon: string }) {
   return (
     <div className="duo-card px-4 py-4 text-center">
-      <div className="text-[18px] leading-none mb-1.5">{icon}</div>
-      <div className="text-[24px] font-extrabold leading-tight">{value.toLocaleString()}</div>
-      <div className="text-[12px] font-bold text-ink-faint mt-0.5">{label}</div>
+      <div className="text-lg leading-none mb-2">{icon}</div>
+      <div className="text-2xl font-extrabold leading-tight">{value.toLocaleString()}</div>
+      <div className="text-xs font-bold text-ink-faint mt-1">{label}</div>
     </div>
   );
 }

@@ -1,0 +1,198 @@
+/* =====================================================================
+   ReadFlow Design Tokens  v1
+   规范说明见 docs/design-system.md —— 改这里之前先改那份文档。
+
+   规则（迁移完成后由 scripts/check-tokens.mjs 强制）：
+   · 页面 / 组件样式里只许出现 var(--rf-*)，不许出现裸 hex、裸 px 字号、
+     阶梯外的间距 / 圆角 / 阴影。
+   · 基础色板（--rf-green-500 这类）只在本文件里被引用；
+     组件只用「语义 token」（--rf-text-*、--rf-bg-*、--rf-accent-* …）。
+
+   状态：草案。尚未被 globals.css 引入，引入即开始迁移。
+   ===================================================================== */
+
+:root {
+  /* ---------- 1. 基础色板（只在本文件内引用） ---------- */
+
+  /* 品牌绿：500 填充主按钮；700 才能当文字（白底对比 4.9:1） */
+  --rf-green-50:  #f1fbe7;
+  --rf-green-100: #d7ffb8;
+  --rf-green-500: #58cc02;
+  --rf-green-600: #58a700; /* 按钮底边 / 进度条深色段 */
+  --rf-green-700: #3f7f00; /* 绿色文字、图标 */
+
+  /* 中性灰：全站唯一的灰阶 */
+  --rf-gray-0:   #ffffff;
+  --rf-gray-50:  #f7f7f7;
+  --rf-gray-100: #f0f0f0;
+  --rf-gray-200: #e5e5e5;
+  --rf-gray-300: #d4d4d4;
+  --rf-gray-400: #afafaf;
+  --rf-gray-500: #8a8a8a;
+  --rf-gray-600: #6b6b6b; /* 白底 5.3:1，次要文字的下限 */
+  --rf-gray-800: #3c3c3c;
+  --rf-gray-900: #262626;
+
+  /* 辅助色：每种都有固定含义，见文档「颜色语义」 */
+  --rf-blue-50:  #e8f6fe;
+  --rf-blue-500: #1cb0f6;
+  --rf-blue-600: #1899d6;
+  --rf-blue-700: #0a6fa3;
+
+  --rf-purple-50:  #f5ecff;
+  --rf-purple-500: #ce82ff;
+  --rf-purple-600: #a560e8;
+  --rf-purple-700: #7a3cc0;
+
+  --rf-amber-50:  #fff4d6;
+  --rf-amber-500: #ff9600;
+  --rf-amber-600: #e08600;
+  --rf-amber-700: #b35500;
+
+  --rf-red-50:  #ffecec;
+  --rf-red-500: #ff4b4b;
+  --rf-red-600: #ea2b2b;
+  --rf-red-700: #c62828;
+
+  /* ---------- 2. 语义颜色（组件只用这一层） ---------- */
+
+  /* 文字 */
+  --rf-text-primary:   var(--rf-gray-800); /* 正文、标题、选中项 */
+  --rf-text-secondary: var(--rf-gray-600); /* 说明、元信息、未选中导航 */
+  --rf-text-disabled:  var(--rf-gray-400); /* 只用于禁用态，不用于可读信息 */
+  --rf-text-inverse:   #ffffff;
+  --rf-text-reading:   #1a1a1a;            /* 阅读器正文 */
+
+  /* 背景 */
+  --rf-bg-page:    var(--rf-gray-0);
+  --rf-bg-surface: var(--rf-gray-0);   /* 卡片 */
+  --rf-bg-subtle:  var(--rf-gray-50);  /* 分段控件轨道、表头、代码块 */
+  --rf-bg-hover:   var(--rf-gray-50);
+  --rf-bg-selected: var(--rf-gray-100); /* 列表 / 侧栏 / 筛选的「已选中」，统一中性灰 */
+
+  /* 线 */
+  --rf-border:        var(--rf-gray-200);
+  --rf-border-strong: var(--rf-gray-300); /* 输入框、次按钮 */
+  --rf-border-focus:  var(--rf-blue-500);
+
+  /* 品牌 / 主操作 —— 一屏只该有一个 */
+  --rf-accent:        var(--rf-green-500);
+  --rf-accent-edge:   var(--rf-green-600);
+  --rf-accent-text:   var(--rf-green-700);
+  --rf-accent-soft:   var(--rf-green-50);
+
+  /* 查词高亮（阅读器 + 词库原句里的命中词） */
+  --rf-highlight-bg:    var(--rf-green-100);
+  --rf-highlight-line:  var(--rf-green-500);
+
+  /* 链接 / 信息提示 */
+  --rf-info:      var(--rf-blue-500);
+  --rf-info-text: var(--rf-blue-700);
+  --rf-info-soft: var(--rf-blue-50);
+
+  /* AI 相关（问 AI、AI 释义、小结） */
+  --rf-ai:      var(--rf-purple-600);
+  --rf-ai-text: var(--rf-purple-700);
+  --rf-ai-soft: var(--rf-purple-50);
+
+  /* 游戏化（XP、连续天数、成就） */
+  --rf-reward:      var(--rf-amber-500);
+  --rf-reward-text: var(--rf-amber-700);
+  --rf-reward-soft: var(--rf-amber-50);
+
+  /* 危险 / 错误 */
+  --rf-danger:      var(--rf-red-600);
+  --rf-danger-text: var(--rf-red-700);
+  --rf-danger-soft: var(--rf-red-50);
+
+  /* 成功（导出成功、已导出） */
+  --rf-success-text: var(--rf-green-700);
+  --rf-success-soft: var(--rf-green-50);
+
+  /* CEFR 难度：只用在难度徽章上 */
+  --rf-level-a-text: var(--rf-green-700);  --rf-level-a-bg: var(--rf-green-50);
+  --rf-level-b-text: var(--rf-blue-700);   --rf-level-b-bg: var(--rf-blue-50);
+  --rf-level-c-text: var(--rf-purple-700); --rf-level-c-bg: var(--rf-purple-50);
+
+  /* 学习日历热力图 */
+  --rf-heat-0: #ededed;
+  --rf-heat-1: var(--rf-green-100);
+  --rf-heat-2: #a8e86a;
+  --rf-heat-3: #7acb2e;
+  --rf-heat-4: var(--rf-green-600);
+
+  /* ---------- 3. 字体 ---------- */
+  --rf-font-sans: var(--font-dm-sans), -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 音标：不能用等宽字体（Geist Mono 小字号下 ɒ 像 D、ˈ 像引号），用系统无衬线 */
+  --rf-font-ipa: -apple-system, BlinkMacSystemFont, "Segoe UI", "Lucida Grande", "Noto Sans", sans-serif;
+  --rf-font-mono: var(--font-geist-mono), ui-monospace, Menlo, monospace;
+
+  /* ---------- 4. 字号阶梯（字号 / 行高，行高都是 4 的倍数） ---------- */
+  --rf-text-xs:   12px; --rf-leading-xs:   16px; /* 徽章、计数、表格角标 */
+  --rf-text-sm:   14px; --rf-leading-sm:   20px; /* 次要信息、按钮小号、表单说明 */
+  --rf-text-md:   16px; --rf-leading-md:   24px; /* 默认正文、按钮、输入框 */
+  --rf-text-lg:   18px; --rf-leading-lg:   28px; /* 卡片标题、词条标题 */
+  --rf-text-xl:   20px; --rf-leading-xl:   28px; /* 区块标题（我的文本、导入文本） */
+  --rf-text-2xl:  24px; --rf-leading-2xl:  32px; /* 页面标题、弹窗标题 */
+  --rf-text-3xl:  32px; --rf-leading-3xl:  40px; /* 首页 Hero、战绩大数字 */
+  /* 阅读器正文单独一档，允许用户调节，默认 19px / 36px */
+  --rf-text-reading: 19px; --rf-leading-reading: 36px;
+
+  /* 字重：只用这四档 */
+  --rf-weight-regular: 400; /* 正文 */
+  --rf-weight-medium:  600; /* 标签、导航、强调 */
+  --rf-weight-bold:    700; /* 标题、按钮 */
+  --rf-weight-heavy:   800; /* 只用于 Hero 标题和大数字 */
+
+  /* ---------- 5. 间距（4 的倍数） ---------- */
+  --rf-space-1:  4px;
+  --rf-space-2:  8px;
+  --rf-space-3:  12px;
+  --rf-space-4:  16px;
+  --rf-space-5:  20px;
+  --rf-space-6:  24px;
+  --rf-space-8:  32px;
+  --rf-space-10: 40px;
+  --rf-space-12: 48px;
+  --rf-space-16: 64px;
+
+  /* ---------- 6. 圆角 ---------- */
+  --rf-radius-xs:   4px;   /* 行内高亮、复选框等极小元素 */
+  --rf-radius-sm:   8px;   /* 徽章、标签、小图标按钮、复选框外框 */
+  --rf-radius-md:   12px;  /* 按钮、输入框、下拉、列表行 */
+  --rf-radius-lg:   16px;  /* 卡片、面板 */
+  --rf-radius-xl:   24px;  /* 弹窗、抽屉 */
+  --rf-radius-full: 999px; /* 头像、圆形按钮、进度条 */
+
+  /* ---------- 7. 边框粗细 ---------- */
+  --rf-border-width:  1px;  /* 卡片、分隔线、输入框 */
+  --rf-border-press:  4px;  /* 多邻国「实体按钮」底边，只给 .btn 用 */
+  --rf-focus-ring: 0 0 0 3px rgba(28, 176, 246, 0.25);
+
+  /* ---------- 8. 阴影（只有三档 + 按钮实体底边） ---------- */
+  --rf-shadow-sm: 0 1px 2px rgba(24, 36, 58, 0.06);   /* 卡片悬停、吸顶栏 */
+  --rf-shadow-md: 0 8px 24px rgba(24, 36, 58, 0.12);  /* 下拉菜单、气泡、Toast */
+  --rf-shadow-lg: 0 24px 64px rgba(24, 36, 58, 0.18); /* 弹窗、抽屉 */
+
+  /* ---------- 9. 布局 ---------- */
+  --rf-container: 1200px;       /* 除阅读器外所有页面统一最大宽度 */
+  --rf-gutter: 24px;            /* 页面左右留白；<640px 时为 16px */
+  --rf-header-h: 64px;
+  --rf-sidebar-w: 240px;        /* 词库左栏等 */
+
+  /* ---------- 10. 动效 ---------- */
+  --rf-duration-fast: 120ms;    /* 悬停、按下 */
+  --rf-duration-base: 200ms;    /* 展开、弹层 */
+  --rf-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---------- 11. 层级 ---------- */
+  --rf-z-sticky:   10;
+  --rf-z-dropdown: 100;
+  --rf-z-overlay:  900;
+  --rf-z-modal:    1000;
+  --rf-z-toast:    1100;
+}
+
+@media (max-width: 639px) {
+  :root { --rf-gutter: 16px; }
+}

@@ -22,9 +22,10 @@ export type TextCardRow = {
 };
 
 const SOURCE_STYLE: Record<string, { label: string; cls: string; color: string }> = {
-  paste: { label: "粘贴", cls: "duo-badge duo-badge-blue", color: "var(--duo-blue)" },
-  file: { label: "文件", cls: "duo-badge duo-badge-orange", color: "var(--duo-orange)" },
-  url: { label: "网页", cls: "duo-badge duo-badge-green", color: "var(--duo-green)" },
+  // 来源只是元信息，不上色（规范 §1.1：颜色只表达含义）
+  paste: { label: "粘贴", cls: "duo-badge", color: "" },
+  file: { label: "文件", cls: "duo-badge", color: "" },
+  url: { label: "网页", cls: "duo-badge", color: "" },
 };
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
@@ -38,7 +39,7 @@ function ReadBadge({ ratio }: { ratio: number | null }) {
   const pct = Math.round(Math.min(ratio, 1) * 100);
   return (
     <span
-      className="duo-badge duo-badge-purple"
+      className="duo-badge"
       title="上次离开时的滚动位置；往回翻会下降。100% 不等于已读完"
     >
       已读 {pct}%
@@ -50,7 +51,7 @@ function ReadBadge({ ratio }: { ratio: number | null }) {
 function CompletedBadge({ completedAt }: { completedAt: number | null }) {
   if (completedAt === null) return null;
   return (
-    <span className="duo-badge duo-badge-green" title="你手动标记过已读完（阅读页可再点一次取消）">
+    <span className="duo-badge duo-badge-success" title="你手动标记过已读完（阅读页可再点一次取消）">
       ✓ 已读完
     </span>
   );
@@ -137,19 +138,18 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
         type="button"
         className={`duo-filter-chip${active ? " duo-filter-chip-on" : ""}`}
         onClick={onClick}
+        title={count !== undefined ? `${label} · ${count} 篇` : undefined}
       >
         {label}
-        {count !== undefined ? ` ${count}` : ""}
       </button>
     );
   }
 
   return (
     <div>
-      <div className="duo-section-title mb-3">
-        <span style={{ color: "var(--duo-blue)" }}>📚</span>
+      <div className="duo-section-title mb-4">
         我的文本
-        <span className="text-[13px] font-bold text-ink-faint">
+        <span className="text-sm font-semibold text-ink-soft">
           ({shown.length}
           {hasFilter ? `/${list.length}` : ""})
         </span>
@@ -158,7 +158,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
       {/* 筛选行：有分类数据才显示，避免空环境里两排无意义的 chip */}
       {(list.length > 0 && (catCounts.size > 1 || customCats.length > 0)) && (
         <div className="tm-filter-row">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="tm-filter-label">分类</span>
             {renderChip("all", "全部", undefined, category === "all", () => setCategory("all"))}
             {unclassified > 0 &&
@@ -170,7 +170,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
               renderChip(c, c, catCounts.get(c), category === c, () => setCategory(c)),
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="tm-filter-label">难度</span>
             {renderChip("all", "全部", undefined, level === "all", () => setLevel("all"))}
             {LEVELS.filter((l) => (levelCounts.get(l) ?? 0) > 0).map((l) =>
@@ -184,8 +184,8 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
         hasFilter ? (
           <div className="duo-card duo-empty">
             <div className="duo-empty-icon">🔍</div>
-            <p className="text-[17px] font-bold mb-1.5">这个筛选条件下没有文本</p>
-            <p className="text-[14px] text-ink-faint">
+            <p className="text-lg font-bold mb-2">这个筛选条件下没有文本</p>
+            <p className="text-sm text-ink-faint">
               <button
                 type="button"
                 className="underline underline-offset-2 font-bold"
@@ -201,8 +201,8 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
         ) : (
           <div className="duo-card duo-empty">
             <div className="duo-empty-icon">🎯</div>
-            <p className="text-[17px] font-bold mb-1.5">开始你的第一关</p>
-            <p className="text-[14px] text-ink-faint">在右边粘贴一段文字，或上传一个 txt 文件</p>
+            <p className="text-lg font-bold mb-2">开始你的第一关</p>
+            <p className="text-sm text-ink-faint">在右边粘贴一段文字，或上传一个 txt 文件</p>
           </div>
         )
       ) : (
@@ -214,27 +214,19 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
               <li key={t.id} className="relative group text-list-item">
                 <Link href={`/texts/${t.id}`} className="duo-text-item block">
                   <div className="flex items-start gap-4">
-                    <span
-                      className="duo-level-dot"
-                      style={{
-                        background: style.color,
-                        borderBottom: "3px solid rgba(0,0,0,0.18)",
-                      }}
-                    >
-                      {i + 1}
-                    </span>
+                    <span className="duo-level-dot">{i + 1}</span>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-4 mb-1.5 pr-9">
-                        <h2 className="text-[16.5px] font-bold truncate">{t.title}</h2>
-                        <span className="text-[13px] font-bold text-ink-faint shrink-0">
+                      <div className="flex items-baseline justify-between gap-4 mb-2 pr-9">
+                        <h2 className="text-base font-bold truncate">{t.title}</h2>
+                        <span className="text-sm text-ink-soft shrink-0">
                           {t.wordCount.toLocaleString()} 词
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={style.cls}>{style.label}</span>
                         {t.category && (
-                          <span className="duo-badge duo-badge-purple">{t.category}</span>
+                          <span className="duo-badge">{t.category}</span>
                         )}
                         <CefrBadge
                           level={asCefrLevel(t.cefrLevel)}
@@ -243,10 +235,10 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
                         />
                         <ReadBadge ratio={t.readRatio} />
                         <CompletedBadge completedAt={t.completedAt} />
-                        <span className="text-[12.5px] font-medium text-ink-faint">
+                        <span className="text-xs text-ink-soft">
                           {new Date(t.createdAt).toLocaleDateString("zh-CN")}
                         </span>
-                        <span className="duo-nav-link !py-0.5 !px-2 !text-[12px] ml-auto">
+                        <span className="text-sm font-semibold text-ink-soft ml-auto group-hover:text-ink">
                           {t.completedAt !== null ? "继续回味 →" : "开始阅读 →"}
                         </span>
                       </div>

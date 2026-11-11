@@ -56,7 +56,7 @@ function renderMdInline(text: string): ReactNode[] {
               style={{
                 fontSize: "0.68em",
                 lineHeight: 1,
-                color: "var(--duo-ink-soft, #888)",
+                color: "var(--duo-ink-soft)",
                 marginTop: "1px",
                 whiteSpace: "nowrap",
               }}

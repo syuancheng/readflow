@@ -23,9 +23,9 @@ export default function DuoProgress({
       <div className="flex items-center gap-3 mb-2">
         <div className="flex-1">
           {label && (
-            <p className="text-[14px] font-bold text-ink mb-0.5">{label}</p>
+            <p className="text-sm font-bold text-ink mb-1">{label}</p>
           )}
-          {hint && <p className="text-[12.5px] font-medium text-ink-faint">{hint}</p>}
+          {hint && <p className="text-xs font-semibold text-ink-faint">{hint}</p>}
         </div>
         {done && (
           <span className="duo-badge" style={{ background: "var(--duo-green-soft)", color: "var(--duo-green-dark)" }}>
@@ -44,11 +44,11 @@ export default function DuoProgress({
         <span className="duo-progress-flag">🚩</span>
       </div>
 
-      <div className="flex items-center justify-between mt-1.5">
-        <span className="text-[12px] font-bold text-ink-faint">
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-xs font-bold text-ink-faint">
           {value.toLocaleString()} / {max.toLocaleString()} 词
         </span>
-        <span className="text-[12px] font-bold" style={{ color: done ? "var(--duo-green-dark)" : "var(--duo-blue-dark)" }}>
+        <span className="text-xs font-bold" style={{ color: done ? "var(--duo-green-dark)" : "var(--duo-blue-dark)" }}>
           {pct}%
         </span>
       </div>

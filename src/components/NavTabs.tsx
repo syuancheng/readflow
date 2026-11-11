@@ -20,7 +20,7 @@ export default function NavTabs() {
   if (pathname.startsWith("/texts")) return null;
 
   return (
-    <nav className="flex items-center gap-2 text-ink-soft ml-2 duo-hide-mobile" aria-label="主导航">
+    <nav className="rf-nav-tabs duo-hide-mobile" aria-label="主导航">
       {TABS.map((t) => {
         const active = t.match(pathname);
         return (

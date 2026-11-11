@@ -136,13 +136,9 @@ export default async function WordsPage() {
   const articles = articleOptions(items.map((i) => ({ article: i.article, lastAt: i.row.lastAt })));
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8">
+    <div className="rf-container rf-page">
       {/* 页面标题由顶部导航高亮表达，这里只留一句说明（不重复写「我的词库」） */}
-      <div className="mb-6">
-        <p className="text-[15px] text-ink-soft font-medium">
-          阅读时点过的词都在这里，带着原句，可跳回原文定位。点一行看完整释义。
-        </p>
-      </div>
+      <p className="rf-page-desc">阅读时点过的词都在这里，带着原句，可跳回原文定位。点一行看完整释义。</p>
 
       <WordList words={words} articles={articles} />
     </div>

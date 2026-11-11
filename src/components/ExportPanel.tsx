@@ -140,8 +140,8 @@ export default function ExportPanel({
           className="duo-card p-5"
           style={{ background: "var(--duo-orange-soft)", borderColor: "var(--duo-orange)" }}
         >
-          <p className="text-[15px] font-extrabold mb-1">还没配置墨墨令牌</p>
-          <p className="text-[13.5px] font-medium text-ink-soft leading-relaxed">
+          <p className="text-base font-extrabold mb-1">还没配置墨墨令牌</p>
+          <p className="text-sm font-semibold text-ink-soft leading-relaxed">
             点右上角头像 → <b>设置</b> → 墨墨记单词，填入你的开放 API Token，保存即可生效（不用重启）。
             令牌获取：墨墨 App → 我的 → 更多设置 → 实验功能 → 开放 API。
           </p>
@@ -155,14 +155,14 @@ export default function ExportPanel({
           推送到哪里
         </div>
 
-        <p className="text-[13px] font-medium text-ink-faint mb-4 leading-relaxed">
+        <p className="text-sm font-semibold text-ink-faint mb-4 leading-relaxed">
           墨墨开放 API 只能写卡片，<b>不能建牌组、也不能建章节</b>。所以请先在 App
           或网页端把牌组和章节建好，这里只负责往里写。
         </p>
 
         <div className="grid sm:grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-[13px] font-bold text-ink-soft block mb-1.5">牌组</span>
+            <span className="text-sm font-bold text-ink-soft block mb-2">牌组</span>
             <select
               className="duo-input"
               value={deckId}
@@ -180,7 +180,7 @@ export default function ExportPanel({
           </label>
 
           <label className="block">
-            <span className="text-[13px] font-bold text-ink-soft block mb-1.5">章节</span>
+            <span className="text-sm font-bold text-ink-soft block mb-2">章节</span>
             <select
               className="duo-input"
               value={chapterId}
@@ -201,7 +201,7 @@ export default function ExportPanel({
         </div>
 
         {deckError && (
-          <p className="text-[13px] font-bold mt-3" style={{ color: "var(--duo-red)" }}>
+          <p className="text-sm font-bold mt-3" style={{ color: "var(--duo-red)" }}>
             {deckError}
           </p>
         )}
@@ -214,7 +214,7 @@ export default function ExportPanel({
           生成哪些卡片
         </div>
 
-        <div className="space-y-2.5">
+        <div className="space-y-3">
           {CARD_TYPES.map((t) => {
             const on = types.includes(t.key);
             return (
@@ -229,20 +229,20 @@ export default function ExportPanel({
               >
                 <div className="flex items-center gap-2">
                   <span
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[12px] font-bold text-white shrink-0"
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-md text-xs font-bold text-white shrink-0"
                     style={{ background: on ? "var(--duo-green)" : "var(--duo-ink-faint)" }}
                   >
                     {on ? "✓" : ""}
                   </span>
-                  <span className="text-[14.5px] font-extrabold">{t.label}</span>
+                  <span className="text-sm font-extrabold">{t.label}</span>
                 </div>
-                <p className="text-[12.5px] font-medium text-ink-faint mt-1 ml-7">{t.hint}</p>
+                <p className="text-xs font-semibold text-ink-faint mt-1 ml-7">{t.hint}</p>
               </button>
             );
           })}
         </div>
 
-        <div className="flex items-center gap-3 text-[12.5px] font-bold text-ink-faint mt-4">
+        <div className="flex items-center gap-3 text-xs font-bold text-ink-faint mt-4">
           <span className="duo-badge duo-badge-blue">选中 {wordCount} 个词</span>
           <span className="duo-badge duo-badge-orange">
             今日已推 {todayPushed} / {dailyCap}
@@ -273,7 +273,7 @@ export default function ExportPanel({
           className="duo-card p-4"
           style={{ background: "var(--duo-red-soft)", borderColor: "var(--duo-red)" }}
         >
-          <p className="text-[13.5px] font-bold" style={{ color: "#a02020" }}>
+          <p className="text-sm font-bold" style={{ color: "var(--rf-danger-text)" }}>
             {error}
           </p>
         </div>
@@ -299,7 +299,7 @@ function ResultView({ result }: { result: ExportResult }) {
             <span className="duo-badge duo-badge-green">成功 {summary.pushed}</span>
             <span className="duo-badge duo-badge-blue">跳过 {summary.skipped}</span>
             {summary.failed > 0 && (
-              <span className="duo-badge" style={{ background: "var(--duo-red-soft)", color: "#a02020" }}>
+              <span className="duo-badge" style={{ background: "var(--duo-red-soft)", color: "var(--rf-danger-text)" }}>
                 失败 {summary.failed}
               </span>
             )}
@@ -309,7 +309,7 @@ function ResultView({ result }: { result: ExportResult }) {
       </div>
 
       {dryRun && (
-        <p className="text-[13px] font-medium text-ink-faint mb-4 leading-relaxed">
+        <p className="text-sm font-semibold text-ink-faint mb-4 leading-relaxed">
           下面是真正会发送给墨墨的原始语法。换行、<code className="font-mono">---</code>
           答案线、<code className="font-mono">[F#1#…]</code> 挖空都是语法的一部分。
           确认无误再点「写入墨墨」。
@@ -319,26 +319,26 @@ function ResultView({ result }: { result: ExportResult }) {
       <div className="space-y-4">
         {previews.map((it, i) => (
           <div key={`${it.wordId}-${it.cardType}-${i}`}>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-[14px] font-extrabold">{it.word}</span>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-sm font-extrabold">{it.word}</span>
               <span className="duo-badge duo-badge-green">{TYPE_LABEL[it.cardType] ?? it.cardType}</span>
               {it.status === "failed" && (
-                <span className="duo-badge" style={{ background: "var(--duo-red-soft)", color: "#a02020" }}>
+                <span className="duo-badge" style={{ background: "var(--duo-red-soft)", color: "var(--rf-danger-text)" }}>
                   未通过
                 </span>
               )}
               {it.cardId && (
-                <span className="text-[11px] font-mono text-ink-faint">{it.cardId}</span>
+                <span className="text-xs font-mono text-ink-faint">{it.cardId}</span>
               )}
             </div>
             <pre
-              className="text-[12.5px] leading-relaxed font-mono whitespace-pre-wrap break-words rounded-xl p-3.5"
+              className="text-xs leading-relaxed font-mono whitespace-pre-wrap break-words rounded-xl p-4"
               style={{ background: "var(--duo-surface)", border: "1px solid var(--duo-border)" }}
             >
               {it.content}
             </pre>
             {it.error && (
-              <p className="text-[12px] font-bold mt-1" style={{ color: "var(--duo-red)" }}>
+              <p className="text-xs font-bold mt-1" style={{ color: "var(--duo-red)" }}>
                 {it.error}
               </p>
             )}
@@ -347,7 +347,7 @@ function ResultView({ result }: { result: ExportResult }) {
       </div>
 
       {!dryRun && summary.pushed > 0 && (
-        <p className="text-[13px] font-medium text-ink-faint mt-5">
+        <p className="text-sm font-semibold text-ink-faint mt-5">
           卡片已经写进墨墨了。打开 App 到对应章节就能看到——不想要的话只能在 App 里手删。
         </p>
       )}

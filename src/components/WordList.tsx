@@ -299,7 +299,7 @@ export default function WordList({
                 📤 导出到墨墨
               </span>
             )}
-            <span className="ml-auto text-[13px] font-bold text-ink-faint whitespace-nowrap">{shown.length} 个词</span>
+            <span className="ml-auto text-sm font-bold text-ink-faint whitespace-nowrap">{shown.length} 个词</span>
             <select
               className="wl-tool-btn wl-sort"
               aria-label="排序"
@@ -315,8 +315,8 @@ export default function WordList({
           {shown.length === 0 ? (
             <div className="duo-empty">
               <div className="duo-empty-icon">📝</div>
-              <p className="text-[17px] font-bold mb-1.5">这里没有词</p>
-              <p className="text-[14px] text-ink-faint">换个筛选条件，或者去阅读器里点几个词</p>
+              <p className="text-lg font-bold mb-2">这里没有词</p>
+              <p className="text-sm text-ink-faint">换个筛选条件，或者去阅读器里点几个词</p>
               <Link href="/" className="duo-btn duo-btn-primary mt-5">
                 去读一篇
               </Link>
@@ -417,9 +417,9 @@ export default function WordList({
                     {open && (
                       <div className="wl-detail">
                         <div className="flex items-baseline gap-2 flex-wrap mb-2">
-                          <h3 className="text-[18px] font-extrabold">{w.displayForm}</h3>
+                          <h3 className="text-lg font-extrabold">{w.displayForm}</h3>
                           {w.phonetic && (
-                            <span className="text-[13px] font-medium text-ink-faint font-mono">
+                            <span className="rf-ipa">
                               /{normalizePhonetic(w.phonetic)}/
                             </span>
                           )}
@@ -438,14 +438,14 @@ export default function WordList({
                           </button>
                         </div>
                         {/* 释义：AI 释义是 Markdown（标题/加粗/列表），与阅读页批注卡同一套渲染 */}
-                        <div className="text-[14px] text-ink-soft font-medium mb-2">
+                        <div className="text-sm text-ink-soft font-semibold mb-2">
                           <MarkdownText text={normalizeTranslation(w.translation)} />
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="space-y-2">
                           {w.contexts.map((cx) => (
                             <div key={cx.id} className="wl-sentence">
                               <p className="italic">&ldquo;{cx.sentence}&rdquo;</p>
-                              <p className="text-[11px] font-bold text-ink-faint mt-1 flex items-center gap-2">
+                              <p className="text-xs font-bold text-ink-faint mt-1 flex items-center gap-2">
                                 <span>{cx.textDeleted ? "← 来自已删除的文章" : `← ${cx.textTitle}`}</span>
                                 {!cx.textDeleted && cx.textId && cx.paragraphId && (
                                   <Link

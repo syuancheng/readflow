@@ -82,10 +82,10 @@ export default function ImportForm() {
 
   return (
     <form onSubmit={submit} className="duo-card p-6">
-      <h2 className="text-[18px] font-extrabold mb-4">导入文本</h2>
+      <h2 className="duo-section-title mb-4">导入文本</h2>
 
       {/* Tab 切换 */}
-      <div className="flex gap-2 mb-5">
+      <div className="rf-seg mb-5">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -123,10 +123,10 @@ export default function ImportForm() {
             type="file"
             accept=".txt,.md,.markdown,text/plain,text/markdown"
             onChange={onPickFile}
-            className="block w-full text-[13px] text-ink-soft file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-2 file:border-[var(--duo-border)] file:bg-white file:text-[14px] file:font-bold file:text-ink-soft hover:file:border-[var(--duo-blue)] cursor-pointer"
+            className="block w-full text-sm text-ink-soft file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-2 file:border-[var(--duo-border)] file:bg-white file:text-sm file:font-bold file:text-ink-soft hover:file:border-[var(--duo-blue)] cursor-pointer"
           />
           {body && (
-            <p className="mt-2 text-[13px] font-medium text-ink-faint">
+            <p className="mt-2 text-sm font-semibold text-ink-faint">
               已读入 {body.length.toLocaleString()} 个字符
             </p>
           )}
@@ -143,8 +143,8 @@ export default function ImportForm() {
 
       {mode !== "url" && (
         <div className="rf-format-row mb-3">
-          <span className="text-[12px] font-bold text-ink-faint shrink-0">格式</span>
-          <div className="flex gap-1.5 flex-wrap">
+          <span className="text-xs font-bold text-ink-faint shrink-0">格式</span>
+          <div className="flex gap-2 flex-wrap">
             {FORMATS.map((f) => (
               <button
                 key={f.key}
@@ -157,7 +157,7 @@ export default function ImportForm() {
             ))}
           </div>
           {body.trim() && (
-            <span className="text-[12px] font-medium text-ink-faint">
+            <span className="text-xs font-semibold text-ink-faint">
               {signals ? `检测到：${signals}` : "未检测到排版标记"}
               {format === "auto" && autoFormat
                 ? ` · 将按${autoFormat === "markdown" ? " Markdown" : "纯文本"}解析`
@@ -169,7 +169,7 @@ export default function ImportForm() {
 
       {error && (
         <div
-          className="mb-3 text-[14px] font-bold px-4 py-3 rounded-xl"
+          className="mb-3 text-sm font-bold px-4 py-3 rounded-xl"
           style={{
             background: "var(--duo-red-soft)",
             color: "var(--duo-red)",
@@ -180,7 +180,7 @@ export default function ImportForm() {
       )}
 
       <div className="flex items-center justify-between mt-2">
-        <p className="text-[13px] font-medium text-ink-faint">
+        <p className="text-sm font-semibold text-ink-faint">
           {mode === "url" ? "自动提取网页正文，优先取官方 Markdown" : "支持 .txt / .md / 粘贴 Markdown"}
         </p>
         <button type="submit" className="duo-btn duo-btn-primary" disabled={busy}>

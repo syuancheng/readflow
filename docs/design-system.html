@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReadFlow 设计规范</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&family=Geist+Mono&display=swap" rel="stylesheet">
+<style>:root { --font-dm-sans: "DM Sans"; --font-geist-mono: "Geist Mono"; }</style>
+<!-- 直接引用真实 token 文件：改 tokens.css，这里同步变化 -->
+<link rel="stylesheet" href="../src/styles/tokens.css">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--rf-bg-page); color: var(--rf-text-primary); font-family: var(--rf-font-sans);
+         font-size: var(--rf-text-md); line-height: var(--rf-leading-md); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: var(--rf-container); margin: 0 auto; padding: var(--rf-space-8) var(--rf-gutter) var(--rf-space-16); }
+  h1 { font-size: var(--rf-text-2xl); line-height: var(--rf-leading-2xl); font-weight: var(--rf-weight-bold); }
+  .lead { color: var(--rf-text-secondary); font-size: var(--rf-text-sm); line-height: var(--rf-leading-sm); margin-top: var(--rf-space-2); }
+  section { margin-top: var(--rf-space-12); }
+  h2 { font-size: var(--rf-text-xl); line-height: var(--rf-leading-xl); font-weight: var(--rf-weight-bold); margin-bottom: var(--rf-space-4); }
+  h3 { font-size: var(--rf-text-sm); line-height: var(--rf-leading-sm); font-weight: var(--rf-weight-medium); color: var(--rf-text-secondary); margin: var(--rf-space-6) 0 var(--rf-space-3); }
+  .card { background: var(--rf-bg-surface); border: var(--rf-border-width) solid var(--rf-border); border-radius: var(--rf-radius-lg); padding: var(--rf-space-6); }
+  .grid { display: grid; gap: var(--rf-space-4); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .mono { font-family: var(--rf-font-mono); font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); color: var(--rf-text-secondary); }
+
+  /* 颜色语义 */
+  .sem { display: flex; gap: var(--rf-space-3); align-items: flex-start; }
+  .sem-sw { width: 40px; height: 40px; border-radius: var(--rf-radius-md); flex: none; border: var(--rf-border-width) solid rgba(0,0,0,.06); }
+  .sem b { display: block; font-size: var(--rf-text-sm); line-height: var(--rf-leading-sm); }
+  .sem p { font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); color: var(--rf-text-secondary); margin-top: var(--rf-space-1); }
+  .ramp { display: flex; border-radius: var(--rf-radius-md); overflow: hidden; border: var(--rf-border-width) solid var(--rf-border); }
+  .ramp div { flex: 1; height: 48px; display: flex; align-items: flex-end; padding: var(--rf-space-1) var(--rf-space-2); font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); }
+
+  /* 字号 */
+  .type-row { display: grid; grid-template-columns: 120px 1fr; gap: var(--rf-space-4); align-items: baseline; padding: var(--rf-space-3) 0; border-top: var(--rf-border-width) solid var(--rf-border); }
+  .type-row:first-child { border-top: 0; }
+
+  /* 间距 / 圆角 / 阴影 */
+  .space-row { display: flex; align-items: center; gap: var(--rf-space-4); padding: var(--rf-space-1) 0; }
+  .space-row .bar { height: 16px; background: var(--rf-info); border-radius: 2px; }
+  .space-row .mono { width: 96px; }
+  .shape { height: 96px; background: var(--rf-bg-subtle); border: var(--rf-border-width) solid var(--rf-border); display: flex; align-items: flex-end; padding: var(--rf-space-3); }
+  .shadow-box { height: 96px; background: #fff; border-radius: var(--rf-radius-lg); display: flex; align-items: flex-end; padding: var(--rf-space-3); }
+
+  /* 组件示例 */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--rf-space-2); height: 44px; padding: 0 var(--rf-space-5);
+         border-radius: var(--rf-radius-md); font: inherit; font-weight: var(--rf-weight-bold); cursor: pointer;
+         border: 0; border-bottom: var(--rf-border-press) solid; transition: transform var(--rf-duration-fast) var(--rf-ease); }
+  .btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+  .btn-primary { background: var(--rf-accent); color: var(--rf-text-inverse); border-color: var(--rf-accent-edge); }
+  .btn-secondary { background: #fff; color: var(--rf-text-primary); border: var(--rf-border-width) solid var(--rf-border-strong); border-bottom: var(--rf-border-press) solid var(--rf-border-strong); }
+  .btn-ai { background: var(--rf-ai-soft); color: var(--rf-ai-text); border-color: var(--rf-purple-500); }
+  .btn-sm { height: 32px; padding: 0 var(--rf-space-3); font-size: var(--rf-text-sm); border-bottom-width: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: var(--rf-space-3); align-items: center; }
+
+  .nav { display: flex; gap: var(--rf-space-8); align-items: center; height: var(--rf-header-h); border-bottom: var(--rf-border-width) solid var(--rf-border); padding: 0 var(--rf-space-6); }
+  .nav .logo { font-weight: var(--rf-weight-heavy); font-size: var(--rf-text-xl); display: flex; gap: var(--rf-space-2); align-items: center; margin-right: var(--rf-space-4); }
+  .nav .logo i { width: 32px; height: 32px; border-radius: var(--rf-radius-sm); background: var(--rf-accent); }
+  .nav a { color: var(--rf-text-secondary); text-decoration: none; font-weight: var(--rf-weight-medium); height: 100%; display: flex; align-items: center; box-shadow: inset 0 -3px 0 transparent; }
+  .nav a[aria-current] { color: var(--rf-text-primary); font-weight: var(--rf-weight-bold); box-shadow: inset 0 -3px 0 var(--rf-accent); }
+
+  .chip { height: 32px; padding: 0 var(--rf-space-3); border-radius: var(--rf-radius-full); display: inline-flex; align-items: center; font-size: var(--rf-text-sm);
+          color: var(--rf-text-secondary); font-weight: var(--rf-weight-medium); border: var(--rf-border-width) solid var(--rf-border); background: #fff; }
+  .chip[aria-pressed="true"] { background: var(--rf-bg-selected); color: var(--rf-text-primary); border-color: transparent; }
+  .seg { display: inline-flex; padding: var(--rf-space-1); gap: var(--rf-space-1); background: var(--rf-bg-subtle); border-radius: var(--rf-radius-md); }
+  .seg span { height: 32px; padding: 0 var(--rf-space-4); display: flex; align-items: center; border-radius: var(--rf-radius-sm); font-size: var(--rf-text-sm); font-weight: var(--rf-weight-medium); color: var(--rf-text-secondary); }
+  .seg span.on { background: #fff; color: var(--rf-text-primary); box-shadow: var(--rf-shadow-sm); }
+  .side { display: flex; flex-direction: column; gap: var(--rf-space-1); width: 240px; }
+  .side div { display: flex; justify-content: space-between; height: 40px; align-items: center; padding: 0 var(--rf-space-3); border-radius: var(--rf-radius-md); color: var(--rf-text-secondary); font-weight: var(--rf-weight-medium); }
+  .side div.on { background: var(--rf-bg-selected); color: var(--rf-text-primary); }
+  .side small { font-size: var(--rf-text-xs); }
+
+  .badge { display: inline-flex; align-items: center; height: 24px; padding: 0 var(--rf-space-2); border-radius: var(--rf-radius-sm); font-size: var(--rf-text-xs); font-weight: var(--rf-weight-medium); background: var(--rf-bg-subtle); color: var(--rf-text-secondary); }
+  .b-a { background: var(--rf-level-a-bg); color: var(--rf-level-a-text); }
+  .b-b { background: var(--rf-level-b-bg); color: var(--rf-level-b-text); }
+  .b-c { background: var(--rf-level-c-bg); color: var(--rf-level-c-text); }
+  .b-ai { background: var(--rf-ai-soft); color: var(--rf-ai-text); }
+  .b-ok { background: var(--rf-success-soft); color: var(--rf-success-text); }
+  .b-reward { background: var(--rf-reward-soft); color: var(--rf-reward-text); }
+
+  .wordrow { display: grid; grid-template-columns: 1fr 160px 200px; gap: var(--rf-space-4); align-items: center; padding: var(--rf-space-3) var(--rf-space-4); border-top: var(--rf-border-width) solid var(--rf-border); }
+  .wordrow:hover { background: var(--rf-bg-hover); }
+  .wordrow .snip { color: var(--rf-text-secondary); }
+  .wordrow mark { background: var(--rf-highlight-bg); color: var(--rf-text-primary); font-weight: var(--rf-weight-bold); padding: 0 var(--rf-space-1); border-radius: 4px; }
+  .wordrow .mean { font-weight: var(--rf-weight-medium); }
+  .wordrow a { color: var(--rf-text-secondary); font-size: var(--rf-text-sm); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wordrow a:hover { color: var(--rf-info-text); text-decoration: underline; }
+
+  .ipa-demo { display: grid; grid-template-columns: 1fr 1fr; gap: var(--rf-space-4); }
+  .ipa-demo div { font-size: var(--rf-text-lg); line-height: var(--rf-leading-lg); }
+  @media (max-width: 639px) { .wordrow { grid-template-columns: 1fr; } .type-row { grid-template-columns: 1fr; } .ipa-demo { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ReadFlow 设计规范 v1</h1>
+  <p class="lead">本页直接读取 src/styles/tokens.css 渲染。下面所有尺寸、颜色都来自 token，没有一个魔法数字。</p>
+
+  <section>
+    <h2>颜色：每种只有一个含义</h2>
+    <div class="grid">
+      <div class="sem"><div class="sem-sw" style="background:var(--rf-accent)"></div><div><b>绿 · 主操作</b><p>主按钮、进度、品牌、成功。不用于选中态和文字装饰。</p></div></div>
+      <div class="sem"><div class="sem-sw" style="background:var(--rf-highlight-bg)"></div><div><b>浅绿 · 查词高亮</b><p>只用于原文里查过的词。</p></div></div>
+      <div class="sem"><div class="sem-sw" style="background:var(--rf-info)"></div><div><b>蓝 · 链接 / 信息</b><p>链接悬停、提示条、聚焦环。</p></div></div>
+      <div class="sem"><div class="sem-sw" style="background:var(--rf-ai)"></div><div><b>紫 · AI</b><p>问 AI、AI 释义、分段小结。</p></div></div>
+      <div class="sem"><div class="sem-sw" style="background:var(--rf-reward)"></div><div><b>橙 · 游戏化</b><p>XP、连续天数、成就。</p></div></div>
+      <div class="sem"><div class="sem-sw" style="background:var(--rf-danger)"></div><div><b>红 · 危险</b><p>删除、错误、作废。</p></div></div>
+    </div>
+    <h3>灰阶（文字只用 800 / 600，400 仅限禁用）</h3>
+    <div class="ramp">
+      <div style="background:var(--rf-gray-50)">50</div><div style="background:var(--rf-gray-100)">100</div><div style="background:var(--rf-gray-200)">200</div>
+      <div style="background:var(--rf-gray-300)">300</div><div style="background:var(--rf-gray-400)">400</div><div style="background:var(--rf-gray-500);color:#fff">500</div>
+      <div style="background:var(--rf-gray-600);color:#fff">600 次要</div><div style="background:var(--rf-gray-800);color:#fff">800 主要</div><div style="background:var(--rf-gray-900);color:#fff">900</div>
+    </div>
+    <h3>徽章</h3>
+    <div class="row">
+      <span class="badge">粘贴</span><span class="badge">网页</span><span class="badge">技术文档</span>
+      <span class="badge b-a">A2</span><span class="badge b-b">B2</span><span class="badge b-c">C1</span>
+      <span class="badge b-ai">✦ AI 释义</span><span class="badge b-ok">已导出 · 墨墨</span><span class="badge b-reward">⚡ 120 XP</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>字号阶梯</h2>
+    <div class="card">
+      <div class="type-row"><span class="mono">3xl 32/40 · 800</span><span style="font-size:var(--rf-text-3xl);line-height:var(--rf-leading-3xl);font-weight:var(--rf-weight-heavy)">今天读点什么？</span></div>
+      <div class="type-row"><span class="mono">2xl 24/32 · 700</span><span style="font-size:var(--rf-text-2xl);line-height:var(--rf-leading-2xl);font-weight:700">我的词库</span></div>
+      <div class="type-row"><span class="mono">xl 20/28 · 700</span><span style="font-size:var(--rf-text-xl);line-height:var(--rf-leading-xl);font-weight:700">导入文本</span></div>
+      <div class="type-row"><span class="mono">lg 18/28 · 700</span><span style="font-size:var(--rf-text-lg);line-height:var(--rf-leading-lg);font-weight:700">Harness Engineering for Self-Improvement</span></div>
+      <div class="type-row"><span class="mono">md 16/24 · 400</span><span>导入想读的文章，边读边查词，生词会带着原句收进词库。</span></div>
+      <div class="type-row"><span class="mono">sm 14/20 · 400</span><span style="font-size:var(--rf-text-sm);line-height:var(--rf-leading-sm);color:var(--rf-text-secondary)">2026/11/7 · 6,227 词</span></div>
+      <div class="type-row"><span class="mono">xs 12/16 · 600</span><span style="font-size:var(--rf-text-xs);line-height:var(--rf-leading-xs);font-weight:600;color:var(--rf-text-secondary)">13 个词</span></div>
+      <div class="type-row"><span class="mono">reading 19/36</span><span style="font-size:var(--rf-text-reading);line-height:var(--rf-leading-reading);color:var(--rf-text-reading)">So, Chris, tell us about your book and how the concept of a work–life balance has been changing?</span></div>
+    </div>
+    <h3>音标字体修复（同一串 ˈkɒnsept）</h3>
+    <div class="card ipa-demo">
+      <div><span class="mono">现在：Geist Mono 13px（ɒ 像 D，ˈ 像引号）</span><br><span style="font-family:var(--rf-font-mono);font-size:13px">/ˈkɒnsept/ /ˈθʌŋk/ /ʃɪp/</span></div>
+      <div><span class="mono">规范：--rf-font-ipa</span><br><span style="font-family:var(--rf-font-ipa)">/ˈkɒnsept/ /ˈθʌŋk/ /ʃɪp/</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>间距（4 的倍数）</h2>
+    <div class="card">
+      <div class="space-row"><span class="mono">space-1 · 4</span><div class="bar" style="width:var(--rf-space-1)"></div></div>
+      <div class="space-row"><span class="mono">space-2 · 8</span><div class="bar" style="width:var(--rf-space-2)"></div></div>
+      <div class="space-row"><span class="mono">space-3 · 12</span><div class="bar" style="width:var(--rf-space-3)"></div></div>
+      <div class="space-row"><span class="mono">space-4 · 16</span><div class="bar" style="width:var(--rf-space-4)"></div></div>
+      <div class="space-row"><span class="mono">space-5 · 20</span><div class="bar" style="width:var(--rf-space-5)"></div></div>
+      <div class="space-row"><span class="mono">space-6 · 24</span><div class="bar" style="width:var(--rf-space-6)"></div></div>
+      <div class="space-row"><span class="mono">space-8 · 32</span><div class="bar" style="width:var(--rf-space-8)"></div></div>
+      <div class="space-row"><span class="mono">space-10 · 40</span><div class="bar" style="width:var(--rf-space-10)"></div></div>
+      <div class="space-row"><span class="mono">space-12 · 48</span><div class="bar" style="width:var(--rf-space-12)"></div></div>
+      <div class="space-row"><span class="mono">space-16 · 64</span><div class="bar" style="width:var(--rf-space-16)"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>圆角与阴影</h2>
+    <div class="grid">
+      <div class="shape" style="border-radius:var(--rf-radius-sm)"><span class="mono">sm 8 · 徽章</span></div>
+      <div class="shape" style="border-radius:var(--rf-radius-md)"><span class="mono">md 12 · 按钮 / 输入</span></div>
+      <div class="shape" style="border-radius:var(--rf-radius-lg)"><span class="mono">lg 16 · 卡片</span></div>
+      <div class="shape" style="border-radius:var(--rf-radius-xl)"><span class="mono">xl 24 · 弹窗</span></div>
+    </div>
+    <div class="grid" style="margin-top:var(--rf-space-6)">
+      <div class="shadow-box" style="border:var(--rf-border-width) solid var(--rf-border)"><span class="mono">静止卡片：只有 1px 线</span></div>
+      <div class="shadow-box" style="box-shadow:var(--rf-shadow-sm)"><span class="mono">shadow-sm · 悬停 / 吸顶</span></div>
+      <div class="shadow-box" style="box-shadow:var(--rf-shadow-md)"><span class="mono">shadow-md · 菜单 / Toast</span></div>
+      <div class="shadow-box" style="box-shadow:var(--rf-shadow-lg)"><span class="mono">shadow-lg · 弹窗</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>组件示例（按规范重画）</h2>
+    <h3>顶部导航：当前页只用文字加粗 + 底部绿条</h3>
+    <div class="card" style="padding:0">
+      <nav class="nav"><span class="logo"><i></i>ReadFlow</span><a href="#">我的文本</a><a href="#" aria-current="page">我的词库</a><a href="#">战绩</a></nav>
+    </div>
+    <h3>按钮：一屏只有一个绿色主按钮</h3>
+    <div class="row">
+      <button class="btn btn-primary">导出到墨墨</button>
+      <button class="btn btn-secondary">批量操作</button>
+      <button class="btn btn-ai">✦ 问 AI</button>
+      <button class="btn btn-secondary btn-sm">标记已读完</button>
+    </div>
+    <h3>选中态：统一中性灰，不再用绿 / 蓝</h3>
+    <div class="row" style="align-items:flex-start;gap:var(--rf-space-8)">
+      <div class="side"><div class="on">全部 <small>13</small></div><div>★ 星标 <small>0</small></div><div>未导出 <small>13</small></div><div>已导出 <small>0</small></div></div>
+      <div style="display:flex;flex-direction:column;gap:var(--rf-space-4)">
+        <div class="row"><span class="chip" aria-pressed="true">全部</span><span class="chip">未分类</span><span class="chip">技术文档</span></div>
+        <div class="seg"><span class="on">全部</span><span>单词</span><span>短语</span></div>
+        <div class="seg"><span class="on">粘贴</span><span>上传</span><span>网页</span></div>
+      </div>
+    </div>
+    <h3>词库行：释义改深灰，来源改灰色单行，只有命中词有颜色</h3>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="wordrow" style="border-top:0"><span class="snip">…tell us about your book and how the <mark>concept</mark> of a work–life balance has been changing?</span><span class="mean">观念</span><a href="#">Work–life balance</a></div>
+      <div class="wordrow"><span class="snip">…perceives and manages context, stores <mark>artifacts</mark>, and evaluates results.</span><span class="mean">产物（模型生成并保存下来的东西）</span><a href="#">Harness Engineering for Self-Improvement</a></div>
+      <div class="wordrow"><span class="snip">…them, monitor them, and shape their <mark>behavior</mark> all grow much more important.</span><span class="mean">行为</span><a href="#">When AI builds itself</a></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

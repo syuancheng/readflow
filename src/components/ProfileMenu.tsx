@@ -27,10 +27,10 @@ type Me = { username: string; displayName: string; phone: string | null; isOwner
 const inputStyle: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  padding: "10px 12px",
-  border: "2px solid var(--duo-border, #e5e5e5)",
-  borderRadius: 10,
-  fontSize: 14,
+  padding: "12px 12px",
+  border: "1px solid var(--rf-border-strong)",
+  borderRadius: "var(--rf-radius-md)",
+  fontSize: "var(--rf-text-sm)",
   fontFamily: "inherit",
   outline: "none",
 };
@@ -48,11 +48,11 @@ const backdropStyle: React.CSSProperties = {
 const modalStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: 380,
-  padding: "26px 24px",
-  borderRadius: 18,
-  background: "#fff",
-  color: "var(--duo-ink, #3c3c3c)",
-  boxShadow: "0 18px 50px rgba(0,0,0,0.18)",
+  padding: "24px 24px",
+  borderRadius: "var(--rf-radius-lg)",
+  background: "var(--rf-bg-surface)",
+  color: "var(--duo-ink)",
+  boxShadow: "var(--rf-shadow-lg)",
 };
 
 export default function ProfileMenu() {
@@ -198,7 +198,7 @@ export default function ProfileMenu() {
             <p className="pm-name">{profile.displayName}</p>
             <p className="pm-sub">{profile.bio || DEFAULT_PROFILE.bio}</p>
             {me && (
-              <p style={{ margin: "6px 0 0", fontSize: 11.5, fontWeight: 700, color: "var(--duo-ink-faint, #afafaf)" }}>
+              <p style={{ margin: "8px 0 0", fontSize: "var(--rf-text-xs)", fontWeight: 700, color: "var(--duo-ink-faint)" }}>
                 @{me.username}
                 {me.phone ? ` · ${maskPhone(me.phone)}` : ""}
                 {me.isOwner ? " · 主账号" : ""}
@@ -253,12 +253,12 @@ export default function ProfileMenu() {
       {pwOpen && (
         <div style={backdropStyle} onClick={() => setPwOpen(false)}>
           <div style={modalStyle} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <h2 style={{ fontSize: 20, fontWeight: 800, margin: "0 0 6px" }}>修改密码</h2>
-            <p style={{ fontSize: 13, lineHeight: 1.6, color: "var(--duo-ink-soft, #777)", margin: "0 0 20px" }}>
+            <h2 style={{ fontSize: "var(--rf-text-xl)", fontWeight: 700, margin: "0 0 8px" }}>修改密码</h2>
+            <p style={{ fontSize: "var(--rf-text-sm)", lineHeight: 1.6, color: "var(--duo-ink-soft)", margin: "0 0 20px" }}>
               新密码至少 8 位。修改后其它设备会被强制登出，本机保持登录。
             </p>
-            <form onSubmit={changePassword} style={{ display: "grid", gap: 14 }}>
-              <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+            <form onSubmit={changePassword} style={{ display: "grid", gap: 16 }}>
+              <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
                 原密码
                 <input
                   type="password"
@@ -269,7 +269,7 @@ export default function ProfileMenu() {
                   style={inputStyle}
                 />
               </label>
-              <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 700 }}>
+              <label style={{ display: "grid", gap: 8, fontSize: "var(--rf-text-sm)", fontWeight: 700 }}>
                 新密码
                 <input
                   type="password"
@@ -284,23 +284,23 @@ export default function ProfileMenu() {
               {pwMsg && (
                 <p
                   role="status"
-                  style={{ margin: 0, fontSize: 13, fontWeight: 600, color: pwMsg.ok ? "#2b8a3e" : "#d33" }}
+                  style={{ margin: 0, fontSize: "var(--rf-text-sm)", fontWeight: 600, color: pwMsg.ok ? "var(--rf-success-text)" : "var(--rf-danger-text)" }}
                 >
                   {pwMsg.text}
                 </p>
               )}
-              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
                 <button
                   type="button"
                   onClick={() => setPwOpen(false)}
                   style={{
                     flex: 1,
-                    padding: "11px 14px",
-                    border: "2px solid var(--duo-border, #e5e5e5)",
-                    borderRadius: 12,
-                    background: "#fff",
-                    fontSize: 14,
-                    fontWeight: 800,
+                    padding: "12px 16px",
+                    border: "1px solid var(--rf-border-strong)",
+                    borderRadius: "var(--rf-radius-md)",
+                    background: "var(--rf-bg-surface)",
+                    fontSize: "var(--rf-text-sm)",
+                    fontWeight: 700,
                     cursor: "pointer",
                   }}
                 >
@@ -311,13 +311,14 @@ export default function ProfileMenu() {
                   disabled={pwBusy}
                   style={{
                     flex: 1,
-                    padding: "11px 14px",
+                    padding: "12px 16px",
                     border: "none",
-                    borderRadius: 12,
-                    background: "var(--duo-blue, #1cb0f6)",
-                    color: "#fff",
-                    fontSize: 14,
-                    fontWeight: 800,
+                    borderBottom: "4px solid var(--rf-accent-edge)",
+                    borderRadius: "var(--rf-radius-md)",
+                    background: "var(--rf-accent)",
+                    color: "var(--rf-text-inverse)",
+                    fontSize: "var(--rf-text-sm)",
+                    fontWeight: 700,
                     cursor: pwBusy ? "not-allowed" : "pointer",
                     opacity: pwBusy ? 0.6 : 1,
                   }}

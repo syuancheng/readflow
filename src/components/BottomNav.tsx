@@ -32,8 +32,8 @@ export default function BottomNav() {
               className={`duo-bottom-link ${active ? "duo-bottom-link-active" : ""}`}
               aria-current={active ? "page" : undefined}
             >
-              <span className="text-[22px] leading-none mb-1">{item.icon}</span>
-              <span className="text-[12px] font-bold">{item.label}</span>
+              <span className="text-2xl leading-none mb-1">{item.icon}</span>
+              <span className="text-xs font-bold">{item.label}</span>
             </Link>
           );
         })}

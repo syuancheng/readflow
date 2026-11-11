@@ -18,8 +18,8 @@ export default function SiteHeader() {
 
   return (
     <header className="duo-nav sticky top-0 z-30">
-      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center gap-8">
-        <Link href="/" className="flex items-center gap-2 font-extrabold text-[18px] tracking-tight">
+      <div className="rf-container h-16 flex items-center gap-8">
+        <Link href="/" className="flex items-center gap-2 font-extrabold text-xl tracking-tight">
           <LogoMark size={32} />
           <span className="duo-hide-mobile">ReadFlow</span>
         </Link>

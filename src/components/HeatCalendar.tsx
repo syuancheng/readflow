@@ -46,7 +46,7 @@ export default function HeatCalendar({ cells }: { cells: CalendarCell[] }) {
     <div className="flex gap-2">
       {/* 星期 */}
       <div
-        className="grid grid-rows-7 gap-[3px] text-[10px] font-bold text-ink-faint pt-[1px]"
+        className="grid grid-rows-7 gap-1 text-xs font-bold text-ink-faint pt-px"
         style={{ width: 16 }}
       >
         {WEEKDAY_LABEL.map((label, i) => (
@@ -57,9 +57,9 @@ export default function HeatCalendar({ cells }: { cells: CalendarCell[] }) {
       </div>
 
       <div className="overflow-x-auto">
-        <div className="flex gap-[3px]">
+        <div className="flex gap-1">
           {weeks.map((week, wi) => (
-            <div key={wi} className="grid grid-rows-7 gap-[3px]">
+            <div key={wi} className="grid grid-rows-7 gap-1">
               {week.map((cell) => (
                 <div
                   key={cell.date}
@@ -68,7 +68,7 @@ export default function HeatCalendar({ cells }: { cells: CalendarCell[] }) {
                       ? undefined
                       : `${cell.date} · ${cell.count} 个词`
                   }
-                  className="w-[12px] h-[12px] rounded-[3px]"
+                  className="w-[12px] h-[12px] rounded-xs"
                   style={{
                     background: cell.future
                       ? "transparent"
@@ -81,11 +81,11 @@ export default function HeatCalendar({ cells }: { cells: CalendarCell[] }) {
         </div>
 
         {/* 月份 */}
-        <div className="flex gap-[3px] mt-1.5">
+        <div className="flex gap-1 mt-2">
           {monthLabels.map((label, i) => (
             <div
               key={i}
-              className="text-[10px] font-bold text-ink-faint whitespace-nowrap"
+              className="text-xs font-bold text-ink-faint whitespace-nowrap"
               style={{ width: 12 }}
             >
               {label}
@@ -100,12 +100,12 @@ export default function HeatCalendar({ cells }: { cells: CalendarCell[] }) {
 /** 图例：少 → 多 */
 export function HeatLegend() {
   return (
-    <div className="flex items-center gap-1.5 text-[11px] font-bold text-ink-faint">
+    <div className="flex items-center gap-2 text-xs font-bold text-ink-faint">
       <span>少</span>
       {LEVEL_BG.map((bg, i) => (
         <div
           key={i}
-          className="w-[12px] h-[12px] rounded-[3px]"
+          className="w-[12px] h-[12px] rounded-xs"
           style={{ background: bg }}
         />
       ))}
