@@ -1162,66 +1162,120 @@ body {
   padding: 0 2px;
 }
 
-/* AI 释义小按钮（描边 pill） */
-.rf-ai-mini {
+/* 提问区与词典结果之间的一条分隔，避免上下内容糊成一片 */
+.rf-ai-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--duo-border);
+}
+
+/* 右栏唯一的主按钮：展开 / 收起问题选项（紧凑 pill，行为不变） */
+.rf-ai-primary {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 2px solid var(--duo-border);
-  background: var(--duo-bg);
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--duo-green);
+  color: #fff;
   font-size: 12.5px;
-  font-weight: 700;
-  color: var(--duo-ink-soft);
+  font-weight: 800;
   cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  transition: background-color 120ms ease;
 }
+.rf-ai-primary:hover:not(:disabled) { background: var(--duo-green-dark); }
+.rf-ai-primary:disabled { opacity: 0.55; cursor: default; }
 
-.rf-ai-mini:hover {
-  border-color: var(--duo-green);
-  color: var(--duo-green-dark);
-  background: var(--duo-green-soft);
-}
-
-.rf-ai-mini:disabled {
-  opacity: 0.5;
-  cursor: default;
-  border-color: var(--duo-border);
-  color: var(--duo-ink-soft);
-  background: var(--duo-bg);
-}
-
-/* 「问 AI」展开后的选项面板（P26） */
+/* 「问 AI」展开后的选项面板（P26）：一行一条，像选择题 */
 .rf-ask-menu {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
   margin-top: 8px;
-  padding: 10px;
-  border: 2px solid var(--duo-border);
-  border-radius: 14px;
-  background: var(--duo-bg);
+  padding: 8px;
+  border: 1px solid var(--duo-border);
+  border-radius: 12px;
+  background: var(--duo-surface);
 }
 .rf-ask-menu > div {
   width: 100%;
 }
+
+/* 自定义提问：发送图标内嵌在输入框右端，不再有独立按钮 */
+.rf-ask-custom {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+}
+.rf-ask-custom .duo-input {
+  width: 100%;
+  padding: 8px 40px 8px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+.rf-ask-send {
+  position: absolute;
+  right: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--duo-green-dark);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.rf-ask-send svg {
+  width: 16px;
+  height: 16px;
+}
+.rf-ask-send:hover:not(:disabled) {
+  background: var(--duo-green-soft);
+}
+.rf-ask-send:disabled {
+  color: var(--duo-ink-faint);
+  opacity: 0.55;
+  cursor: default;
+}
 .rf-ask-chip {
-  padding: 5px 11px;
-  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 9px;
   border: 1.5px solid var(--duo-border);
-  background: var(--duo-surface);
-  font-size: 12.5px;
+  background: var(--duo-bg);
+  font-size: 13px;
   font-weight: 700;
   color: var(--duo-ink);
+  text-align: left;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.rf-ask-chip::before {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--duo-border);
+  border-radius: 50%;
+  transition: border-color 120ms ease;
 }
 .rf-ask-chip:hover {
   border-color: var(--duo-green);
   background: var(--duo-green-soft);
   color: var(--duo-green-dark);
+}
+.rf-ask-chip:hover::before {
+  border-color: var(--duo-green);
 }
 
 /* 对话串里追问那一段的标题：你问：整句没看懂 */

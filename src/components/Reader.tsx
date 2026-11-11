@@ -1866,9 +1866,9 @@ function PickCard({
       })}
 
       {/* 唯一的 AI 入口（P26）：合并原来的「AI 释义」和「追问」。展开后选一个常见问题，或自己输入 */}
-      <div className="mt-3">
+      <div className="rf-ai-section">
         <button
-          className="rf-ai-mini"
+          className="rf-ai-primary"
           disabled={busy}
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
@@ -1889,18 +1889,34 @@ function PickCard({
                 {o.label}
               </button>
             ))}
-            <div className="flex gap-2 mt-1">
+            <div className="rf-ask-custom">
               <input
-                className="duo-input !text-[14px] flex-1"
-                placeholder="或者直接问：比如这里为什么用过去时？"
+                className="duo-input"
+                placeholder="自己写个问题…"
                 value={askPrompt}
                 onChange={(e) => setAskPrompt(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") askCustom();
                 }}
               />
-              <button className="rf-ai-mini" disabled={!askPrompt.trim()} onClick={askCustom}>
-                提问
+              <button
+                className="rf-ask-send"
+                disabled={!askPrompt.trim()}
+                onClick={askCustom}
+                aria-label="发送问题"
+                title="发送"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 3 10.5 13.5" />
+                  <path d="M21 3 14.5 21l-4-7.5L3 9.5 21 3Z" />
+                </svg>
               </button>
             </div>
           </div>
