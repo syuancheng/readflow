@@ -39,6 +39,16 @@
   text-transform: none;
   letter-spacing: normal;
   font-style: normal;
+  /* 默认收起，鼠标停在高亮词上才浮出来（与 ReadFlow 阅读页 P26 一致）：
+     一是网页行距通常不够，常显的小标签会盖住上一行的字；
+     二是重读时不直接看到答案，留住「先自己想一想」的机会。
+     用 opacity 而不是 display:none，节点和文字都还在（导入网页时会被剔除）。 */
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.rf-hl:hover .rf-gloss {
+  opacity: 1;
 }
 
 .rf-gloss::after {
@@ -52,7 +62,9 @@
 }
 
 .rf-hl:hover .rf-gloss {
-  max-width: 420px;
+  /* 绝对定位在行内元素里，宽度会被压到高亮词那么窄、一个字一行；按内容撑开、过长才换行 */
+  width: max-content;
+  max-width: 320px;
   white-space: normal;
   background: #58a700;
   color: #fff;

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ReadFlow · 网页阅读助手",
-  "version": "0.1.0",
-  "description": "在任意网页高亮你存过的单词/短语并显示中文释义，划词即可查词、收进 ReadFlow 词库。",
+  "version": "0.2.0",
+  "description": "把正在看的网页一键导入 ReadFlow；在任意网页高亮你存过的单词/短语，划词即可查词、收进词库。",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -18,6 +18,6 @@
   ],
   "action": {
     "default_popup": "src/popup.html",
-    "default_title": "ReadFlow 设置"
+    "default_title": "导入到 ReadFlow"
   }
 }

@@ -49,13 +49,21 @@ type SettingsPayload = {
   activeProvider: string | null;
   providers: ProviderRow[];
   markji: { configured: boolean; maskedToken: string; fromEnv: boolean };
-  extension: { token: string | null };
+  /** 插件 Token 状态（P30 每人一个，只存哈希；明文只在生成那次的 newExtensionToken 里） */
+  extension: { hasToken: boolean; hint: string | null; createdAt: number | null; lastUsedAt: number | null };
+  newExtensionToken?: string;
   /** 主账号：改的是站级配置（所有人共用的默认模型等）；普通账号改的是自己的 Key / Token */
   canEditSite?: boolean;
   /** 普通账号才有：自己有没有 Key、站点模型每天的免费次数（P28） */
   aiQuota?: { ownKey: boolean; siteAvailable: boolean; limit: number; usedToday: number };
   profile?: Profile;
 };
+
+/** 「11/12 14:05」这种短格式；空值显示「—」 */
+function fmtTime(ms: number | null): string {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 type Editor = { mode: "add" | "edit"; id: ProviderId };
 type Note = { kind: "ok" | "err"; text: string };
@@ -266,6 +274,9 @@ export default function SettingsDialog({
   const [markjiInput, setMarkjiInput] = useState("");
   const [showMarkji, setShowMarkji] = useState(false);
   const [notice, setNotice] = useState<Note | null>(null);
+  /** 刚生成的插件 Token 明文：只在本次打开的弹窗里显示，关掉就再也看不到 */
+  const [freshToken, setFreshToken] = useState<string | null>(null);
+  const [tokenCopied, setTokenCopied] = useState(false);
   const [profileDraft, setProfileDraft] = useState<Profile>(DEFAULT_PROFILE);
   const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -500,8 +511,32 @@ export default function SettingsDialog({
   }
 
   async function regenerateToken() {
+    if (data?.extension.hasToken && !window.confirm("重新生成后，插件里旧的 Token 会立即失效，需要把新的填进去。继续吗？")) return;
     const payload = await put({ regenerateExtensionToken: true });
-    if (payload) setNotice({ kind: "ok", text: "已生成新的插件 Token，旧的立即失效" });
+    if (payload?.newExtensionToken) {
+      setFreshToken(payload.newExtensionToken);
+      setTokenCopied(false);
+      setNotice({ kind: "ok", text: "已生成新的插件 Token：现在就复制，关掉设置后就看不到了" });
+    }
+  }
+
+  async function revokeToken() {
+    if (!window.confirm("作废后插件会立即断开，需要重新生成才能再用。继续吗？")) return;
+    const payload = await put({ revokeExtensionToken: true });
+    if (payload) {
+      setFreshToken(null);
+      setNotice({ kind: "ok", text: "插件 Token 已作废" });
+    }
+  }
+
+  async function copyFreshToken() {
+    if (!freshToken) return;
+    try {
+      await navigator.clipboard.writeText(freshToken);
+      setTokenCopied(true);
+    } catch {
+      setNotice({ kind: "err", text: "复制失败，请手动选中 Token 复制" });
+    }
   }
 
   // ---------- 个人资料（本地展示用，不涉及账号体系） ----------
@@ -603,9 +638,6 @@ export default function SettingsDialog({
               <div className={`st-notice ${notice.kind === "ok" ? "st-notice-ok" : "st-notice-err"}`}>
                 {notice.text}
               </div>
-            )}
-            {data?.canEditSite === false && tab === "extension" && (
-              <div className="st-notice st-notice-err">浏览器插件目前只给主账号使用。</div>
             )}
             {data?.canEditSite === false && tab === "markji" && (
               <div className="st-notice st-notice-info">
@@ -976,35 +1008,59 @@ export default function SettingsDialog({
                       <div className="st-panel-row">
                         <div>
                           <h3 className="st-panel-title">浏览器插件</h3>
-                          <p className="st-panel-desc">把 Token 填进插件 popup 里即可同步词表。</p>
+                          <p className="st-panel-desc">
+                            插件凭这个 Token 代表<b>你本人</b>：同步你的词表、划词收进你的词库、
+                            把正在看的网页导入成你的文章。
+                          </p>
                         </div>
                       </div>
                       <div className="st-field">
-                        <label className="st-label">同步 Token</label>
-                        <div className="st-input-row">
-                          <code className="st-token">{data?.extension.token ?? "尚未生成"}</code>
-                          {data?.extension.token && (
-                            <button
-                              className="st-btn st-btn-ghost"
-                              onClick={() => void navigator.clipboard?.writeText(data.extension.token!)}
-                            >
-                              复制
-                            </button>
-                          )}
-                          <button
-                            className="st-btn st-btn-quiet"
-                            disabled={isBusy}
-                            onClick={() => void regenerateToken()}
-                          >
-                            {data?.extension.token ? "重新生成" : "生成"}
-                          </button>
-                        </div>
-                        <p className="st-help">重新生成会使旧 Token 立即失效。</p>
+                        <label className="st-label">插件 Token</label>
+                        {freshToken ? (
+                          <>
+                            <div className="st-input-row">
+                              <code className="st-token" data-testid="fresh-extension-token">{freshToken}</code>
+                              <button className="st-btn st-btn-primary" onClick={() => void copyFreshToken()}>
+                                {tokenCopied ? "已复制 ✓" : "复制"}
+                              </button>
+                            </div>
+                            <p className="st-help">
+                              只显示这一次：现在就复制并粘贴到插件的「插件 Token」里。关掉设置后就看不到了，忘了只能重新生成。
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="st-input-row">
+                              <code className="st-token">
+                                {data?.extension.hasToken ? `已生成 · 末尾 …${data.extension.hint}` : "尚未生成"}
+                              </code>
+                              <button
+                                className={data?.extension.hasToken ? "st-btn st-btn-ghost" : "st-btn st-btn-primary"}
+                                disabled={isBusy}
+                                onClick={() => void regenerateToken()}
+                              >
+                                {data?.extension.hasToken ? "重新生成" : "生成 Token"}
+                              </button>
+                              {data?.extension.hasToken && (
+                                <button className="st-btn st-btn-quiet" disabled={isBusy} onClick={() => void revokeToken()}>
+                                  作废
+                                </button>
+                              )}
+                            </div>
+                            <p className="st-help">
+                              {data?.extension.hasToken
+                                ? `生成于 ${fmtTime(data.extension.createdAt)} · ${
+                                    data.extension.lastUsedAt ? `最近使用 ${fmtTime(data.extension.lastUsedAt)}` : "还没被插件用过"
+                                  }。为了安全只保存了加密后的值，看不到原文；丢了就重新生成。`
+                                : "生成后把它粘贴到插件里。每个账号一个，重新生成会让旧的立即失效。"}
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                     <p className="st-security">
-                      服务地址填 http://localhost:3000（或你的部署域名）。插件目录：项目下的 extension/，
-                      在 chrome://extensions 开启开发者模式后「加载已解压的扩展程序」。
+                      插件里的「服务地址」填你打开 ReadFlow 用的地址（比如 {typeof window === "undefined" ? "" : window.location.origin}）。
+                      安装：Chrome 打开 chrome://extensions → 开启开发者模式 →「加载已解压的扩展程序」→ 选项目里的 extension/ 目录。
                     </p>
                   </section>
                 )}

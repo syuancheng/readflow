@@ -287,7 +287,7 @@ try {
   });
   check("图片代理拒绝代理本机 / 内网地址", loopImg.status === 403, `status=${loopImg.status}`);
 
-  // ---- 6d. P28：非 owner 的墨墨 Token / 模型 Key 写到自己名下，碰不到站级；插件 Token 只给 owner ----
+  // ---- 6d. P28：非 owner 的墨墨 Token / 模型 Key 写到自己名下，碰不到站级；P30 插件 Token 每人一个 ----
   const bSetToken = await api("/api/settings", { method: "PUT", cookie: cookieB, body: { markjiToken: "b-token-123" } });
   const bRegen = await api("/api/settings", { method: "PUT", cookie: cookieB, body: { regenerateExtensionToken: true } });
   const bTest = await api("/api/settings/test", { method: "POST", cookie: cookieB, body: { target: "ai" } });
@@ -298,17 +298,21 @@ try {
     .get(BOB)?.value;
   tokDb.close();
   check(
-    "非 owner 改墨墨 Token 只写自己名下 / 重置插件 Token → 403 / 测试模型不借用站点的",
+    "非 owner 改墨墨 Token 只写自己名下 / 能生成自己的插件 Token / 测试模型不借用站点的",
     bSetToken.status === 200 && bOwnTok === "b-token-123" && siteTok !== "b-token-123" &&
-      bRegen.status === 403 && bTest.data.ok === false,
+      bRegen.status === 200 && Boolean(bRegen.data.newExtensionToken) && bTest.data.ok === false,
     `token=${bSetToken.status} 自己名下=${bOwnTok} 站级=${siteTok} regen=${bRegen.status} test.ok=${bTest.data.ok}`,
   );
   const aRegen = await api("/api/settings", { method: "PUT", cookie: cookieA, body: { regenerateExtensionToken: true } });
   const bView = await api("/api/settings", { cookie: cookieB });
+  const aTok = aRegen.data.newExtensionToken;
+  const bTok = bRegen.data.newExtensionToken;
+  const aWords = await fetch(`${BASE}/api/extension/words`, { headers: { "x-readflow-token": aTok ?? "" } });
   check(
-    "owner 能生成插件 Token，非 owner 读不到它",
-    aRegen.status === 200 && Boolean(aRegen.data.extension?.token) && bView.data.extension?.token === null,
-    `A=${aRegen.status}/${Boolean(aRegen.data.extension?.token)} B 见到=${bView.data.extension?.token}`,
+    "两人各有自己的插件 Token，互不相同；读回设置只给状态不给明文",
+    aRegen.status === 200 && Boolean(aTok) && aTok !== bTok && aWords.status === 200 &&
+      bView.data.extension?.hasToken === true && !JSON.stringify(bView.data).includes(bTok ?? "§"),
+    `A=${aRegen.status} 不同=${aTok !== bTok} A 词表=${aWords.status} B 状态=${JSON.stringify(bView.data.extension)}`,
   );
 
   // ---- 7. 个人资料按账号隔离，站级密钥共享 ----

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   PROVIDERS,
@@ -12,7 +11,6 @@ import {
 import {
   allSettings,
   deleteSetting,
-  getSetting,
   ownSettings,
   setSetting,
 } from "@/lib/settings-store";
@@ -20,6 +18,7 @@ import { GLOBAL_USER } from "@/db/ensure-auth";
 import { hasOwnModel } from "@/lib/user-secrets";
 import { aiUsedToday, dailyAiQuota } from "@/lib/ai-quota";
 import { currentUser } from "@/lib/auth";
+import { extensionTokenStatus, issueExtensionToken, revokeExtensionToken } from "@/lib/extension-tokens";
 import {
   isAvatarImage,
   normalizeProfile,
@@ -38,7 +37,8 @@ const str = (v: unknown): string | undefined =>
 /**
  * GET /api/settings
  * 返回配置状态。API Key 与墨墨 Token 一律脱敏，永不下发明文；
- * 插件 Token 例外——用户需要复制它到插件里，只能在这里看到。
+ * 插件 Token 只存哈希，这里只给状态（末 4 位、生成 / 最近使用时间），
+ * 明文只在 PUT regenerateExtensionToken 的那次响应里出现一次。
  */
 export async function GET() {
   const user = await currentUser();
@@ -57,7 +57,7 @@ export async function GET() {
       activeProvider: own[SETTINGS_KEYS.activeProvider] ?? null,
       providers: providerStatuses(own, {}),
       markji: { configured: Boolean(ownMarkji), maskedToken: maskSecret(ownMarkji), fromEnv: false },
-      extension: { token: null },
+      extension: extensionTokenStatus(user.id),
       canEditSite: false,
       aiQuota: {
         ownKey: hasOwnModel(user.id),
@@ -79,11 +79,8 @@ export async function GET() {
       maskedToken: maskSecret(markji),
       fromEnv: !settings[SETTINGS_KEYS.markjiToken] && Boolean(markji),
     },
-    // 插件 Token 能读写 owner 的整个词库（插件链路无 cookie、数据归 owner），
-    // 只能给 owner 看；其它账号拿到它就等于拿到了 owner 的词库。
-    extension: {
-      token: user.isOwner ? getSetting(SETTINGS_KEYS.extensionToken) : null,
-    },
+    // P30：插件 Token 每人一个，只代表本人
+    extension: extensionTokenStatus(user.id),
     canEditSite: user.isOwner,
     profile: profileFromSettings(settings),
   });
@@ -102,6 +99,7 @@ type PutBody = {
   markjiToken?: string;
   markjiClear?: boolean;
   regenerateExtensionToken?: boolean;
+  revokeExtensionToken?: boolean;
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
   profile?: Partial<Profile>;
   profileReset?: boolean;
@@ -130,11 +128,8 @@ export async function PUT(req: Request) {
   // 把墨墨导出指到自己的账户，或重置插件 Token 拿到 owner 的词库。
   // 主账号改站级行（所有人共用的默认模型、主账号自己的墨墨、插件 Token）；
   // 普通账号改自己的行（P28）：自己的模型 Key、自己的墨墨 Token，碰不到站级密钥。
-  // 插件 Token 能读写主账号的整个词库，只有主账号能重置。
+  // 插件 Token（P30）是每人自己的，任何账号都能生成 / 作废自己的，不受 scope 影响。
   const scope = user.isOwner ? GLOBAL_USER : user.id;
-  if (!user.isOwner && body.regenerateExtensionToken === true) {
-    return NextResponse.json({ error: "只有主账号可以管理插件 Token" }, { status: 403 });
-  }
   if (body.activeProvider !== undefined) {
     if (body.activeProvider === null || body.activeProvider === "") {
       deleteSetting(SETTINGS_KEYS.activeProvider, scope);
@@ -170,8 +165,11 @@ export async function PUT(req: Request) {
     if (token && !isMaskedValue(token)) setSetting(SETTINGS_KEYS.markjiToken, token, scope);
   }
 
+  let newExtensionToken: string | null = null;
   if (body.regenerateExtensionToken === true) {
-    setSetting(SETTINGS_KEYS.extensionToken, randomUUID().replace(/-/g, ""));
+    newExtensionToken = issueExtensionToken(user.id);
+  } else if (body.revokeExtensionToken === true) {
+    revokeExtensionToken(user.id);
   }
 
   const PROFILE_KEYS = [
@@ -197,5 +195,8 @@ export async function PUT(req: Request) {
     }
   }
 
-  return GET();
+  const res = await GET();
+  if (!newExtensionToken) return res;
+  // 新 Token 的明文只在这一次响应里返回，设置页提示用户立刻复制
+  return NextResponse.json({ ...(await res.json()), newExtensionToken });
 }

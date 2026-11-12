@@ -37,6 +37,8 @@ db.exec(`
     exchange  TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_ecdict_exchange ON ecdict(exchange);
+  -- 查询一律 word = ? COLLATE NOCASE；没有这个索引就是全表扫（见 src/lib/dict.ts）
+  CREATE INDEX IF NOT EXISTS idx_ecdict_word_nocase ON ecdict(word COLLATE NOCASE);
 `);
 
 // CSV 解析：处理引号包裹的字段

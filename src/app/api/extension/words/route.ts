@@ -1,48 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contexts, paragraphs, texts, userWords } from "@/db/schema";
-import { ownerId } from "@/lib/auth";
-import { SETTINGS_KEYS } from "@/lib/config";
-import { getSetting } from "@/lib/settings-store";
+import { preflight, requireExtensionUser, withCors } from "@/lib/extension-http";
 import { shortGloss } from "@/lib/gloss";
 import { lookup } from "@/lib/dict";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 扩展插件从 chrome-extension:// 发请求，带自定义头会触发预检 */
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, x-readflow-token, Authorization",
-  "Access-Control-Allow-Private-Network": "true",
-  "Access-Control-Max-Age": "86400",
-};
-
-function withCors(res: NextResponse): NextResponse {
-  for (const [k, v] of Object.entries(CORS)) res.headers.set(k, v);
-  return res;
-}
-
 export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS });
-}
-
-function authorized(req: Request): boolean {
-  const expected = getSetting(SETTINGS_KEYS.extensionToken);
-  if (!expected) return false;
-  const header = req.headers.get("x-readflow-token") ?? "";
-  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const got = header || bearer;
-  if (!got || got.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(got), Buffer.from(expected));
-  } catch {
-    return false;
-  }
+  return preflight();
 }
 
 /**
@@ -50,17 +19,10 @@ function authorized(req: Request): boolean {
  * 插件词表同步。Token 在 ReadFlow → 头像 → 设置 → 浏览器插件 里生成。
  */
 export async function GET(req: Request) {
-  if (!authorized(req)) {
-    return withCors(
-      NextResponse.json(
-        { ok: false, error: "插件 Token 无效或尚未生成，请在 ReadFlow 设置页生成并填入插件" },
-        { status: 401 },
-      ),
-    );
-  }
-
-  // 插件走站级 token、没有 cookie，数据统一归到 owner 名下
-  const owner = ownerId();
+  const auth = requireExtensionUser(req);
+  if ("response" in auth) return auth.response;
+  // P30：Token 是个人的，词表就是这个人的词表
+  const owner = auth.user.id;
   const rows = db
     .select({
       id: userWords.id,
@@ -128,9 +90,8 @@ type SaveBody = {
  * 网页上划词收进词库：为该网页建一条轻量文本 + 段落，再走与主站一致的 upsert 逻辑。
  */
 export async function POST(req: Request) {
-  if (!authorized(req)) {
-    return withCors(NextResponse.json({ ok: false, error: "插件 Token 无效" }, { status: 401 }));
-  }
+  const auth = requireExtensionUser(req);
+  if ("response" in auth) return auth.response;
 
   let body: SaveBody;
   try {
@@ -161,7 +122,7 @@ export async function POST(req: Request) {
   const isPhrase = /\s/.test(word) ? 1 : 0;
   const now = Date.now();
 
-  const owner = ownerId();
+  const owner = auth.user.id;
   const result = db.transaction((tx) => {
     // 同一个网页复用一条 text（避免每收一个词就多一篇文章）。
     // 必须带上 userId：否则 B 用户的网页摘录会挂到 A 的同网址文章下。
@@ -169,7 +130,9 @@ export async function POST(req: Request) {
       ? tx
           .select()
           .from(texts)
-          .where(and(eq(texts.sourceUrl, url), eq(texts.userId, owner)))
+          // 只挂到「网页摘录」（source_type='web'）上：同网址如果整篇导入过（'url'），
+          // 绝不能往那篇文章末尾追加句子段落
+          .where(and(eq(texts.sourceUrl, url), eq(texts.userId, owner), eq(texts.sourceType, "web")))
           .get()
       : undefined;
     if (!text) {

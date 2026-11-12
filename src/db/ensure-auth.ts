@@ -62,6 +62,15 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
       count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (user_id, day)
     );
+    -- 浏览器插件 Token（P30）：每人一个，只存 sha256；token_hint 是末 4 位，
+    -- 让设置页能显示「…a1b2」帮用户认出是哪一个，明文只在生成时返回一次。
+    CREATE TABLE IF NOT EXISTS extension_tokens (
+      user_id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      token_hint TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER
+    );
   `);
   if (!userCols.some((c) => c.name === "invite_code")) {
     sqlite.exec("ALTER TABLE users ADD COLUMN invite_code TEXT");

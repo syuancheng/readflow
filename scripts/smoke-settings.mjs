@@ -106,11 +106,12 @@ const clean =
   !cfg.markji.configured &&
   !JSON.stringify(cfg).includes(FAKE) &&
   cfg.profile.displayName === "Siyuan Cheng" &&
-  cfg.extension.token === before.extension.token;
+  cfg.extension.hasToken === before.extension.hasToken &&
+  cfg.extension.hint === before.extension.hint;
 check(
   "13 冒烟配置与资料全部清空，插件 Token 保留",
   clean,
-  `active=${cfg.activeProvider} markji=${cfg.markji.configured} ext=${cfg.extension.token ? "kept" : "missing"}`,
+  `active=${cfg.activeProvider} markji=${cfg.markji.configured} ext=${cfg.extension.hint === before.extension.hint ? "kept" : "changed"}`,
 );
 
 console.log(`===== 配置 + 资料流程 ${pass}/${pass + fail} 通过 =====`);

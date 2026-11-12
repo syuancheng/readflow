@@ -23,6 +23,25 @@ export type Extracted = {
  *
  * 两条路径最终都产出同一个 Block[]（见 src/lib/import/），下游不区分来源。
  */
+
+/** 页面 <head> 里声明的官方 Markdown 版本地址（绝对地址），没有返回 null */
+export function findMarkdownAlternate(doc: Document, url: string): string | null {
+  const href = doc
+    .querySelector('link[rel~="alternate"][type="text/markdown"]')
+    ?.getAttribute("href");
+  if (!href) return null;
+  try {
+    return new URL(href, url).toString();
+  } catch {
+    return null;
+  }
+}
+
+/** 有些站点 404 也返回 200 的 HTML 错误页：靠内容特征判断拿到的确实是 Markdown */
+export function looksLikeMarkdown(body: string): boolean {
+  return Boolean(body.trim()) && !/^\s*<(!doctype|html)/i.test(body) && /^#{1,6}\s|^\s*\|.+\||^\s*```/m.test(body);
+}
+
 export async function extractFromUrl(url: string): Promise<Extracted> {
   let res: Response;
   try {
@@ -37,19 +56,17 @@ export async function extractFromUrl(url: string): Promise<Extracted> {
   } catch (e) {
     throw new Error(`抓取失败：${(e as Error).message}`);
   }
-
   if (!res.ok) throw new Error(`抓取失败：HTTP ${res.status}`);
+
   const html = await res.text();
   const dom = new JSDOM(html, { url });
   const doc = dom.window.document;
 
   // 1) 官方 Markdown（若站点提供）
   let markdown: string | null = null;
-  const link = doc.querySelector('link[rel~="alternate"][type="text/markdown"]');
-  const href = link?.getAttribute("href");
-  if (href) {
+  const mdUrl = findMarkdownAlternate(doc, url);
+  if (mdUrl) {
     try {
-      const mdUrl = new URL(href, url).toString();
       const mdRes = await fetch(mdUrl, {
         headers: { "user-agent": UA, accept: "text/markdown,text/plain,*/*;q=0.8" },
         redirect: "follow",
@@ -58,9 +75,7 @@ export async function extractFromUrl(url: string): Promise<Extracted> {
       if (mdRes.ok) {
         const body = await mdRes.text();
         const ct = mdRes.headers.get("content-type") ?? "";
-        // 有些站点 404 也返回 200 的 HTML 错误页，靠内容类型 + 内容特征双保险
-        const looksLikeMarkdown = /^#{1,6}\s|^\s*\|.+\||^\s*```/m.test(body);
-        if (body.trim() && (ct.includes("markdown") || ct.includes("text/plain")) && looksLikeMarkdown) {
+        if ((ct.includes("markdown") || ct.includes("text/plain")) && looksLikeMarkdown(body)) {
           markdown = body;
         }
       }
@@ -69,7 +84,22 @@ export async function extractFromUrl(url: string): Promise<Extracted> {
     }
   }
 
-  // 2) Readability：既提供 title，也提供 fallback 正文 HTML
+  return extractFromDocument(doc, url, markdown);
+}
+
+/**
+ * 已经拿到页面 HTML 时的提取（P30 插件导入）：浏览器替服务器抓好了页面，
+ * 服务器不再联网，只做和 URL 导入完全相同的解析。
+ * markdown 是插件在浏览器里取回的官方 Markdown（可空），这里会再校验一次。
+ */
+export function extractFromHtml(html: string, url: string, markdown?: string | null): Extracted {
+  const dom = new JSDOM(html, { url });
+  const md = markdown && looksLikeMarkdown(markdown) ? markdown : null;
+  return extractFromDocument(dom.window.document, url, md);
+}
+
+/** 两条路径共用的后半段：Readability 取标题和正文 HTML，有官方 Markdown 时优先用它 */
+function extractFromDocument(doc: Document, url: string, markdown: string | null): Extracted {
   let title = (doc.querySelector("meta[property='og:title']")?.getAttribute("content") || doc.title || "").trim();
   let articleHtml: string | null = null;
   try {

@@ -151,7 +151,10 @@ try {
   const ownerTok = q("select value from settings where user_id = 'local' and key = 'markji.token'")?.value;
   const friendTok = q("select value from settings where user_id = ? and key = 'markji.token'", friendRow.id)?.value;
   check("12 普通账号填的墨墨 Token 存在自己名下，主账号的不变", friendTok === "friend-markji-token-zzzz" && ownerTok === "owner-markji-token-abcdef");
-  check("13 普通账号不能重置插件 Token", (await api(friend, "/api/settings", { method: "PUT", body: JSON.stringify({ regenerateExtensionToken: true }) })).status === 403);
+  // P30：插件 Token 每人一个，普通账号也能生成自己的；明文只在这次响应里出现
+  const fRegen = await api(friend, "/api/settings", { method: "PUT", body: JSON.stringify({ regenerateExtensionToken: true }) });
+  const fRegenBody = await json(fRegen);
+  check("13 普通账号能生成自己的插件 Token（明文只返回一次）", fRegen.status === 200 && /^rfx_/.test(fRegenBody.newExtensionToken ?? "") && fRegenBody.extension?.hasToken === true && !("token" in (fRegenBody.extension ?? {})));
 
   // ---- 14. 站点模型每日免费次数（本测试设为 2 次） ----
   const r1 = await explain(friend);

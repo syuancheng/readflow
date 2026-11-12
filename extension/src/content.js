@@ -309,8 +309,23 @@
     while (i > 0 && isWord(text[i - 1])) i--;
     let j = i;
     while (j < text.length && isWord(text[j])) j++;
-    const w = text.slice(i, j).replace(/^[-']+|[-']+$/g, "");
-    return w && w.length > 1 ? { word: w, node: range.startContainer } : null;
+    const raw = text.slice(i, j);
+    const w = raw.replace(/^[-'’]+|[-'’]+$/g, "");
+    if (!w || w.length < 2) return null;
+
+    // 只认「真的点在这个词上」：caretRangeFromPoint 在空白处会吸附到最近的文字
+    const wordRange = document.createRange();
+    wordRange.setStart(range.startContainer, i);
+    wordRange.setEnd(range.startContainer, j);
+    if (!RF.pointInRects(x, y, wordRange.getClientRects())) return null;
+    return { word: w, node: range.startContainer };
+  }
+
+  /** 点在链接、按钮、输入框这类可交互元素上：那是在用网页，不是在查词 */
+  const INTERACTIVE = "a[href], button, input, textarea, select, option, label, summary, [contenteditable=''], [contenteditable='true'], [role='button'], [role='link'], [role='tab'], [role='menuitem']";
+
+  function closeCard() {
+    card?.classList.remove("on");
   }
 
   async function openCard(word, sentence, x, y, saved) {
@@ -328,7 +343,7 @@
     const aiBtn = card.querySelector('[data-act="ai"]');
 
     if (saved) {
-      body.textContent = saved.translation || saved.gloss || "（暂无释义）";
+      body.textContent = RF.cleanTranslation(saved.translation) || saved.gloss || "（暂无释义）";
       if (saved.example) {
         const ex = document.createElement("div");
         ex.className = "rf-example";
@@ -341,10 +356,10 @@
       try {
         const r = await send({
           type: "rf:api",
-          payload: { path: `/api/dict?word=${encodeURIComponent(word)}` },
+          payload: { path: `/api/extension/dict?word=${encodeURIComponent(word)}` },
         });
         const entry = r.json?.entry;
-        dictTranslation = entry?.translation || "";
+        dictTranslation = RF.cleanTranslation(entry?.translation);
         body.textContent = dictTranslation || "词典未收录，可点「AI 释义」结合上下文解释。";
       } catch (err) {
         body.textContent = `词典查询失败：${err.message}`;
@@ -359,7 +374,7 @@
         const r = await send({
           type: "rf:api",
           payload: {
-            path: "/api/explain",
+            path: "/api/extension/explain",
             method: "POST",
             raw: true,
             body: {
@@ -464,19 +479,26 @@
       (e) => {
         if (!config?.enabled || onOwnSite()) return;
         if (host && (e.target === host || shadow?.contains(e.composedPath?.()[0]))) return;
+        // 已存词的高亮：点中就看卡片（高亮本身就是一个明确的词）
         const mark = e.target.closest?.(".rf-hl");
-        if (mark) {
+        if (mark && !mark.closest(INTERACTIVE)) {
           const hit = words.find((w) => w.id === mark.dataset.rfId);
           void openCard(mark.dataset.rfText, sentenceOf(mark), e.clientX, e.clientY, hit || null);
           return;
         }
-        const selected = window.getSelection()?.toString().trim();
-        if (selected && selected.length <= 120) {
-          void openCard(selected, sentenceOf(window.getSelection()?.anchorNode), e.clientX, e.clientY, null);
+        // 拖选了一段文字（必须含字母）：查这段
+        const sel = window.getSelection();
+        const selected = sel && !sel.isCollapsed ? sel.toString().trim() : "";
+        if (RF.isLookupSelection(selected)) {
+          void openCard(selected, sentenceOf(sel.anchorNode), e.clientX, e.clientY, null);
           return;
         }
+        // 点在链接 / 按钮 / 输入框上：让网页自己处理
+        if (e.target.closest?.(INTERACTIVE)) return;
+        // 单击：只有真的点在一个英文单词上才查；点空白处 = 关掉卡片
         const at = wordAtPoint(e.clientX, e.clientY);
         if (at) void openCard(at.word, sentenceOf(at.node), e.clientX, e.clientY, null);
+        else closeCard();
       },
       false,
     );

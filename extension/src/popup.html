@@ -2,63 +2,96 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>ReadFlow 设置</title>
+    <title>ReadFlow</title>
     <style>
+      /* 取值对齐主站设计规范（src/styles/tokens.css）：插件不能引用站点 CSS，这里抄同一组数值 */
+      :root {
+        --green: #58cc02; --green-edge: #58a700; --green-text: #3f7f00; --green-soft: #f1fbe7;
+        --ink: #3c3c3c; --ink-2: #6b6b6b; --line: #e5e5e5; --line-strong: #d4d4d4;
+        --subtle: #f7f7f7; --red-text: #c62828; --red-soft: #ffecec; --blue: #1cb0f6;
+      }
       * { box-sizing: border-box; }
-      body { width: 330px; margin: 0; padding: 16px; font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; color: #3c3c3c; }
-      h1 { font-size: 16px; font-weight: 800; margin: 0 0 2px; }
-      .sub { font-size: 11.5px; color: #999; margin: 0 0 14px; }
-      label { display: block; font-size: 11.5px; font-weight: 800; color: #777; margin: 10px 0 4px; }
-      input[type="text"], input[type="password"], select { width: 100%; padding: 8px 10px; border: 1.5px solid #e5e5e5; border-radius: 8px; font: inherit; font-size: 12.5px; }
-      input:focus, select:focus { outline: none; border-color: #58a700; }
-      .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
-      .row span { font-size: 12px; font-weight: 700; }
-      .switch { width: 38px; height: 21px; border-radius: 999px; background: #ccc; position: relative; cursor: pointer; border: 0; flex-shrink: 0; }
-      .switch.on { background: #58cc02; }
-      .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform .15s; }
-      .switch.on::after { transform: translateX(17px); }
-      button.act { width: 100%; margin-top: 14px; padding: 9px; border: 0; border-radius: 9px; background: #58cc02; color: #fff; font: inherit; font-weight: 800; cursor: pointer; }
-      button.act.ghost { background: #f7f7f7; color: #3c3c3c; margin-top: 8px; }
-      button:disabled { opacity: .6; cursor: default; }
-      .status { margin-top: 12px; padding: 9px 11px; border-radius: 8px; background: #f7f7f7; font-size: 11.5px; color: #777; }
-      .status.err { background: #ffe0e0; color: #b52d2d; }
-      .tip { margin-top: 10px; font-size: 11px; color: #999; line-height: 1.6; }
-      code { background: #f0f0f0; padding: 1px 4px; border-radius: 4px; }
+      body { width: 340px; margin: 0; padding: 16px; font: 14px/20px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; color: var(--ink); }
+      h1 { display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 24px; font-weight: 700; margin: 0 0 12px; }
+      h1 i { width: 24px; height: 24px; border-radius: 8px; background: var(--green); color: #fff; font-style: normal; font-size: 12px; display: grid; place-items: center; }
+
+      .import { padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+      .page { font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+      .host { margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 40px; margin-top: 12px; padding: 0 16px;
+             border: 0; border-bottom: 4px solid var(--green-edge); border-radius: 12px; background: var(--green); color: #fff;
+             font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+      .btn:active:not(:disabled) { transform: translateY(2px); border-bottom-width: 2px; }
+      .btn.secondary { background: #fff; color: var(--ink); border: 1px solid var(--line-strong); border-bottom: 4px solid var(--line-strong); }
+      .btn:disabled { opacity: .55; cursor: default; }
+      .row2 { display: flex; gap: 8px; }
+      .row2 .btn { margin-top: 8px; }
+      .msg { margin-top: 12px; padding: 8px 12px; border-radius: 8px; font-size: 12px; line-height: 16px; background: var(--subtle); color: var(--ink-2); }
+      .msg.ok { background: var(--green-soft); color: var(--green-text); }
+      .msg.err { background: var(--red-soft); color: var(--red-text); }
+      [hidden] { display: none !important; }
+
+      details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+      summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+      label { display: block; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--ink-2); margin: 12px 0 4px; }
+      input[type="text"], input[type="password"], select { width: 100%; height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; font: inherit; font-size: 14px; color: var(--ink); background: #fff; }
+      input:focus, select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(28, 176, 246, .25); }
+      .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; font-size: 12px; font-weight: 600; }
+      .switch { width: 40px; height: 24px; border-radius: 999px; background: var(--line-strong); position: relative; cursor: pointer; border: 0; flex-shrink: 0; }
+      .switch.on { background: var(--green); }
+      .switch::after { content: ""; position: absolute; top: 4px; left: 4px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .12s; }
+      .switch.on::after { transform: translateX(16px); }
+      .tip { margin: 12px 0 0; font-size: 12px; line-height: 16px; color: var(--ink-2); }
+      code { background: var(--subtle); padding: 0 4px; border-radius: 4px; }
     </style>
   </head>
   <body>
-    <h1>ReadFlow · 网页阅读助手</h1>
-    <p class="sub">在任意网页高亮已存词，划词即可查词收词</p>
+    <h1><i>R</i>ReadFlow</h1>
 
-    <label for="server">ReadFlow 服务地址</label>
-    <input id="server" type="text" placeholder="http://127.0.0.1:3000" />
+    <!-- 导入当前网页（P30）：服务器打不开的国外网站，由浏览器把页面交给 ReadFlow -->
+    <section class="import">
+      <div id="page-title" class="page">读取当前标签页…</div>
+      <div id="page-host" class="host"></div>
+      <button id="import" class="btn" disabled>📥 导入到 ReadFlow</button>
+      <div id="import-msg" class="msg" hidden></div>
+      <div id="after" class="row2" hidden>
+        <a id="open" class="btn" href="#" target="_blank">打开阅读 →</a>
+        <button id="force" class="btn secondary" hidden>再导入一份</button>
+      </div>
+    </section>
 
-    <label for="token">插件 Token</label>
-    <input id="token" type="password" placeholder="在 ReadFlow 设置页生成" />
+    <details id="settings">
+      <summary>插件设置（服务地址 · Token · 高亮）</summary>
 
-    <label for="lang">页面语言</label>
-    <select id="lang">
-      <option value="en">English</option>
-      <option value="zh">中文</option>
-      <option value="ja">日本語</option>
-      <option value="fr">Français</option>
-      <option value="de">Deutsch</option>
-      <option value="es">Español</option>
-    </select>
+      <label for="server">ReadFlow 服务地址</label>
+      <input id="server" type="text" placeholder="http://127.0.0.1:3000" />
 
-    <div class="row">
-      <span>启用网页高亮</span>
-      <button id="enabled" class="switch" aria-label="启用高亮"></button>
-    </div>
+      <label for="token">插件 Token</label>
+      <input id="token" type="password" placeholder="在 ReadFlow 设置 → 浏览器插件 里生成" />
 
-    <button id="save" class="act">保存并同步</button>
-    <button id="sync" class="act ghost">仅重新同步词表</button>
+      <label for="lang">页面语言</label>
+      <select id="lang">
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+        <option value="ja">日本語</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="es">Español</option>
+      </select>
 
-    <div id="status" class="status">读取中…</div>
-    <p class="tip">
-      Token 获取：打开 ReadFlow → 右上角头像 → <b>设置</b> → 浏览器插件 → 生成/复制。<br />
-      插件安装：Chrome → <code>chrome://extensions</code> → 开发者模式 → 加载已解压的扩展程序 → 选项目的 <code>extension/</code> 目录。
-    </p>
+      <div class="switch-row">
+        <span>在网页上高亮已存词</span>
+        <button id="enabled" class="switch" aria-label="启用高亮"></button>
+      </div>
+
+      <button id="save" class="btn">保存并同步</button>
+      <button id="sync" class="btn secondary">仅重新同步词表</button>
+
+      <div id="status" class="msg">读取中…</div>
+      <p class="tip">
+        Token：打开 ReadFlow → 右上角头像 → <b>设置</b> → 浏览器插件 → 生成，复制过来。每个账号一个，代表你本人。
+      </p>
+    </details>
 
     <script src="popup.js"></script>
   </body>

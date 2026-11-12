@@ -75,5 +75,29 @@
     return out;
   }
 
-  return { buildEntries, findMatches, escapeRegex };
+  /**
+   * 点击点是否真的落在某个矩形（单词在屏幕上占的框）里。
+   * caretRangeFromPoint 在空白处也会「吸附」到最近的文字，所以拿到单词后必须再核对一次，
+   * 否则点行尾空白、段落间距都会弹出查词卡片。pad 给一点点容差，免得点在字的边缘点不中。
+   */
+  function pointInRects(x, y, rects, pad = 2) {
+    for (const r of rects || []) {
+      if (!r || r.width === 0 || r.height === 0) continue;
+      if (x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad) return true;
+    }
+    return false;
+  }
+
+  /** 拖选的内容至少要有一个字母（拖过一片空白 / 标点不算选中了词），并且不能太长 */
+  function isLookupSelection(text) {
+    const t = String(text || "").trim();
+    return t.length > 0 && t.length <= 120 && /\p{L}/u.test(t);
+  }
+
+  /** ECDICT 的释义里换行存成了字面的 "\\n"，显示前还原成真换行 */
+  function cleanTranslation(s) {
+    return String(s || "").replace(/\\n/g, "\n").trim();
+  }
+
+  return { buildEntries, findMatches, escapeRegex, pointInRects, isLookupSelection, cleanTranslation };
 });

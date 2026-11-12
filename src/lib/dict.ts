@@ -12,9 +12,37 @@ function getDictDb(): Database.Database {
     throw new Error(`ECDICT database not found at ${dbPath}. Run: node scripts/import-ecdict.mjs`);
   }
 
+  ensureNocaseIndex(dbPath);
   dictDb = new Database(dbPath, { readonly: true, fileMustExist: true });
   dictDb.pragma("query_only = ON");
   return dictDb;
+}
+
+/**
+ * 所有查询都是 `word = ? COLLATE NOCASE`，而 word 列自带的唯一索引是区分大小写的，
+ * 用不上 → 每查一个词都全表扫 77 万行（实测 30–40ms/次）。导入一篇 1700 词的文章
+ * 要查几百个不同词形做难度估算，累计 20 多秒，插件导入因此超时（P30 实测）。
+ *
+ * 老库（以及服务器上已经导入好的库）没有这个索引：第一次打开词典时补建一次，
+ * 77 万行约 0.4 秒、库文件多十几 MB。建不了（只读盘等）就照旧慢查，不影响功能。
+ */
+function ensureNocaseIndex(dbPath: string): void {
+  try {
+    const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const has = probe
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_ecdict_word_nocase'")
+      .get();
+    probe.close();
+    if (has) return;
+    const rw = new Database(dbPath, { fileMustExist: true });
+    try {
+      rw.exec("CREATE INDEX IF NOT EXISTS idx_ecdict_word_nocase ON ecdict(word COLLATE NOCASE)");
+    } finally {
+      rw.close();
+    }
+  } catch (err) {
+    console.warn("[dict] 补建大小写不敏感索引失败，查词会变慢：", (err as Error).message);
+  }
 }
 
 /**
