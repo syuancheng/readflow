@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { contexts, texts, userWords } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import {
   buildCalendar,
   computeStreaks,
@@ -39,7 +39,8 @@ export async function getStats(
       w: sql<number>`coalesce(sum(${texts.wordCount}), 0)`,
     })
     .from(texts)
-    .where(eq(texts.userId, userId));
+    // 网页摘录（P31）：一句话一条的插件摘录不算「读过的文本」，也不计词数
+    .where(and(eq(texts.userId, userId), ne(texts.sourceType, "web")));
 
   const wordRows = await db
     .select({ c: sql<number>`count(*)` })

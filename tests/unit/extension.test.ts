@@ -14,6 +14,12 @@ const RFMatch = require("../../../extension/src/matcher.js") as {
   pointInRects: (x: number, y: number, rects: Array<Partial<DOMRect>>, pad?: number) => boolean;
   isLookupSelection: (text: string) => boolean;
   cleanTranslation: (s: string | null | undefined) => string;
+  normalizeBlockText: (s: string) => string;
+  normalizedIndex: (raw: string, at: number) => number;
+  sentenceAround: (text: string, start: number, end: number) => string;
+  normalizePhonetic: (s: string | null | undefined) => string;
+  renderMarkdown: (text: string) => string;
+  escHtml: (s: string | null | undefined) => string;
 };
 
 const WORDS = [
@@ -120,4 +126,50 @@ test("插件拖选查词：必须含字母、不超过 120 字", () => {
 test("插件卡片释义：ECDICT 的字面 \\n 还原成换行", () => {
   assert.equal(RFMatch.cleanTranslation("a. 根本不同的\\nn. 无法相比的东西"), "a. 根本不同的\nn. 无法相比的东西");
   assert.equal(RFMatch.cleanTranslation(null), "");
+});
+
+/* ---------------- P31 移植到插件的纯函数 ---------------- */
+
+test("normalizeBlockText：换行 / nbsp / 连续空格都压成一个空格", () => {
+  assert.equal(RFMatch.normalizeBlockText("a\u00a0b   c\n\td"), "a b c d");
+  assert.equal(RFMatch.normalizeBlockText("  首尾空白  "), "首尾空白");
+});
+
+test("normalizedIndex：块原文下标 → 归一化后下标", () => {
+  const raw = "The  quick\nbrown";
+  const norm = RFMatch.normalizeBlockText(raw);
+  assert.equal(norm, "The quick brown");
+  // "quick" 在原文从 5 开始，归一化后也是 4
+  assert.equal(RFMatch.normalizedIndex(raw, raw.indexOf("quick")), norm.indexOf("quick"));
+  // "brown" 在原文跨了换行，换算后仍能对上
+  assert.equal(RFMatch.normalizedIndex(raw, raw.indexOf("brown")), norm.indexOf("brown"));
+});
+
+test("sentenceAround：返回选区所在的整句", () => {
+  const text = "First one. The optimization target matters. Last one.";
+  const start = text.indexOf("target");
+  assert.equal(RFMatch.sentenceAround(text, start, start + 6), "The optimization target matters.");
+});
+
+test("normalizePhonetic：老式重音记号换成 IPA", () => {
+  assert.equal(RFMatch.normalizePhonetic("'glisn"), "ˈglisn");
+  assert.equal(RFMatch.normalizePhonetic("kɒ:"), "kɒː");
+  // 空格分隔的多个变体只取第一个（与 src/lib/text.ts 同规则）
+  assert.equal(RFMatch.normalizePhonetic("'pri:.print prɪnt"), "ˈpriːˌprint");
+  assert.equal(RFMatch.normalizePhonetic(null), "");
+});
+
+test("renderMarkdown：先转义再渲染，模型输出的 HTML 只能当文字", () => {
+  const html = RFMatch.renderMarkdown('<img src=x onerror="alert(1)">');
+  assert.ok(html.includes("&lt;img"), html);
+  assert.ok(!html.includes("<img"), html);
+  assert.ok(!html.includes("onerror=\"alert"), "引号也要转义");
+});
+
+test("renderMarkdown：粗体、列表、释义行、换行", () => {
+  const html = RFMatch.renderMarkdown("释义：超智能的\n- 第一条\n- 第二条\n\n**重点**");
+  assert.ok(html.includes('<p class="rf-gloss-line">'), html);
+  assert.ok(html.includes("<b>释义：超智能的</b>"), html);
+  assert.ok(html.includes("<ul>") && html.includes("<li>第一条</li>"), html);
+  assert.ok(html.includes("<b>重点</b>"), html);
 });

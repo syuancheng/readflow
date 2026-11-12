@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -20,7 +20,9 @@ export default async function Home() {
     db
       .select()
       .from(texts)
-      .where(eq(texts.userId, user.id))
+      // P31 决策 D4：网页摘录（插件记词时顺带建的 source_type='web'）不是完整文章，
+      // 不进「我的文本」书架；它的词在词库里照常见。
+      .where(and(eq(texts.userId, user.id), ne(texts.sourceType, "web")))
       .orderBy(desc(texts.createdAt)),
     getStats(7, 18, user.id),
   ]);

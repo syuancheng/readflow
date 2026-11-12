@@ -15,17 +15,32 @@ export type CtxLike = {
   textId: string | null;
   textTitle: string | null;
   createdAt: number;
+  /** 来源文章的类型（P31）：'web' = 插件建的网页摘录，词库里用 🌐 区分 */
+  sourceType?: string | null;
 };
 
-export type ArticleRef = { key: string; title: string; deleted: boolean };
+export type ArticleRef = {
+  key: string;
+  title: string;
+  deleted: boolean;
+  /** article = 整篇导入的文章；web = 插件记的网页摘录 */
+  kind: "article" | "web";
+};
 
 /** 词归属的文章 = 最近一条语境所在的文章；没有语境返回 null */
 export function latestArticle(ctxs: readonly CtxLike[]): ArticleRef | null {
   let best: CtxLike | null = null;
   for (const c of ctxs) if (!best || c.createdAt > best.createdAt) best = c;
   if (!best) return null;
-  if (!best.textId || !best.textTitle) return { key: DELETED_ARTICLE, title: "已删除的文章", deleted: true };
-  return { key: best.textId, title: best.textTitle, deleted: false };
+  if (!best.textId || !best.textTitle) {
+    return { key: DELETED_ARTICLE, title: "已删除的文章", deleted: true, kind: "article" };
+  }
+  return {
+    key: best.textId,
+    title: best.textTitle,
+    deleted: false,
+    kind: best.sourceType === "web" ? "web" : "article",
+  };
 }
 
 /** 要展示的原句：只取归属文章里的语境，最新在前，最多 limit 条 */
@@ -42,8 +57,11 @@ export function contextsOfArticle<T extends CtxLike>(ctxs: readonly T[], article
 /** 文章下拉框：每篇文章的词数，按最近活跃排序；已删除的文章放最后 */
 export function articleOptions(
   words: readonly { article: ArticleRef | null; lastAt: number }[],
-): { key: string; title: string; count: number }[] {
-  const map = new Map<string, { key: string; title: string; count: number; lastAt: number }>();
+): { key: string; title: string; count: number; kind: "article" | "web" }[] {
+  const map = new Map<
+    string,
+    { key: string; title: string; count: number; lastAt: number; kind: "article" | "web" }
+  >();
   for (const w of words) {
     if (!w.article) continue;
     const cur = map.get(w.article.key);
@@ -51,7 +69,13 @@ export function articleOptions(
       cur.count += 1;
       cur.lastAt = Math.max(cur.lastAt, w.lastAt);
     } else {
-      map.set(w.article.key, { key: w.article.key, title: w.article.title, count: 1, lastAt: w.lastAt });
+      map.set(w.article.key, {
+        key: w.article.key,
+        title: w.article.title,
+        count: 1,
+        lastAt: w.lastAt,
+        kind: w.article.kind,
+      });
     }
   }
   return [...map.values()]
@@ -60,7 +84,7 @@ export function articleOptions(
       if (b.key === DELETED_ARTICLE) return -1;
       return b.lastAt - a.lastAt;
     })
-    .map(({ key, title, count }) => ({ key, title, count }));
+    .map(({ key, title, count, kind }) => ({ key, title, count, kind }));
 }
 
 export const TARGET_LABEL: Record<string, string> = {

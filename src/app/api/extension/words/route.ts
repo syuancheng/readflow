@@ -4,7 +4,7 @@ import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { preflight, requireExtensionUser, withCors } from "@/lib/extension-http";
-import { shortGloss } from "@/lib/gloss";
+import { shortGloss, inlineGloss } from "@/lib/gloss";
 import { lookup } from "@/lib/dict";
 
 export const runtime = "nodejs";
@@ -39,11 +39,14 @@ export async function GET(req: Request) {
     .orderBy(desc(userWords.createdAt))
     .all();
 
-  // 每个词带一句最近查过的原文，插件卡片里显示语境
+  // 每个词带一句最近查过的原文，插件卡片里显示语境。
+  // 同时取最近一条 context 的 ai_gloss：网页上悬停显示的中文与阅读页一致，
+  // 优先用 AI 的「释义：」行（P31），没有再用词典短释义。
   const examples = db
     .select({
       userWordId: contexts.userWordId,
       sentence: sql<string>`(${contexts.prefix} || ${contexts.quote} || ${contexts.suffix})`,
+      aiGloss: contexts.aiGloss,
       createdAt: contexts.createdAt,
     })
     .from(contexts)
@@ -52,9 +55,11 @@ export async function GET(req: Request) {
     .orderBy(desc(contexts.createdAt))
     .all();
   const exampleByWord = new Map<string, string>();
+  const latestGlossByWord = new Map<string, string | null>();
   for (const e of examples) {
     if (!exampleByWord.has(e.userWordId)) {
       exampleByWord.set(e.userWordId, String(e.sentence ?? "").replace(/\s+/g, " ").trim().slice(0, 220));
+      latestGlossByWord.set(e.userWordId, e.aiGloss ?? null);
     }
   }
 
@@ -69,7 +74,9 @@ export async function GET(req: Request) {
         phonetic: w.phonetic,
         pos: w.pos,
         translation: w.translation,
-        gloss: shortGloss(w.translation),
+        gloss:
+          inlineGloss(latestGlossByWord.get(w.id) ?? null, w.translation) ||
+          shortGloss(w.translation),
         isPhrase: w.isPhrase === 1,
         example: exampleByWord.get(w.id) ?? "",
       })),
@@ -220,6 +227,7 @@ export async function POST(req: Request) {
           // 坐标已在句内：前后文直接给到句首/句尾，不从词中间截断
           prefix: sentence.slice(0, s),
           suffix: sentence.slice(e),
+          via: "extension",
           createdAt: now,
         })
         .run();

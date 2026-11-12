@@ -83,10 +83,10 @@ user_words ──1:N──> contexts ──> (text_id, paragraph_id, 位置, quo
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `texts` | `id`(uuid), `user_id`, `title`, `source_type`(paste/file/url), `source_url`, `language`, `word_count`, `created_at`(ms), `cefr_level`, `cefr_score`, `cefr_detail`(JSON), `cefr_method`, `cefr_overridden`, `source_format`(plain/markdown/html), `source_raw` | 一篇文章；难度字段可空（3.4）；`source_raw` 存原始源，供换解析器时无损重跑（3.5，>2MB 不落库） |
+| `texts` | `id`(uuid), `user_id`, `title`, `source_type`(paste/file/url/**web**), `source_url`, `language`, `word_count`, `created_at`(ms), `cefr_level`, `cefr_score`, `cefr_detail`(JSON), `cefr_method`, `cefr_overridden`, `source_format`(plain/markdown/html), `source_raw` | 一篇文章；难度字段可空（3.4）；`source_raw` 存原始源，供换解析器时无损重跑（3.5，>2MB 不落库）；`web` 是插件查词自动建的**网页摘录**（12.9），不是完整文章，不进首页 / 书架 / 战绩 |
 | `paragraphs` | `id`(uuid), `text_id`, `idx`, `content`, `block_type`, `block_meta`(JSON), `inline_ranges`(JSON) | **锚定基准**。`content` 只存可见纯文本，是 `contexts.start/end` 唯一坐标基准；后三列只描述排版，不参与定位。索引 `(text_id, idx)` |
 | `user_words` | `id`(uuid), `user_id`, `lemma`, `display_form`, `pos`, `phonetic`, `translation`, `note`, `created_at` | 唯一索引 `(user_id, lemma)` —— 一个词只存一行 |
-| `contexts` | `id`, `user_word_id`, `text_id`, `paragraph_id`, `start`, `end`, `quote`, `prefix`, `suffix`, `ai_gloss`, `created_at` | 每次收词一条，**刻意不去重** |
+| `contexts` | `id`, `user_word_id`, `text_id`, `paragraph_id`, `start`, `end`, `quote`, `prefix`, `suffix`, `ai_gloss`, `dict_entry`(JSON 快照), `via`(reader/extension), `created_at` | 收词一条；锚点路径（`ensureContextByAnchor`）幂等，手动收词刻意不去重；`via` 记「从哪儿记的」，粒度是单条记录（12.9） |
 | `exports` | `id`, `user_word_id`, `deck_id`, `chapter_id`, `card_id`, `card_type`, `status`, `error`, `pushed_at` | 唯一索引 `(user_word_id, deck_id, card_type)`，导出幂等的物理保证（11.5） |
 | `settings` | `key`, `value`, `updated_at` | 键值配置：记住上次选的牌组/章节 |
 
@@ -1247,6 +1247,29 @@ npm test               # 单测含 auth-crypto（scrypt、token、过期）与 s
 
 P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整片假阴性，统一由 `scripts/e2e-auth.mjs` 注入登录态：`ensureAuth(BASE)` patch Node 侧 `globalThis.fetch` 自动带 cookie，`authCookies(BASE)` 给 Playwright context 注入（限定目标域名，不外泄给文章里的外链图片）。在真实库上跑需要 `E2E_USER` / `E2E_PASS` 指定账号；helper **不会自动建号**，避免替用户创建账号。
 
+### 12.9 浏览器插件查词（P31）
+
+目标是一句话：**在网页上点一个词，等于在阅读页点一个词**——同一套锚点、同一套词典、同一套「要不要自动问 AI」的规则、同一套对话串。插件里不复制任何一条业务规则。
+
+**为什么要有「网页摘录」**：插件不可能把所有网页都整篇导入（用户只想读那一段）。所以 `texts.source_type` 多了一个 `web`：一个网址一条，段落就是点过的那些块，`source_url` 记原网址。它只是锚点的宿主：首页「我的文本」、`GET /api/texts`、战绩页的「读过的文本」都把它过滤掉，数据和记录本身保留（决策 D4）。
+
+**挂到哪篇文章（决策 D3）**：`POST /api/extension/record` 先查当前账号有没有 `source_type='url'` 且 `stripHash(source_url)` 相同的那篇；有就用 `locateInParagraphs()` 把「块 + 块内偏移」换算成「段落 + 段内偏移」，命中就 `imported=true`（词库点来源进阅读页）；没有或定位不到才落到网页摘录（点来源用 Chrome 文本片段回原网页）。同一处重复点按锚点幂等，不会多建记录。
+
+**坐标换算最容易错**（`src/lib/web-anchor.ts`）：网页上的块文本和 `paragraphs.content` 往往不一样——`&nbsp;`、换行、多个空格、首尾空白，还有插件自己插进 DOM 的 `.rf-gloss` 小标签。所以插件取块文本前先克隆并删掉 `.rf-gloss`，再用 `normalizeBlockText()` 归一化、`normalizedIndex()` 把原文下标映射到归一化下标；服务端拿到 quote 后要在段落里**重新找位置**，并且必须满足 `content.slice(start, end) === quote`（归一化回映的右端取 `map[at + len]` 而不是 `map[at+len-1]+1`，这一位就是当初单测报错的地方）。校验不过一律降级成「只查词典、不记录」——宁可少记一条，也不能把绿色划线画错位置。
+
+**插件侧只有三件事是自己的**：
+1. **侧栏**（380px、固定右侧、`translateX(100%)` 滑入）：覆盖网页不挤压布局；点空白 / `Esc` / × / 再点同一个词都关闭。
+2. **流式必须用 port**：`rf:api` 会等整个响应读完才返回，看不到逐字；“问 AI” 走 `chrome.runtime.connect({name:"rf:explainStream"})`，content 断开时 background `abort()` 上游请求。
+3. **侧栏代次 `panelSeq`**：`openShell` / `closePanel` 各加一。请求是异步的，用户完全可能在看答案回来之前点空白关掉或点了别的词——迟到的 `/record` 响应必须丢掉，否则侧栏会「自己弹回来」（`npm run test:extension` 的 C4 就是这么抓到的）。
+
+**「问 AI」的选项文案与出现条件和 `Reader.tsx` 的 `askOptions()` 一字不差**，改动时必须两边一起改；E2E 会拿 `Reader.tsx` 的源码逐条核对文案，漂移就红。
+
+**网站侧的两处呈现**：词库来源栏按 `contexts.via === 'extension'` 出「🧩 插件」徽章；来源是网页摘录时链接改成 `textFragmentUrl()`（`#:~:text=前文-,选区,-后文`，`-`→`%2D`、`,`→`%2C`），新标签页打开并滚动高亮原句，其它情况仍走 `/texts/{id}?p={paragraphId}`。
+
+**回归**：`npm run test:extension` 的 D 段（隔离库 + 临时端口 + 真实 Chromium）覆盖九件事——侧栏打开并显示词典、覆盖式 380px 不挤压布局、自动落库且 `via='extension'`、取消记录连词条一起删并清高亮、短语词典未命中自动请 AI（本地假模型，不花钱）并写进 `ai_gloss`、选项文案与阅读页一致、已导入网页上点词挂在 `source_type='url'` 且 `content.slice===quote`、词库页出 🧩 与文本片段外链、首页和书架看不到网页摘录。
+
+---
+
 ## 13. 代码地图与改动指引
 
 | 想改什么 | 改哪里 | 注意 |
@@ -1261,6 +1284,8 @@ P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整�
 | 改「再点开不重问」 | `Reader.tsx` 的 `savedGlossFor()` / `glossCacheRef` / `forgetGloss()` | 缓存键是 `${paragraphId}:${start}:${end}`，跨文章不算同一个锚点；删词删批注要同步清 |
 | 改阅读器证据 | `lib/sentence.ts` 的 `selectionSignals()` + `/api/explain` 的 `narrowSignals()` | 只送证据不送结论；新字段要同步白名单裁剪 |
 | 改「何时自动问 AI」 | `lib/explain-policy.ts` 的 `shouldAutoExplain()` + `Reader.tsx` 词典 fetch 回调 | 自动触发必须挂在请求回调里（state 会残留上一次结果）；改完跑 `npm run test:auto-explain` |
+| 改插件查词 / 侧栏 | `extension/src/content.js`（侧栏与交互）+ `src/lib/extension-record.ts`（落库与回放） | 插件不自己实现「要不要自动讲解」，一律看 `/record` 返回的 `autoExplain`；流式必须走 port；改完跑 `npm run test:extension` |
+| 改网页坐标换算 | `src/lib/web-anchor.ts` 的 `normalizeBlockText` / `locateInParagraphs` / `textFragmentUrl` | 返回的坐标必须满足 `content.slice(start, end) === quote`；归一化回映取右端用 `map[at+len]`；改完跑 `tests/unit/web-anchor.test.ts` |
 | 改无模型提示文案 | `lib/explain-policy.ts` 的 `NO_MODEL_NOTICE` / `NO_MODEL_MARKER` | `lib/ai.ts` 只 re-export；前端识别与词库过滤共用同一标记，别复制字符串 |
 | 加词典字段 | `lib/dict.ts` 的 SELECT + `DictEntry` + `Reader.tsx` 的 `DictView` | 三处同步 |
 | 改分词规则 | `lib/tokenize.ts` 的 `TOKEN_RE` | 必须保持确定性（不能依赖环境） |

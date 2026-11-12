@@ -103,14 +103,14 @@ async function getState() {
 }
 
 /** 通用后端请求（词典 / AI 释义 / 收词），统一带 Token 与重试 */
-async function apiRequest({ path, method = "GET", body, raw = false }) {
+async function apiRequest({ path, method = "GET", body, raw = false }, attempts = 3) {
   const config = await getConfig();
   const init = {
     method,
     headers: authHeaders(config, body ? { "Content-Type": "application/json" } : {}),
     ...(body ? { body: JSON.stringify(body) } : {}),
   };
-  const res = await retryFetch(`${config.serverUrl}${path}`, init);
+  const res = await retryFetch(`${config.serverUrl}${path}`, init, attempts);
   if (raw) return { text: await res.text() };
   const text = await res.text();
   try {
@@ -256,6 +256,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return getState();
       case "rf:api":
         return apiRequest(msg.payload || {});
+      case "rf:record":
+        // 按锚点幂等，超时可以安全重试一次
+        return apiRequest({ path: "/api/extension/record", method: "POST", body: msg.body || {} }, 2);
+      case "rf:unrecord": {
+        const q = new URLSearchParams({
+          wordId: String(msg.wordId || ""),
+          contextId: String(msg.contextId || ""),
+        });
+        // 删除不是幂等操作（重试时第二条会拿到 404），只发一次
+        return apiRequest({ path: `/api/extension/record?${q}`, method: "DELETE" }, 1);
+      }
+      case "rf:gloss":
+        // 覆盖写，重试幂等
+        return apiRequest({ path: "/api/extension/gloss", method: "POST", body: msg.body || {} });
+      case "rf:word":
+        return apiRequest({ path: `/api/extension/word/${encodeURIComponent(String(msg.id || ""))}` });
       case "rf:openReadflow": {
         const config = await getConfig();
         // 只允许打开 ReadFlow 自己的页面（网页里的 content script 也能发这个消息）
@@ -272,4 +288,58 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     .then((result) => sendResponse({ ok: true, result }))
     .catch((err) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   return true; // 异步 sendResponse
+});
+
+/* ---------------- 流式 AI 释义（P31 §5.5） ----------------
+ * rf:api 会等整个响应读完才返回，看不到逐字显示，所以流式请求单独用 port：
+ * 每收到一块就 postMessage 给 content script；content 断开 port 时立刻 abort 上游，
+ * 避免用户切到别的词后旧请求还在烧 token。
+ */
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "rf:explainStream") return;
+  let controller = null;
+  let closed = false;
+
+  port.onDisconnect.addListener(() => {
+    closed = true;
+    controller?.abort();
+  });
+
+  port.onMessage.addListener(async (msg) => {
+    if (msg?.type !== "start") return;
+    controller = new AbortController();
+    try {
+      const config = await getConfig();
+      const res = await fetch(`${config.serverUrl}/api/extension/explain`, {
+        method: "POST",
+        headers: authHeaders(config, { "Content-Type": "application/json" }),
+        body: JSON.stringify(msg.body || {}),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        port.postMessage({ error: errorText(text, res.status) });
+        return;
+      }
+      if (!res.body) {
+        port.postMessage({ error: "浏览器不支持流式响应，请升级 Chrome" });
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (closed) {
+          controller.abort();
+          return;
+        }
+        port.postMessage({ chunk: decoder.decode(value, { stream: true }) });
+      }
+      port.postMessage({ done: true });
+    } catch (err) {
+      if (closed || err?.name === "AbortError") return;
+      port.postMessage({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
 });

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { userWords, contexts, exports } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
+import { deleteWordContexts } from "@/lib/word-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,51 +77,18 @@ export async function DELETE(
   const textId = url.searchParams.get("textId");
 
   if (contextId || textId) {
-    // 删 context（?contextId= 一条；?textId= 该文本下这个词的全部——
-    // 批注按词去重后，× 的语义是「清掉这个词在本文的标记」，
-    // 只删最新一条会让更早的 context 重新浮出来）。
-    // 删完后这个词条已经没有任何 context 了，就把词条一并删掉（见下）。
-    const word = db
-      .select()
-      .from(userWords)
-      .where(eq(userWords.id, id))
-      .get() as typeof userWords.$inferSelect | undefined;
-
-    if (!word) {
-      return NextResponse.json({ error: "词条不存在" }, { status: 404 });
+    // 删 context 的规则统一收口在 word-store（P31）：网站「取消记录」与
+    // 插件「取消记录」共用同一份，避免两边行为漂移。
+    const result = deleteWordContexts(id, user.id, {
+      contextId: contextId ?? undefined,
+      textId: textId ?? undefined,
+    });
+    if (!result.ok) {
+      return result.reason === "not_found"
+        ? NextResponse.json({ error: "词条不存在" }, { status: 404 })
+        : NextResponse.json({ error: "无权操作" }, { status: 403 });
     }
-    if (word.userId !== user.id) {
-      return NextResponse.json({ error: "无权操作" }, { status: 403 });
-    }
-
-    if (textId) {
-      db.delete(contexts)
-        .where(and(eq(contexts.userWordId, id), eq(contexts.textId, textId)))
-        .run();
-    } else {
-      // 必须同时限定 userWordId：只校验了词条归属，contextId 却是客户端随便填的
-      db.delete(contexts)
-        .where(and(eq(contexts.id, contextId!), eq(contexts.userWordId, id)))
-        .run();
-    }
-
-    const remaining = db
-      .select({ id: contexts.id })
-      .from(contexts)
-      .where(eq(contexts.userWordId, id))
-      .all();
-
-    // 「取消记录」（P25）只删这篇文章里的这一处；这个词别处已经没有任何记录时，
-    // 连词条一起删掉 —— 否则词库和墨墨导出里会留下一个没有原句的空词条。
-    if (remaining.length === 0) {
-      db.transaction((tx) => {
-        tx.delete(exports).where(eq(exports.userWordId, id)).run();
-        tx.delete(userWords).where(eq(userWords.id, id)).run();
-      });
-      return NextResponse.json({ ok: true, prunedWord: true });
-    }
-
-    return NextResponse.json({ ok: true, prunedWord: false });
+    return NextResponse.json({ ok: true, prunedWord: result.prunedWord });
   }
 
   // 验证归属

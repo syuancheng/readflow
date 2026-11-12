@@ -141,6 +141,13 @@ export const contexts = sqliteTable(
      * 老记录为 NULL，由 /api/annotations 首次读取时补一次。
      */
     dictEntry: text("dict_entry"),
+    /**
+     * 这条记录是从哪里记的（P31）：reader = 网站阅读页，extension = 浏览器插件。
+     * 粒度是「每一条 context」而不是词条——同一个词可以既在阅读页记过、
+     * 又在插件里记过，词库的「🧩 插件」标记按条显示。
+     * 老记录与阅读页一律 'reader'；插件写入时显式给 'extension'。
+     */
+    via: text("via").notNull().default("reader"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [

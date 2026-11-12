@@ -13,6 +13,7 @@ import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
 import type { ExportBadge, Snippet } from "@/lib/word-library";
+import { textFragmentUrl } from "@/lib/web-anchor";
 
 export type WordContextRow = {
   id: string;
@@ -23,6 +24,14 @@ export type WordContextRow = {
   textTitle: string;
   /** 来源文章已被删除：原句和释义仍展示，但不再提供「跳到原文」 */
   textDeleted?: boolean;
+  /** P31：这条记录是从阅读页还是浏览器插件记的 */
+  via?: "reader" | "extension";
+  quote: string;
+  prefix: string;
+  suffix: string;
+  /** 'web' = 插件建的网页摘录：来源链接改为原网页 + 文本片段 */
+  sourceType?: string | null;
+  sourceUrl?: string | null;
 };
 
 export type WordRow = {
@@ -46,7 +55,33 @@ export type WordRow = {
   contexts: WordContextRow[];
 };
 
-export type ArticleOption = { key: string; title: string; count: number };
+export type ArticleOption = {
+  key: string;
+  title: string;
+  count: number;
+  /** 网页摘录用 🌐，整篇导入的文章用 📖 */
+  kind?: "article" | "web";
+};
+
+/**
+ * 一条记录该跳到哪里（P31）：
+ * - 整篇导入过的文章 → 阅读页定位到那一段；
+ * - 网页摘录 → 打开原网页并用文本片段（#:~:text=）滚动到那句话、高亮它；
+ * - 文章已删 / 没有网址 → null，只展示不提供跳转。
+ */
+function sourceTarget(c: WordContextRow): { href: string; external: boolean } | null {
+  if (c.textDeleted) return null;
+  if (c.sourceType === "web" && c.sourceUrl) {
+    return {
+      href: textFragmentUrl(c.sourceUrl, c.quote, c.prefix, c.suffix),
+      external: true,
+    };
+  }
+  if (c.textId && c.paragraphId) {
+    return { href: `/texts/${c.textId}?p=${c.paragraphId}`, external: false };
+  }
+  return null;
+}
 
 /** 状态筛选：不绑死墨墨，以后接 Anki 等也是这几档 */
 type StatusFilter = "all" | "starred" | "todo" | "done";
@@ -240,7 +275,7 @@ export default function WordList({
               title={a.title}
             >
               <span className="truncate">
-                {a.key === DELETED_KEY ? "🗑" : "📖"} {a.title}
+                {a.key === DELETED_KEY ? "🗑" : a.kind === "web" ? "🌐" : "📖"} {a.title}
               </span>
               <span className="wl-side-count">{a.count}</span>
             </button>
@@ -400,17 +435,46 @@ export default function WordList({
                       </span>
 
                       <span className="wl-source">
-                        {c && !c.textDeleted && c.textId && c.paragraphId ? (
-                          <Link
-                            href={`/texts/${c.textId}?p=${c.paragraphId}`}
-                            onClick={(e) => e.stopPropagation()}
-                            title={`跳到原文：${c.textTitle}`}
+                        {c?.via === "extension" && (
+                          <span
+                            className="duo-badge wl-via-badge"
+                            title={`通过浏览器插件在网页上记录${c.sourceUrl ? `：${c.sourceUrl}` : ""}`}
                           >
-                            {c.textTitle}
-                          </Link>
-                        ) : (
-                          <span className="text-ink-faint">{c ? "已删除的文章" : ""}</span>
+                            🧩 插件
+                          </span>
                         )}
+                        {(() => {
+                          const target = c ? sourceTarget(c) : null;
+                          if (target?.external) {
+                            return (
+                              <a
+                                href={target.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                title={`在原网页中打开：${c!.textTitle}`}
+                              >
+                                {c!.textTitle} ↗
+                              </a>
+                            );
+                          }
+                          if (target) {
+                            return (
+                              <Link
+                                href={target.href}
+                                onClick={(e) => e.stopPropagation()}
+                                title={`跳到原文：${c!.textTitle}`}
+                              >
+                                {c!.textTitle}
+                              </Link>
+                            );
+                          }
+                          return (
+                            <span className="text-ink-faint">
+                              {c?.textDeleted ? "已删除的文章" : ""}
+                            </span>
+                          );
+                        })()}
                       </span>
                     </div>
 
@@ -446,15 +510,35 @@ export default function WordList({
                             <div key={cx.id} className="wl-sentence">
                               <p className="italic">&ldquo;{cx.sentence}&rdquo;</p>
                               <p className="text-xs font-bold text-ink-faint mt-1 flex items-center gap-2">
-                                <span>{cx.textDeleted ? "← 来自已删除的文章" : `← ${cx.textTitle}`}</span>
-                                {!cx.textDeleted && cx.textId && cx.paragraphId && (
-                                  <Link
-                                    href={`/texts/${cx.textId}?p=${cx.paragraphId}`}
-                                    className="hover:text-[var(--duo-green-dark)] underline underline-offset-2"
-                                  >
-                                    跳到原文 →
-                                  </Link>
-                                )}
+                                <span>
+                                  {cx.textDeleted
+                                    ? "← 来自已删除的文章"
+                                    : `${cx.via === "extension" ? "🧩 " : ""}← ${cx.textTitle}`}
+                                </span>
+                                {(() => {
+                                  const target = sourceTarget(cx);
+                                  if (!target) return null;
+                                  if (target.external) {
+                                    return (
+                                      <a
+                                        href={target.href}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="hover:text-[var(--duo-green-dark)] underline underline-offset-2"
+                                      >
+                                        在原网页中打开 ↗
+                                      </a>
+                                    );
+                                  }
+                                  return (
+                                    <Link
+                                      href={target.href}
+                                      className="hover:text-[var(--duo-green-dark)] underline underline-offset-2"
+                                    >
+                                      跳到原文 →
+                                    </Link>
+                                  );
+                                })()}
                               </p>
                             </div>
                           ))}

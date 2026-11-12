@@ -3633,3 +3633,10 @@ a:focus-visible,
   color: var(--rf-text-secondary);
   margin-bottom: 24px;
 }
+
+/* P31：词库来源前的「🧩 插件」徽章 —— 比正文徽章小一号，与来源文字同一行 */
+.wl-source .wl-via-badge {
+  height: 20px;
+  margin-right: 4px;
+  padding: 0 4px;
+}

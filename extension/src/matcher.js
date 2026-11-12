@@ -99,5 +99,151 @@
     return String(s || "").replace(/\\n/g, "\n").trim();
   }
 
-  return { buildEntries, findMatches, escapeRegex, pointInRects, isLookupSelection, cleanTranslation };
+  /* ---------------- 下面这批纯函数为 P31 侧栏准备 ---------------- */
+
+  /** 各种空白（含 &nbsp;）压成一个空格并 trim —— 与 src/lib/web-anchor.ts 同规则 */
+  function normalizeBlockText(s) {
+    return String(s == null ? "" : s)
+      .replace(/[\s\u00a0]+/g, " ")
+      .trim();
+  }
+
+  /**
+   * 把「块原文里的下标」换算成 normalizeBlockText 之后的下标。
+   * 网页里的换行 / 连续空格会被压成一个空格，不换算的话选区坐标会整体偏移。
+   */
+  function normalizedIndex(raw, at) {
+    const s = String(raw || "");
+    const limit = Math.max(0, Math.min(s.length, Number(at) || 0));
+    let out = 0;
+    let started = false;
+    let i = 0;
+    while (i < limit) {
+      if (/[\s\u00a0]/.test(s[i])) {
+        while (i < s.length && /[\s\u00a0]/.test(s[i])) i++;
+        if (!started) continue; // 开头的空白会被 trim 掉
+        out += 1;
+        if (limit < i) return out - 1; // 目标落在空白段中间：指向这个空格
+        continue;
+      }
+      started = true;
+      out += 1;
+      i++;
+    }
+    return out;
+  }
+
+  /** 取 [start, end) 所在的整句（按 . ! ? … 切），用作「同一句连续请教」的 key */
+  function sentenceAround(text, start, end) {
+    const s = String(text || "");
+    const a = Math.max(0, Math.min(s.length, start | 0));
+    const b = Math.max(a, Math.min(s.length, end | 0));
+    const isStop = (ch) => ch === "." || ch === "!" || ch === "?" || ch === "…";
+    let from = a;
+    while (from > 0 && !isStop(s[from - 1])) from--;
+    let to = b;
+    while (to < s.length && !isStop(s[to])) to++;
+    if (to < s.length) to++;
+    while (to < s.length && /["'”’)\]]/.test(s[to])) to++;
+    return s.slice(from, to).trim();
+  }
+
+  /**
+   * 音标归一化（移植 src/lib/text.ts）：
+   * ECDICT 用的是老式记法，`'` 是主重音、`,`/`.` 是次重音、`:` 是长音符，
+   * 而且常把两个变体塞在一格里 —— 只取第一个。
+   */
+  const PHONETIC_FIXES = [
+    [/ә/g, "ə"],
+    [/є/g, "ɛ"],
+    [/ε/g, "ɛ"],
+    [/ˊ/g, "ˈ"],
+    [/\u00a0/g, " "],
+    [/（/g, "("],
+    [/）/g, ")"],
+    [/；/g, ";"],
+    [/，/g, ","],
+    [/[\uE000-\uF8FF]/g, ""],
+  ];
+
+  function normalizePhonetic(raw) {
+    if (!raw) return "";
+    let out = String(raw);
+    for (const [from, to] of PHONETIC_FIXES) out = out.replace(from, to);
+    return out
+      .split(/\s+/)[0]
+      .replace(/'/g, "ˈ")
+      .replace(/[,._]/g, "ˌ")
+      .replace(/:/g, "ː")
+      .replace(/^[ˌ]+/, (m) => (m.length > 1 ? "ˌ" : m))
+      .replace(/[ˌ.]+$/, "")
+      .trim();
+  }
+
+  function escHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  /**
+   * 极小的 Markdown 渲染（侧栏 AI 回答用）：**粗体**、换行、`- ` 列表、
+   * 以「释义：」开头的行加粗。
+   *
+   * 安全要求：**先转义 HTML 再做替换**，绝不能把模型输出直接塞进 innerHTML。
+   * 返回的是转义后的 HTML 字符串，插进 innerHTML 不会执行任何标记。
+   */
+  function renderMarkdown(text) {
+    const src = String(text == null ? "" : text).replace(/\\n/g, "\n");
+    const lines = src.split(/\r?\n/);
+    const out = [];
+    let inList = false;
+    const closeList = () => {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+    };
+    const inline = (line) =>
+      escHtml(line).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) {
+        closeList();
+        out.push('<div class="rf-gap"></div>');
+        continue;
+      }
+      if (/^[-•]\s+/.test(line)) {
+        if (!inList) {
+          out.push("<ul>");
+          inList = true;
+        }
+        out.push(`<li>${inline(line.replace(/^[-•]\s+/, ""))}</li>`);
+        continue;
+      }
+      closeList();
+      if (/^释义\s*[：:]/.test(line)) {
+        out.push(`<p class="rf-gloss-line"><b>${inline(line)}</b></p>`);
+      } else {
+        out.push(`<p>${inline(line)}</p>`);
+      }
+    }
+    closeList();
+    return out.join("");
+  }
+
+  return {
+    buildEntries,
+    findMatches,
+    escapeRegex,
+    pointInRects,
+    isLookupSelection,
+    cleanTranslation,
+    normalizeBlockText,
+    normalizedIndex,
+    sentenceAround,
+    normalizePhonetic,
+    renderMarkdown,
+    escHtml,
+  };
 });

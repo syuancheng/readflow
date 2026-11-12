@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { texts } from "@/db/schema";
 import { extractFromUrl } from "@/lib/readability";
@@ -17,7 +17,8 @@ export async function GET() {
   const rows = await db
     .select()
     .from(texts)
-    .where(eq(texts.userId, user.id))
+    // 网页摘录（P31）不是完整文章，不出现在书架接口里
+    .where(and(eq(texts.userId, user.id), ne(texts.sourceType, "web")))
     .orderBy(desc(texts.createdAt));
   return NextResponse.json({ texts: rows });
 }

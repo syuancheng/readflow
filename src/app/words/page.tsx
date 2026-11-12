@@ -88,6 +88,10 @@ export default async function WordsPage() {
         paragraphId: contexts.paragraphId,
         textTitle: texts.title,
         paraContent: paragraphs.content,
+        /** P31：这条记录是从阅读页还是插件记的；摘录类文章来源链接改用文本片段 */
+        via: contexts.via,
+        sourceType: texts.sourceType,
+        sourceUrl: texts.sourceUrl,
         createdAt: contexts.createdAt,
       })
       .from(contexts)
@@ -127,6 +131,13 @@ export default async function WordsPage() {
         // leftJoin 拿不到标题即文章已删（texts.title 恒非空）；
         // 原句与 AI 释义仍展示，只是不再提供跳转
         textDeleted: !c.textTitle,
+        // P31：🧩 插件标记按「每一条记录」判断；摘录类来源用原网页 + 文本片段
+        via: c.via === "extension" ? ("extension" as const) : ("reader" as const),
+        quote: c.quote,
+        prefix: c.prefix,
+        suffix: c.suffix,
+        sourceType: c.sourceType ?? null,
+        sourceUrl: c.sourceUrl ?? null,
         };
       }),
     };

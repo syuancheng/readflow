@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS contexts (
   suffix TEXT NOT NULL,
   ai_gloss TEXT,
   dict_entry TEXT,
+  via TEXT NOT NULL DEFAULT 'reader',
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_contexts_word ON contexts(user_word_id);
@@ -172,6 +173,17 @@ function migrate(): void {
   if (!ctxCols.some((c) => c.name === "dict_entry")) {
     sqlite.exec("ALTER TABLE contexts ADD COLUMN dict_entry TEXT");
   }
+
+  // contexts.via（P31）：记录来源 reader / extension。
+  // 加列后回填一次：P31 之前只有插件能往「网页摘录」（source_type='web'）里写记录，
+  // 那些记录其实都是插件记的。语句可重复执行，只会改原本是 'reader' 的行。
+  if (!ctxCols.some((c) => c.name === "via")) {
+    sqlite.exec("ALTER TABLE contexts ADD COLUMN via TEXT NOT NULL DEFAULT 'reader'");
+  }
+  sqlite.exec(
+    `UPDATE contexts SET via = 'extension'
+      WHERE via = 'reader' AND text_id IN (SELECT id FROM texts WHERE source_type = 'web')`,
+  );
 
   // texts：2026-11 新增的 CEFR 粗估字段（与回填脚本共用定义）
   ensureCefrColumns(sqlite);

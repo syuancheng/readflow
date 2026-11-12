@@ -20,13 +20,36 @@ const c = (id: string, textId: string | null, textTitle: string | null, createdA
 
 test("词归到最近查它的那篇文章", () => {
   const ctxs = [c("1", "A", "文章 A", 100), c("2", "B", "文章 B", 300), c("3", "A", "文章 A", 200)];
-  assert.deepEqual(latestArticle(ctxs), { key: "B", title: "文章 B", deleted: false });
+  assert.deepEqual(latestArticle(ctxs), {
+    key: "B",
+    title: "文章 B",
+    deleted: false,
+    kind: "article",
+  });
   assert.equal(latestArticle([]), null);
+});
+
+test("最近那篇是网页摘录：kind = web（P31 词库用 🌐 区分）", () => {
+  const ctxs = [
+    { ...c("1", "A", "文章 A", 100), sourceType: "url" },
+    { ...c("2", "W", "某个网页", 300), sourceType: "web" },
+  ];
+  assert.deepEqual(latestArticle(ctxs), {
+    key: "W",
+    title: "某个网页",
+    deleted: false,
+    kind: "web",
+  });
 });
 
 test("最近那篇被删了：归到「已删除的文章」", () => {
   const ctxs = [c("1", "A", "文章 A", 100), c("2", "B", null, 300)];
-  assert.deepEqual(latestArticle(ctxs), { key: DELETED_ARTICLE, title: "已删除的文章", deleted: true });
+  assert.deepEqual(latestArticle(ctxs), {
+    key: DELETED_ARTICLE,
+    title: "已删除的文章",
+    deleted: true,
+    kind: "article",
+  });
 });
 
 test("原句只取归属文章里的，最新在前，最多 3 条", () => {
@@ -43,20 +66,28 @@ test("原句只取归属文章里的，最新在前，最多 3 条", () => {
 });
 
 test("文章下拉：按词数计、最近活跃在前、已删除的放最后", () => {
-  const A = { key: "A", title: "文章 A", deleted: false };
-  const B = { key: "B", title: "文章 B", deleted: false };
-  const D = { key: DELETED_ARTICLE, title: "已删除的文章", deleted: true };
+  const A = { key: "A", title: "文章 A", deleted: false, kind: "article" as const };
+  const B = { key: "B", title: "文章 B", deleted: false, kind: "article" as const };
+  const W = { key: "W", title: "网页摘录", deleted: false, kind: "web" as const };
+  const D = {
+    key: DELETED_ARTICLE,
+    title: "已删除的文章",
+    deleted: true,
+    kind: "article" as const,
+  };
   const opts = articleOptions([
     { article: A, lastAt: 100 },
     { article: D, lastAt: 999 },
     { article: B, lastAt: 300 },
     { article: A, lastAt: 200 },
+    { article: W, lastAt: 400 },
     { article: null, lastAt: 1 },
   ]);
   assert.deepEqual(opts, [
-    { key: "B", title: "文章 B", count: 1 },
-    { key: "A", title: "文章 A", count: 2 },
-    { key: DELETED_ARTICLE, title: "已删除的文章", count: 1 },
+    { key: "W", title: "网页摘录", count: 1, kind: "web" },
+    { key: "B", title: "文章 B", count: 1, kind: "article" },
+    { key: "A", title: "文章 A", count: 2, kind: "article" },
+    { key: DELETED_ARTICLE, title: "已删除的文章", count: 1, kind: "article" },
   ]);
 });
 

@@ -66,8 +66,39 @@ const CLICK_PAGE = `<!doctype html><html><head><title>Click test</title>
 <p id="later">The end.</p>
 </body></html>`;
 
+// P31 查词：没导入过的网页，点词会挂到「网页摘录」上。词都挑词典里有的、且不在朋友词表里的，
+// 免得被高亮成 .rf-hl（点高亮走的是「回看」，不是「查词」）。
+const P31_PAGE = `<!doctype html><html><head><title>Quiet rehearsal notes</title>
+<style>body{margin:40px;width:720px;font:20px/34px Georgia,serif}p{margin:0 0 40px}</style></head><body>
+<p id="p31a">The orchestra rehearsed quietly before the concert began.</p>
+<p id="p31b">A careful engineer will scrutinize the deployment pipeline twice.</p>
+</body></html>`;
+
 const site = http.createServer((req, res) => {
   const u = req.url.split("?")[0];
+  // 假模型：OpenAI 兼容的流式端点。P31 的「自动 AI 讲解」必须在这里跑，
+  // 不能真的连外部模型（e2e 要能离线、可重复、不花钱）。
+  if (u === "/v1/chat/completions") {
+    res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
+    const parts = ["释义：**rehearsed quietly** 在这句里是", "「安静地排练」", "的意思。\n\n- 假模型第 1 行\n- 假模型第 2 行"];
+    for (const part of parts) {
+      res.write(
+        `data: ${JSON.stringify({
+          id: "fake-1",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: "fake-model",
+          choices: [{ index: 0, delta: { content: part }, finish_reason: null }],
+        })}\n\n`,
+      );
+    }
+    res.write("data: [DONE]\n\n");
+    return res.end();
+  }
+  if (u === "/p31") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    return res.end(P31_PAGE);
+  }
   if (u === "/click") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(CLICK_PAGE);
@@ -385,10 +416,15 @@ try {
     await cp.setViewportSize({ width: 1000, height: 800 });
     await cp.goto(`${SITE}/click`, { waitUntil: "load" });
     await cp.waitForFunction(() => Boolean(document.getElementById("rf-ext-host")), null, { timeout: 15000 });
+    // P31 起查词 UI 从「小卡片」换成右侧滑出的侧栏，选择器跟着改，断言的行为不变
     const cardState = () =>
       cp.evaluate(() => {
-        const c = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-card");
-        return { open: Boolean(c?.classList.contains("on")), word: c?.querySelector(".rf-card-head b")?.textContent || "", body: c?.querySelector(".rf-card-body")?.textContent || "" };
+        const c = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel");
+        return {
+          open: Boolean(c?.classList.contains("on")),
+          word: c?.querySelector(".rf-word")?.textContent || "",
+          body: c?.querySelector(".rf-dict")?.textContent || "",
+        };
       });
     /** 某个元素里某个词在屏幕上的中心点 */
     const wordPoint = (id, word) =>
@@ -421,13 +457,31 @@ try {
 
     const careful = await wordPoint("long", "careful");
     await cp.mouse.click(careful.x, careful.y);
-    await cp.waitForFunction(() => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-card.on"), null, { timeout: 8000 }).catch(() => {});
+    await cp.waitForFunction(() => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on"), null, { timeout: 8000 }).catch(() => {});
+    // 侧栏先开壳、再填内容；等记录回来再继续，后面的「点空白关闭」才是稳态行为
+    await cp
+      .waitForFunction(() => {
+        const d = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-dict")?.textContent || "";
+        return d.length > 0 && !d.includes("查词典中");
+      }, null, { timeout: 8000 })
+      .catch(() => {});
+    // 侧栏先开壳、再填内容；等记录回来再继续，后面的「点空白关闭」才是稳态行为
+    await cp
+      .waitForFunction(() => {
+        const d = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-dict")?.textContent || "";
+        return d.length > 0 && !d.includes("查词典中");
+      }, null, { timeout: 8000 })
+      .catch(() => {});
     const s3 = await cardState();
     check("C3 点在单词上：弹出这个词的卡片", s3.open && s3.word === "careful", `${s3.open} ${s3.word}`);
 
-    await cp.mouse.click(short.right - 40, (short.top + short.bottom) / 2);
+    // 侧栏固定在右侧 380px，点「行尾右边」会点在侧栏上；这里改点左边页边距
+    const c4x = short.left - 20, c4y = (short.top + short.bottom) / 2;
+    await cp.mouse.click(c4x, c4y);
     await cp.waitForTimeout(500);
-    check("C4 卡片开着时点空白：卡片关掉", !(await cardState()).open);
+    const c4 = await cardState();
+    const c4at = await cp.evaluate(([x, y]) => { const el = document.elementFromPoint(x, y); return el ? `${el.tagName}#${el.id}` : "null"; }, [c4x, c4y]);
+    check("C4 卡片开着时点空白：卡片关掉", !c4.open, `open=${c4.open} word=${c4.word} at=${c4x},${c4y}=${c4at}`);
 
     const lnk = await wordPoint("lnk", "explained");
     await cp.mouse.click(lnk.x, lnk.y);
@@ -436,12 +490,287 @@ try {
 
     const disp = await wordPoint("long", "disparate");
     await cp.mouse.dblclick(disp.x, disp.y);
-    await cp.waitForFunction(() => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-card.on"), null, { timeout: 8000 }).catch(() => {});
-    await cp.waitForFunction(() => !/查询中/.test(document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-card-body")?.textContent || "查询中"), null, { timeout: 8000 }).catch(() => {});
+    await cp.waitForFunction(() => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on"), null, { timeout: 8000 }).catch(() => {});
+    await cp.waitForFunction(() => !/查词典中/.test(document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-dict")?.textContent || "查词典中"), null, { timeout: 8000 }).catch(() => {});
     const s6 = await cardState();
     check("C6 双击选中一个词：弹出卡片", s6.open && s6.word === "disparate", `${s6.open} ${s6.word}`);
     check("C7 卡片释义里没有字面的 \\n", s6.body.length > 0 && !s6.body.includes("\\n"), s6.body.slice(0, 60));
     await cp.close();
+
+    // ---- D. P31：插件查词 = 网站阅读页查词（侧栏 / 自动记录 / 取消 / 自动讲解 / 挂靠文章）----
+    const friendId = q("select id from users where username = 'ext_friend'")[0].id;
+    const PHRASE = "rehearsed quietly";
+
+    // 假模型：把「自定义端点」指到本地测试服务器，AI 讲解走它，不碰真实模型
+    {
+      const d = new Database(DB);
+      const put = d.prepare(
+        "INSERT OR REPLACE INTO settings (user_id, key, value, updated_at) VALUES ('local', ?, ?, ?)",
+      );
+      for (const [k, v] of [
+        ["ai.activeProvider", "custom"],
+        ["ai.custom.apiKey", "fake-key"],
+        ["ai.custom.model", "fake-model"],
+        ["ai.custom.baseUrl", `${SITE}/v1`],
+      ]) put.run(k, v, Date.now());
+      d.close();
+    }
+
+    const panelOf = (page) =>
+      page.evaluate(() => {
+        const root = document.getElementById("rf-ext-host")?.shadowRoot;
+        const panel = root?.querySelector(".rf-panel");
+        const rect = panel?.getBoundingClientRect();
+        const chips = panel?.querySelectorAll(".rf-ask-chip");
+        return {
+          on: Boolean(panel?.classList.contains("on")),
+          word: panel?.querySelector(".rf-word")?.textContent?.trim() || "",
+          dict: panel?.querySelector(".rf-dict")?.textContent || "",
+          options: chips ? [...chips].map((b) => (b.textContent || "").trim()) : [],
+          turns: [...(panel?.querySelectorAll(".rf-turn-text") ?? [])].map((e) => e.textContent || ""),
+          turnHtml: panel?.querySelector(".rf-turn-text")?.innerHTML || "",
+          width: rect ? Math.round(rect.width) : 0,
+          left: rect ? Math.round(rect.left) : 0,
+        };
+      });
+    /** 整页找某个词在屏幕上的点（用于点文章里的词） */
+    const pointOfWord = (page, word) =>
+      page.evaluate((word) => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const n = walker.currentNode;
+          if (n.parentElement?.closest("#rf-ext-host")) continue;
+          const i = (n.nodeValue || "").indexOf(word);
+          if (i < 0) continue;
+          const r = document.createRange();
+          r.setStart(n, i);
+          r.setEnd(n, i + word.length);
+          const b = r.getBoundingClientRect();
+          if (b.width <= 0) continue;
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        }
+        return null;
+      }, word);
+
+    const p31 = await context.newPage();
+    await p31.setViewportSize({ width: 1100, height: 850 });
+    await p31.goto(`${SITE}/p31`, { waitUntil: "load" });
+    await p31.waitForFunction(() => Boolean(document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-bar")), null, { timeout: 15000 });
+    const layoutBefore = await p31.evaluate(() => Math.round(document.getElementById("p31a").getBoundingClientRect().width));
+
+    // D1 单击一个词 → 侧栏打开，词条 + 词典释义都在
+    const rehearsed = await pointOfWord(p31, "rehearsed");
+    await p31.mouse.click(rehearsed.x, rehearsed.y);
+    const d1ok = await p31
+      .waitForFunction(() => {
+        const p = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on");
+        const dict = p?.querySelector(".rf-dict")?.textContent || "";
+        return p?.querySelector(".rf-word")?.textContent?.trim() === "rehearsed" && dict && !dict.includes("查词典中");
+      }, null, { timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    // 侧栏是 200ms 滑入动画，等它到位再量位置（否则量到的是还没滑进来的坐标）
+    await p31
+      .waitForFunction(() => {
+        const p = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel");
+        return Boolean(p) && Math.round(p.getBoundingClientRect().left) === 1100 - 380;
+      }, null, { timeout: 4000 })
+      .catch(() => {});
+    const d1 = await panelOf(p31);
+    check(
+      "D1 单击网页上的词：右侧侧栏打开，显示词条与词典释义（原形徽章也在）",
+      d1ok && d1.word === "rehearsed" && d1.dict.includes("排练") && d1.dict.includes("rehearse"),
+      `on=${d1.on} word=${d1.word} dict=${d1.dict.replace(/\s+/g, " ").slice(0, 60)}`,
+    );
+
+    // D2 覆盖式侧栏：宽 380，贴右边，网页布局一点没被挤
+    const layoutAfter = await p31.evaluate(() => Math.round(document.getElementById("p31a").getBoundingClientRect().width));
+    check(
+      "D2 侧栏是覆盖式滑出的 380px 右栏，不挤压网页布局",
+      d1.width === 380 && Math.abs(d1.left + d1.width - 1100) <= 1 && layoutAfter === layoutBefore,
+      `宽=${d1.width} 左=${d1.left} 段落宽 ${layoutBefore}→${layoutAfter}`,
+    );
+
+    // D3 自动记录：DB 多一条 via='extension' 的 context，挂在「网页摘录」上
+    const rec = q(
+      `select c.id, c.user_word_id, c.prefix, c.suffix, c.quote, t.source_type, t.source_url, t.title
+         from contexts c join texts t on t.id = c.text_id join user_words uw on uw.id = c.user_word_id
+        where uw.user_id = ? and c.quote = ? order by c.created_at desc limit 1`,
+      friendId,
+      "rehearsed",
+    )[0];
+    check(
+      "D3 点完就自动记下来：via='extension'，挂在没导入过的这个网址的网页摘录上",
+      rec?.source_type === "web" && rec?.source_url === `${SITE}/p31` && Boolean(rec?.prefix) && Boolean(rec?.suffix),
+      JSON.stringify(rec ? { ...rec, prefix: rec.prefix.slice(0, 20) } : null),
+    );
+    const vid = q("select via from contexts where id = ?", rec?.id ?? "")[0]?.via;
+    check("D3b 这条记录标成 via='extension'（词库据此显示「🧩 插件」）", vid === "extension", String(vid));
+
+    // D4 取消记录 → 这条 context 删掉；这个词没有别的记录，词条也一起删
+    await p31.evaluate(() => document.getElementById("rf-ext-host").shadowRoot.querySelector(".rf-cancel").click());
+    const d4closed = await p31
+      .waitForFunction(() => !document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on"), null, { timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+    const leftCtx = q("select count(*) n from contexts where id = ?", rec?.id ?? "")[0].n;
+    const leftWord = q("select count(*) n from user_words where id = ?", rec?.user_word_id ?? "")[0].n;
+    // 取消后网页上的高亮也要跟着消失（resync 是异步的，等一会儿）
+    const hlGone = await p31
+      .waitForFunction(() => document.querySelectorAll('.rf-hl[data-rf-text="rehearsed"]').length === 0, null, { timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+    check(
+      "D4 「取消记录」：侧栏关掉，这条记录和词条一起删掉，网页高亮也消失",
+      d4closed && leftCtx === 0 && leftWord === 0 && hlGone,
+      `关闭=${d4closed} 记录=${leftCtx} 词条=${leftWord} 高亮已清=${hlGone}`,
+    );
+
+    // D5 拖选一个词典查不到的短语 → 自动请 AI（假模型），讲完写进 contexts.ai_gloss
+    const phraseRect = await p31.evaluate((phrase) => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const n = walker.currentNode;
+        if (n.parentElement?.closest("#rf-ext-host")) continue;
+        const i = (n.nodeValue || "").indexOf(phrase);
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + phrase.length);
+        const rects = [...r.getClientRects()].filter((b) => b.width > 0);
+        if (!rects.length) continue;
+        const first = rects[0], last = rects[rects.length - 1];
+        return { x1: first.left + 2, y1: first.top + first.height / 2, x2: last.right - 2, y2: last.top + last.height / 2 };
+      }
+      return null;
+    }, PHRASE);
+    await p31.mouse.move(phraseRect.x1, phraseRect.y1);
+    await p31.mouse.down();
+    await p31.mouse.move(phraseRect.x2, phraseRect.y2, { steps: 15 });
+    await p31.mouse.up();
+    const selected = await p31
+      .waitForFunction(() => {
+        const p = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on");
+        return p?.querySelector(".rf-word")?.textContent?.trim() === "rehearsed quietly";
+      }, null, { timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!selected) {
+      // 某些环境里拖选后不会补一个 click，这里补一次（选区还在）
+      await p31.evaluate((p) => {
+        document.querySelector("#p31a").dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: p.x2, clientY: p.y2 }));
+      }, phraseRect);
+    }
+    const d5on = selected || (await p31
+      .waitForFunction(() => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on .rf-word")?.textContent?.trim() === "rehearsed quietly", null, { timeout: 8000 })
+      .then(() => true)
+      .catch(() => false));
+    await p31
+      .waitForFunction(() => {
+        const dict = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-dict")?.textContent || "";
+        return dict.length > 0 && !dict.includes("查词典中");
+      }, null, { timeout: 8000 })
+      .catch(() => {});
+    const d5 = await panelOf(p31);
+    check(
+      "D5 拖选短语：侧栏打开，词典查不到就提示交给 AI",
+      d5on && d5.word === PHRASE && d5.dict.includes("短语不在词典中"),
+      `on=${d5on} word=${d5.word} dict=${d5.dict.replace(/\s+/g, " ").slice(0, 40)}`,
+    );
+
+    const aiDone = await p31
+      .waitForFunction(() => {
+        const t = [...(document.getElementById("rf-ext-host")?.shadowRoot?.querySelectorAll(".rf-turn-text") ?? [])]
+          .map((e) => e.textContent || "")
+          .join(" ");
+        return t.includes("假模型") && !t.includes("生成中");
+      }, null, { timeout: 25000 })
+      .then(() => true)
+      .catch(() => false);
+    let savedGloss = null;
+    for (let i = 0; i < 30 && !savedGloss; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      const row = q("select ai_gloss from contexts where quote = ? order by created_at desc limit 1", PHRASE)[0];
+      if (row?.ai_gloss) savedGloss = row.ai_gloss;
+    }
+    const d5b = await panelOf(p31);
+    check(
+      "D5b 词典没命中就自动请 AI：流式回答渲染在侧栏，讲完存进 contexts.ai_gloss",
+      aiDone && Boolean(savedGloss) && savedGloss.includes("假模型") && d5b.turnHtml.includes("<b>"),
+      `流式=${aiDone} 落库=${Boolean(savedGloss)} 长度=${savedGloss?.length ?? 0}`,
+    );
+
+    // D6 「问 AI」的选项文案与网站阅读页一字不差。
+    // 这里同一句里已经问过两次（先 rehearse 再这个短语），所以会多出「只讲这个词」一项，
+    // 最后三项与状态无关，顺序固定。
+    const ASK_LABELS = ["这个短语在这句里什么意思", "这个词在这句里什么意思", "只讲这个词，不讲整句", "整句没看懂", "讲讲句子结构", "再给个例句"];
+    const TAIL_LABELS = ["整句没看懂", "讲讲句子结构", "再给个例句"];
+    const readerSrc = fs.readFileSync(path.join(ROOT, "src/components/Reader.tsx"), "utf8");
+    const sameAsReader = d5b.options.every((l) => ASK_LABELS.includes(l)) && ASK_LABELS.every((l) => readerSrc.includes(`"${l}"`));
+    check(
+      "D6 「问 AI」选项与阅读页一致（文案逐字相同、顺序一致）",
+      sameAsReader && JSON.stringify(d5b.options.slice(-3)) === JSON.stringify(TAIL_LABELS) && d5b.options.length >= 3,
+      d5b.options.join(" / "),
+    );
+
+    // D7 已整篇导入过的网页：点词挂到那篇文章上，坐标必须落在段落原文里
+    await article.bringToFront(); // 后台标签页收不到鼠标事件
+    const imp = await pointOfWord(article, "perceives");
+    await article.mouse.click(imp.x, imp.y);
+    const d7on = await article
+      .waitForFunction(() => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on .rf-word")?.textContent?.trim() === "perceives", null, { timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    // 侧栏一打开就先把词显示出来，记录还在路上；等词典区渲染完再查库
+    await article
+      .waitForFunction(() => {
+        const dict = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-dict")?.textContent || "";
+        return dict.length > 0 && !dict.includes("查词典中");
+      }, null, { timeout: 10000 })
+      .catch(() => {});
+    // 侧栏一打开就先把词显示出来，记录还在路上；等词典区渲染完再查库
+    await article
+      .waitForFunction(() => {
+        const dict = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-dict")?.textContent || "";
+        return dict.length > 0 && !dict.includes("查词典中");
+      }, null, { timeout: 10000 })
+      .catch(() => {});
+    const artCtx = q(
+      `select c.text_id, c.start as s, c."end" as e, c.quote, t.source_type, p.content
+         from contexts c join texts t on t.id = c.text_id join paragraphs p on p.id = c.paragraph_id
+         join user_words uw on uw.id = c.user_word_id
+        where uw.user_id = ? and c.quote = 'perceives' order by c.created_at desc limit 1`,
+      friendId,
+    )[0];
+    check(
+      "D7 已导入过的网页上点词：挂到导入的那篇文章，坐标满足 content.slice(start, end) === quote",
+      d7on && artCtx?.source_type === "url" && artCtx?.text_id === importedId &&
+        Boolean(artCtx?.content?.slice(artCtx.s, artCtx.e) === "perceives"),
+      `面板=${d7on} 点=${imp?.x},${imp?.y} ${artCtx?.source_type ?? "无记录"} same=${artCtx?.text_id === importedId} slice=${artCtx?.content?.slice(artCtx?.s ?? 0, artCtx?.e ?? 0)}`,
+    );
+
+    // D8 词库页：插件记的有「🧩 插件」，网页摘录的来源链接是文本片段 + 新标签页
+    const wordsPage = await api("/words", { cookie: friend });
+    const pageHtml = wordsPage.text;
+    const anchors = [...pageHtml.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].filter(([, , inner]) => inner.includes("Quiet rehearsal notes"));
+    const fragAnchor = anchors.find(([, attrs]) => attrs.includes("#:~:text=") && attrs.includes('target="_blank"'));
+    check(
+      "D8 词库页：插件记的词带「🧩 插件」；摘录来源是 #:~:text= 文本片段链接、新标签页打开",
+      pageHtml.includes("🧩") && Boolean(fragAnchor) && /#:~:text=[^"]*rehearsed%20quietly/.test(fragAnchor?.[1] ?? ""),
+      `status=${wordsPage.status} 🧩=${pageHtml.includes("🧩")} 外链=${Boolean(fragAnchor)} ${(fragAnchor?.[1] ?? "").slice(0, 120)}`,
+    );
+
+    // D9 网页摘录不算「我的文本」：首页与书架接口里都不出现
+    const home = await api("/", { cookie: friend });
+    const shelf = await api("/api/texts", { cookie: friend });
+    check(
+      "D9 首页「我的文本」与书架接口都不显示网页摘录",
+      !home.text.includes("Quiet rehearsal notes") &&
+        !shelf.data.texts.some((t) => t.sourceType === "web") &&
+        shelf.data.texts.some((t) => t.id === importedId),
+      `首页出现=${home.text.includes("Quiet rehearsal notes")} 书架=${shelf.data.texts.length} 篇`,
+    );
+    await p31.close();
 
     if (process.env.SHOT_DIR) {
       await article.setViewportSize({ width: 900, height: 420 });

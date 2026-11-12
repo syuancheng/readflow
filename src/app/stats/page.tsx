@@ -1,4 +1,4 @@
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc, ne } from "drizzle-orm";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -19,7 +19,8 @@ export default async function StatsPage() {
     db
       .select()
       .from(texts)
-      .where(eq(texts.userId, user.id))
+      // 网页摘录（P31）不算读过的书
+      .where(and(eq(texts.userId, user.id), ne(texts.sourceType, "web")))
       .orderBy(desc(texts.createdAt)),
     db
       .select()

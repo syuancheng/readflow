@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
-import { contexts, paragraphs, texts, userWords } from "@/db/schema";
+import { contexts, exports, paragraphs, texts, userWords } from "@/db/schema";
 import { lookup } from "@/lib/dict";
 import { cardGloss } from "@/lib/gloss";
 
@@ -47,6 +47,12 @@ export type SaveResult = {
 export class InvalidAnchorError extends Error {}
 
 /**
+ * 记录来源（P31）：网站阅读页 / 浏览器插件。
+ * 只有插件会显式传 'extension'，其余路径一律默认 'reader'。
+ */
+export type ContextVia = "reader" | "extension";
+
+/**
  * 校验锚点指向的文章 / 段落确实存在，且文章属于当前账号。
  * 不校验归属的话，B 能把批注（含 AI 释义）挂到 A 的文章上，
  * A 的「已存批注」会混进别人的内容。用「不存在」而非「无权」：不暴露别人的文章。
@@ -67,7 +73,7 @@ export function assertAnchor(input: WordAnchor, userId: string): void {
  * 保持「每次收词一条 context」的原语义（同一个词在不同位置出现各记一条）。
  */
 export function saveWordAndContext(
-  input: WordAnchor & { aiGloss?: string },
+  input: WordAnchor & { aiGloss?: string; via?: ContextVia },
   userId: string,
 ): SaveResult {
   assertAnchor(input, userId);
@@ -148,6 +154,7 @@ export function saveWordAndContext(
         aiGloss: aiGloss ?? null,
         // 词典结果快照：回看时右栏直接用，不再查词典（P25）
         dictEntry: JSON.stringify(dictResult),
+        via: input.via ?? "reader",
         createdAt: now,
       })
       .run();
@@ -227,13 +234,14 @@ export function findContextByAnchor(input: WordAnchor, userId: string) {
  * 重复点同一个位置也只会有一条 context。
  */
 export function ensureContextByAnchor(
-  input: WordAnchor & { aiGloss?: string },
+  input: WordAnchor & { aiGloss?: string; via?: ContextVia },
   userId: string,
 ): SaveResult {
   assertAnchor(input, userId);
   const existing = findContextByAnchor(input, userId);
   if (existing) {
-    // 顺手补一次释义：手动「收词」按钮可能带着刚生成的 AI 全文过来
+    // 顺手补一次释义：手动「收词」按钮可能带着刚生成的 AI 全文过来。
+    // 注意不改 via：最早是从哪里记的，就保留哪里（P31 决策 D5）。
     if (input.aiGloss && !existing.aiGloss) {
       applyGlossToContext(existing.id, input.aiGloss);
     }
@@ -276,4 +284,65 @@ export function persistGlossByAnchor(
   const result = ensureContextByAnchor(input, userId);
   if (!result.contextCreated) applyGlossToContext(result.contextId, input.aiGloss);
   return result;
+}
+
+export type DeleteContextsResult =
+  | { ok: true; prunedWord: boolean }
+  | { ok: false; reason: "not_found" | "forbidden" };
+
+/**
+ * 删掉一个词的某几条 context（P31 从 DELETE /api/words/[id] 抽出）。
+ *
+ * 两个入口共用：网站「取消记录」与插件「取消记录」。返回值区分
+ * 「词条不存在」「不是你的词条」，让调用方按各自的语义给状态码
+ * （网站路由保持原行为 404 / 403；插件接口一律 404，不暴露别人的数据存在）。
+ *
+ * 语义保持原样：
+ * - `opts.textId`：删这个词在这篇文章下的全部 context（批注按词去重后，
+ *   × 的语义是「清掉这个词在本文的标记」，只删最新一条会让更早的浮出来）；
+ * - `opts.contextId`：只删那一条（必须同时限定 userWordId，否则客户端
+ *   可以随便填一个 contextId 删别人的记录）；
+ * - 都不传：清掉这个词的全部 context；
+ * - 删完没有剩余 context 时，连词条 + 导出记录一起删（prunedWord=true），
+ *   否则词库和墨墨导出里会留下没有原句的空词条。
+ *
+ * 注意：整词删除（连 exports 一起）仍在路由里，不经过这里——它不需要
+ * 「删完还剩几条」的判断。
+ */
+export function deleteWordContexts(
+  wordId: string,
+  userId: string,
+  opts: { contextId?: string; textId?: string } = {},
+): DeleteContextsResult {
+  const word = db.select().from(userWords).where(eq(userWords.id, wordId)).get();
+  if (!word) return { ok: false, reason: "not_found" };
+  if (word.userId !== userId) return { ok: false, reason: "forbidden" };
+
+  if (opts.textId) {
+    db.delete(contexts)
+      .where(and(eq(contexts.userWordId, wordId), eq(contexts.textId, opts.textId)))
+      .run();
+  } else if (opts.contextId) {
+    db.delete(contexts)
+      .where(and(eq(contexts.id, opts.contextId), eq(contexts.userWordId, wordId)))
+      .run();
+  } else {
+    db.delete(contexts).where(eq(contexts.userWordId, wordId)).run();
+  }
+
+  const remaining = db
+    .select({ id: contexts.id })
+    .from(contexts)
+    .where(eq(contexts.userWordId, wordId))
+    .all();
+
+  if (remaining.length === 0) {
+    db.transaction((tx) => {
+      tx.delete(exports).where(eq(exports.userWordId, wordId)).run();
+      tx.delete(userWords).where(eq(userWords.id, wordId)).run();
+    });
+    return { ok: true, prunedWord: true };
+  }
+
+  return { ok: true, prunedWord: false };
 }

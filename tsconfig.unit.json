@@ -20,6 +20,7 @@
     "src/lib/markdown-inline.ts",
     "src/lib/explain-policy.ts",
     "src/lib/annotation-range.ts",
+    "src/lib/web-anchor.ts",
     "src/lib/cefr.ts",
     "src/lib/split.ts",
     "src/lib/tokenize.ts",
