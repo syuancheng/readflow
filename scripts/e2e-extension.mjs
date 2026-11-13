@@ -907,38 +907,43 @@ try {
     // （回看本来就没有 answerId，会让「不显示」变成假阴性）。
     await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "off" } });
     const OFF_PHRASE = "scrutinize the deployment pipeline";
-    const offRect = await p31.evaluate((phrase) => {
+    // P32-修复 D5e：之前用鼠标物理拖选短语，但插件在页面变化后约 700ms 会用 MutationObserver
+    // 重建高亮（clearHighlights → applyHighlights），把选区所在的文本节点替换掉，导致正在进行的
+    // 拖选选区丢失，退化成「点击单个词、词典命中、不触发 AI 讲解」，于是等不到「回答完成」。
+    // 改为：等高亮彻底稳定后，用代码直接设置跨节点选区，再派发真实 click 复用插件既有的
+    // click→select 划词路径（不引入新逻辑）。断言语义（站点 off 时不显示反馈行）保持不变。
+    // 先等 resync + MutationObserver 的 700ms debounce 都 settle，保证设置选区后不会被立刻重建弄丢。
+    await p31.waitForTimeout(2500);
+    const selOk = await p31.evaluate((phrase) => {
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       while (walker.nextNode()) {
         const n = walker.currentNode;
         if (n.parentElement?.closest("#rf-ext-host")) continue;
         const i = (n.nodeValue || "").indexOf(phrase);
         if (i < 0) continue;
-        const r = document.createRange();
-        r.setStart(n, i);
-        r.setEnd(n, i + phrase.length);
-        const rects = [...r.getClientRects()].filter((b) => b.width > 0);
-        if (!rects.length) continue;
-        const first = rects[0], last = rects[rects.length - 1];
-        return { x1: first.left + 2, y1: first.top + first.height / 2, x2: last.right - 2, y2: last.top + last.height / 2 };
+        const range = document.createRange();
+        range.setStart(n, i);
+        range.setEnd(n, i + phrase.length);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        // 取选区中点做落点；派发到 body 让 click 冒泡到 document 的监听器
+        // （body 不在 #rf-ext-host 内、也不是 .rf-hl，会正常走划词路径）
+        const rects = [...range.getClientRects()].filter((b) => b.width > 0);
+        const mid = rects[Math.floor(rects.length / 2)];
+        const x = mid ? mid.left + mid.width / 2 : 0;
+        const y = mid ? mid.top + mid.height / 2 : 0;
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        return true;
       }
-      return null;
+      return false;
     }, OFF_PHRASE);
-    check("D5e-0 能在测试网页里定位到新的短语选区", Boolean(offRect), JSON.stringify(offRect));
-    if (offRect) {
-      await p31.mouse.move(offRect.x1, offRect.y1);
-      await p31.mouse.down();
-      await p31.mouse.move(offRect.x2, offRect.y2, { steps: 15 });
-      await p31.mouse.up();
+    check("D5e-0 能在测试网页里找到短语并用代码设置选区", selOk, `phrase=${OFF_PHRASE}`);
+    if (selOk) {
       const offSelected = await p31.waitForFunction(
         (phrase) => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on .rf-word")?.textContent?.trim() === phrase,
         OFF_PHRASE, { timeout: 8000 },
       ).then(() => true).catch(() => false);
-      if (!offSelected) {
-        await p31.evaluate((p) => {
-          document.querySelector("#p31b")?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: p.x2, clientY: p.y2 }));
-        }, offRect);
-      }
       const offAiDone = await p31.waitForFunction(() => {
         const t = [...(document.getElementById("rf-ext-host")?.shadowRoot?.querySelectorAll(".rf-turn-text") ?? [])]
           .map((e) => e.textContent || "").join(" ");
