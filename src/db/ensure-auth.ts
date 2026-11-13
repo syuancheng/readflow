@@ -71,6 +71,45 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
       created_at INTEGER NOT NULL,
       last_used_at INTEGER
     );
+
+    -- P32：个性化 AI 讲解。放在这里是因为连接层最早执行，讲解接口可能先于主 schema 被读到。
+    -- 两张表都只新增，不动任何已有字段；账号删除时按 user_id 清理。
+    CREATE TABLE IF NOT EXISTS learner_profiles (
+      user_id TEXT PRIMARY KEY,
+      survey TEXT,                          -- 问卷答案 JSON（SurveyAnswers），没填是 NULL
+      survey_completed_at INTEGER,          -- 提交过问卷（哪怕全部跳过题目）
+      survey_dismissed_at INTEGER,          -- 点了「以后再说」/ 关掉首页卡片
+      show_feedback INTEGER NOT NULL DEFAULT 1,
+      stats TEXT,                           -- F2 行为推断缓存 JSON
+      stats_updated_at INTEGER,
+      note TEXT,                            -- F3 老师笔记（≤300 字）
+      note_updated_at INTEGER,
+      note_user_edited INTEGER NOT NULL DEFAULT 0,
+      note_lookup_cursor INTEGER NOT NULL DEFAULT 0,
+      note_last_error TEXT,
+      memory_reset_at INTEGER NOT NULL DEFAULT 0,  -- F6 清空记忆：画像只算这之后的事件
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS explain_events (
+      id TEXT PRIMARY KEY,                  -- 同时就是「这段回答」的 id，反馈靠它定位
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL,                   -- 'lookup' | 'explain'
+      ask_kind TEXT,                        -- explain 才有，白名单见 learner/ask-kind.ts
+      via TEXT NOT NULL DEFAULT 'reader',   -- 'reader' | 'extension'
+      word TEXT,
+      lemma TEXT,
+      freq_rank INTEGER,
+      is_phrase INTEGER NOT NULL DEFAULT 0,
+      dict_hit INTEGER,
+      repeat_count INTEGER,
+      text_id TEXT,
+      text_cefr TEXT,
+      context_id TEXT,
+      feedback TEXT,                        -- 'shallow' | 'right' | 'deep'
+      feedback_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_explain_events_user_time ON explain_events(user_id, created_at);
   `);
   if (!userCols.some((c) => c.name === "invite_code")) {
     sqlite.exec("ALTER TABLE users ADD COLUMN invite_code TEXT");

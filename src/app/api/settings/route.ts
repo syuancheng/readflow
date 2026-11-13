@@ -46,6 +46,8 @@ export async function GET() {
   // 站级默认（AI / 墨墨 / 插件）+ 本人覆盖；profile.* 不回退站级。
   // 必须与 PUT 写入时用同一个 userId，否则「保存成功但读回默认值」。
   const settings = allSettings(user.id);
+  // P32：站级开关，默认 on；环境变量强制关闭时由 flag 在服务端兜底，这里只回设置值
+  const aiPersonalized = settings[SETTINGS_KEYS.aiPersonalized] === "off" ? "off" : "on";
 
   // P28：普通账号只看到、只改自己的模型 Key 和墨墨 Token（主账号的站级密钥一概不露），
   // 没填自己的 Key 时用站点模型、按天限次，这里一并返回额度情况
@@ -59,6 +61,7 @@ export async function GET() {
       markji: { configured: Boolean(ownMarkji), maskedToken: maskSecret(ownMarkji), fromEnv: false },
       extension: extensionTokenStatus(user.id),
       canEditSite: false,
+      aiPersonalized,
       aiQuota: {
         ownKey: hasOwnModel(user.id),
         siteAvailable: resolveProvider(allSettings(), process.env) !== null,
@@ -82,6 +85,7 @@ export async function GET() {
     // P30：插件 Token 每人一个，只代表本人
     extension: extensionTokenStatus(user.id),
     canEditSite: user.isOwner,
+    aiPersonalized,
     profile: profileFromSettings(settings),
   });
 }
@@ -100,6 +104,8 @@ type PutBody = {
   markjiClear?: boolean;
   regenerateExtensionToken?: boolean;
   revokeExtensionToken?: boolean;
+  /** P32：站级「个性化讲解」开关，只有主账号能改 */
+  aiPersonalized?: "on" | "off";
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
   profile?: Partial<Profile>;
   profileReset?: boolean;
@@ -130,6 +136,18 @@ export async function PUT(req: Request) {
   // 普通账号改自己的行（P28）：自己的模型 Key、自己的墨墨 Token，碰不到站级密钥。
   // 插件 Token（P30）是每人自己的，任何账号都能生成 / 作废自己的，不受 scope 影响。
   const scope = user.isOwner ? GLOBAL_USER : user.id;
+
+  // P32：站点级开关。非站长发这个字段一律 403，不能让受邀账号替所有人改讲解规则。
+  if (body.aiPersonalized !== undefined) {
+    if (!user.isOwner) {
+      return NextResponse.json({ error: "只有主账号能修改个性化讲解开关" }, { status: 403 });
+    }
+    if (body.aiPersonalized !== "on" && body.aiPersonalized !== "off") {
+      return NextResponse.json({ error: "开关取值只能是 on 或 off" }, { status: 400 });
+    }
+    setSetting(SETTINGS_KEYS.aiPersonalized, body.aiPersonalized, GLOBAL_USER);
+  }
+
   if (body.activeProvider !== undefined) {
     if (body.activeProvider === null || body.activeProvider === "") {
       deleteSetting(SETTINGS_KEYS.activeProvider, scope);

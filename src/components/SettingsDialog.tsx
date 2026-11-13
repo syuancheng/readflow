@@ -16,6 +16,7 @@ import {
 } from "@/lib/profile-form";
 import VoicePicker from "./VoicePicker";
 import InvitePanel from "./InvitePanel";
+import LearnerPanel from "./LearnerPanel";
 import {
   applyModelOption,
   CUSTOM_MODEL_OPTION,
@@ -56,6 +57,8 @@ type SettingsPayload = {
   canEditSite?: boolean;
   /** 普通账号才有：自己有没有 Key、站点模型每天的免费次数（P28） */
   aiQuota?: { ownKey: boolean; siteAvailable: boolean; limit: number; usedToday: number };
+  /** P32：站级「个性化讲解」开关 */
+  aiPersonalized?: "on" | "off";
   profile?: Profile;
 };
 
@@ -234,6 +237,7 @@ function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
 
 const NAV_ICON: Record<NavId, string> = {
   profile: "user",
+  learner: "book",
   invites: "user",
   models: "model",
   markji: "book",
@@ -665,6 +669,8 @@ export default function SettingsDialog({
               <>
                 {tab === "invites" && data?.canEditSite === true && <InvitePanel />}
 
+                {tab === "learner" && <LearnerPanel />}
+
                 {tab === "profile" && (
                   <section className="st-section">
                     <div className="st-panel">
@@ -889,6 +895,26 @@ export default function SettingsDialog({
                           );
                         })}
                       </div>
+
+                      {data?.canEditSite === true && (
+                        <div className="st-reading-row st-reading-row-static">
+                          <span className="st-reading-text">
+                            <b>个性化讲解</b>
+                            <span>关闭后恢复为按同句查询次数决定讲解深度</span>
+                          </span>
+                          <button
+                            type="button"
+                            className={`st-switch ${data?.aiPersonalized !== "off" ? "on" : ""}`}
+                            role="switch"
+                            aria-checked={data?.aiPersonalized !== "off"}
+                            aria-label="个性化讲解"
+                            disabled={isBusy}
+                            onClick={() => void put({ aiPersonalized: data?.aiPersonalized === "off" ? "on" : "off" })}
+                          >
+                            <span className="st-switch-knob" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <p className="st-security">

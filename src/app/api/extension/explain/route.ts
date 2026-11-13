@@ -25,5 +25,5 @@ export async function POST(req: Request) {
   }
   const params = explainParamsFromBody(body);
   if (!params) return extensionError("缺少要解释的词", 400);
-  return withCors(await handleExplain(params, auth.user));
+  return withCors(await handleExplain(params, auth.user, { via: "extension" }));
 }

@@ -3640,3 +3640,46 @@ a:focus-visible,
   margin-right: 4px;
   padding: 0 4px;
 }
+
+/* P32：学习档案问卷（/welcome 与设置共用）和首页提示卡片 */
+.rf-survey {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.rf-survey-q {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.rf-survey-q-title {
+  font-size: var(--rf-text-sm);
+  font-weight: 600;
+  color: var(--rf-text-primary);
+  padding: 0;
+  margin-bottom: 12px;
+}
+.rf-survey-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.rf-survey-close {
+  width: 32px;
+  height: 32px;
+  border: var(--rf-border-width) solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+.rf-survey-close:hover {
+  background: var(--rf-bg-hover);
+}

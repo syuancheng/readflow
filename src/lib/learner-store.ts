@@ -1,0 +1,186 @@
+/**
+ * P32：学习档案与讲解事件的数据库读写。
+ *
+ * 只新增表，不动任何已有结构；全部用原生参数化 SQL（与 settings-store 一致，
+ * 也方便 CommonJS 脚本复用）。所有查询都带 user_id，画像和笔记只有本人可见。
+ */
+import { randomUUID } from "node:crypto";
+import { sqlite } from "../db/sqlite";
+import { allSettings } from "./settings-store";
+import { isPersonalizedOn } from "./learner/flag";
+import { narrowAskKind } from "./learner/ask-kind";
+import { normalizeSurvey, surveyPrior, type SurveyAnswers } from "./learner/survey";
+import { buildLearnerBlock } from "./learner/profile-text";
+import type { AskKind, LearnerLevel } from "./learner/types";
+
+export type LearnerRow = {
+  user_id: string;
+  survey: string | null;
+  survey_completed_at: number | null;
+  survey_dismissed_at: number | null;
+  show_feedback: number;
+  stats: string | null;
+  stats_updated_at: number | null;
+  note: string | null;
+  note_updated_at: number | null;
+  note_user_edited: number;
+  note_lookup_cursor: number;
+  note_last_error: string | null;
+  memory_reset_at: number;
+  updated_at: number;
+};
+
+const SELECT_ONE = "SELECT * FROM learner_profiles WHERE user_id = ?";
+
+export function getLearner(userId: string): LearnerRow {
+  const found = sqlite.prepare(SELECT_ONE).get(userId) as LearnerRow | undefined;
+  if (found) return found;
+  sqlite
+    .prepare("INSERT OR IGNORE INTO learner_profiles (user_id, updated_at) VALUES (?, ?)")
+    .run(userId, Date.now());
+  return sqlite.prepare(SELECT_ONE).get(userId) as LearnerRow;
+}
+
+/** DB 里的问卷是 JSON，读出来再过一遍白名单，脏数据不会进提示词 */
+export function surveyOf(row: LearnerRow): SurveyAnswers | null {
+  if (!row.survey) return null;
+  try {
+    const a = normalizeSurvey(JSON.parse(row.survey));
+    return Object.keys(a).length > 0 ? a : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 首页提示卡片 / /welcome 用：没提交过、也没点过「以后再说」 */
+export function needsSurvey(row: LearnerRow): boolean {
+  return row.survey_completed_at === null && row.survey_dismissed_at === null;
+}
+
+export function saveSurvey(userId: string, input: unknown): SurveyAnswers {
+  const answers = normalizeSurvey(input);
+  sqlite
+    .prepare(
+      `INSERT INTO learner_profiles (user_id, survey, survey_completed_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         survey = excluded.survey,
+         survey_completed_at = excluded.survey_completed_at,
+         updated_at = excluded.updated_at`,
+    )
+    .run(userId, JSON.stringify(answers), Date.now(), Date.now());
+  return answers;
+}
+
+export function dismissSurvey(userId: string): void {
+  getLearner(userId);
+  sqlite
+    .prepare("UPDATE learner_profiles SET survey_dismissed_at = ?, updated_at = ? WHERE user_id = ?")
+    .run(Date.now(), Date.now(), userId);
+}
+
+export function setShowFeedback(userId: string, show: boolean): void {
+  getLearner(userId);
+  sqlite
+    .prepare("UPDATE learner_profiles SET show_feedback = ?, updated_at = ? WHERE user_id = ?")
+    .run(show ? 1 : 0, Date.now(), userId);
+}
+
+export type PromptProfile = {
+  level: LearnerLevel | null;
+  survey: SurveyAnswers | null;
+  /** 阶段二接入行为推断；阶段一恒为 null，画像只来自问卷 */
+  stats: null;
+  note: string | null;
+  showFeedback: boolean;
+  personalized: boolean;
+};
+
+/**
+ * 一次讲解请求前读一次档案。只查一行 + 纯函数换算，远低于 §0.4 的 20ms 预算。
+ * 开关关闭时仍返回档案数据（问卷照常收集），只是不把画像交给模型。
+ */
+export function getProfileForPrompt(userId: string): PromptProfile {
+  const row = getLearner(userId);
+  const survey = surveyOf(row);
+  const prior = survey ? surveyPrior(survey) : null;
+  return {
+    level: prior ? { ...prior, basis: "survey" } : null,
+    survey,
+    stats: null,
+    note: row.note,
+    showFeedback: row.show_feedback === 1,
+    personalized: isPersonalizedOn(allSettings(userId), process.env),
+  };
+}
+
+/** §0.4：发给模型的画像文本不超过 600 字符，由 buildLearnerBlock 保证 */
+export function learnerBlockFor(userId: string): { block: string; detailed: boolean; personalized: boolean } {
+  const p = getProfileForPrompt(userId);
+  if (!p.personalized) return { block: "", detailed: false, personalized: false };
+  return {
+    block: buildLearnerBlock({ level: p.level, survey: p.survey, stats: p.stats, note: p.note }),
+    detailed: p.survey?.stylePref === "detailed",
+    personalized: true,
+  };
+}
+
+export type ExplainEventInput = {
+  userId: string;
+  askKind: AskKind;
+  via: "reader" | "extension";
+  word: string;
+  contextId?: string | null;
+  textId?: string | null;
+  dictHit?: boolean | null;
+  repeatCount?: number | null;
+};
+
+/** 写一条讲解事件；返回 id，同时就是「这段回答」的 X-RF-Answer-Id */
+export function logExplain(input: ExplainEventInput): string {
+  const id = randomUUID();
+  const word = input.word.slice(0, 120);
+  sqlite
+    .prepare(
+      `INSERT INTO explain_events
+         (id, user_id, kind, ask_kind, via, word, is_phrase, dict_hit, repeat_count,
+          text_id, context_id, created_at)
+       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      input.userId,
+      narrowAskKind(input.askKind),
+      input.via,
+      word,
+      /\s/.test(word.trim()) ? 1 : 0,
+      typeof input.dictHit === "boolean" ? (input.dictHit ? 1 : 0) : null,
+      typeof input.repeatCount === "number" ? input.repeatCount : null,
+      input.textId ?? null,
+      input.contextId ?? null,
+      Date.now(),
+    );
+  return id;
+}
+
+/** 「再查 N 个词」的计数：清空记忆之前的事件不算 */
+export function lookupCountSince(userId: string, since: number): number {
+  const r = sqlite
+    .prepare(
+      "SELECT COUNT(*) n FROM explain_events WHERE user_id = ? AND kind = 'lookup' AND created_at > ?",
+    )
+    .get(userId, since) as { n: number };
+  return Number(r.n);
+}
+
+/** 阶段二算行为画像用：最近 90 天、最多 500 条，且只在「清空记忆」之后 */
+export function loadEvents(userId: string, now: number = Date.now()): Record<string, unknown>[] {
+  const row = getLearner(userId);
+  return sqlite
+    .prepare(
+      `SELECT * FROM explain_events
+       WHERE user_id = ? AND created_at >= ? AND created_at > ?
+       ORDER BY created_at DESC LIMIT 500`,
+    )
+    .all(userId, now - 90 * 24 * 3600 * 1000, row.memory_reset_at) as Record<string, unknown>[];
+}

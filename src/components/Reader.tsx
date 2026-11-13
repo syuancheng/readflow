@@ -15,6 +15,7 @@ import { parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
 import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
+import type { AskKind } from "@/lib/learner/types";
 
 /**
  * 一个 Block IR 落库后的一行。content 仍是「用户可见的纯文本」，
@@ -72,6 +73,8 @@ type AskReq = {
   wholeSentence?: boolean;
   /** 把同句加深清零，只讲这个词 */
   forceWord?: boolean;
+  /** P32：这次讲解的种类，随 /api/explain 送给服务端记事件 */
+  askKind?: AskKind;
 };
 type Turn = ThreadTurn & { status: "loading" | "streaming" | "done" | "error"; req?: AskReq };
 
@@ -1601,7 +1604,7 @@ function PickCard({
         ) {
           // 词典给不出答案：用户已经停下来请教了，别再让他多点一次按钮。
           // 此时 dict state 还是 null，triggerAI() 里算出的 dictHit=false 正是实情。
-          void triggerAI();
+          void triggerAI({ askKind: "auto" as const });
         }
       })
       .catch(() => {
@@ -1622,9 +1625,9 @@ function PickCard({
   /** 「问 AI」里的选项：只列这一刻有意义的 */
   const askOptions: { label: string; req: AskReq }[] = [
     ...(!hasDefault
-      ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: {} }]
+      ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: { askKind: "default" as const } }]
       : (pick.signals?.repeatCount ?? 1) >= 2
-        ? [{ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true } }]
+        ? [{ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true, askKind: "word_only" as const } }]
         : []),
     ...(!isWholeSentence
       ? [
@@ -1632,6 +1635,7 @@ function PickCard({
             label: "整句没看懂",
             req: {
               ask: "整句没看懂",
+              askKind: "whole_sentence" as const,
               word: sentence,
               wholeSentence: true,
               prompt:
@@ -1645,6 +1649,7 @@ function PickCard({
       label: "讲讲句子结构",
       req: {
         ask: "讲讲句子结构",
+        askKind: "structure" as const,
         prompt: `讲讲这句话的结构：主干（主语、谓语、宾语或表语）是什么，「${quote}」在其中充当什么、修饰谁。`,
       },
     },
@@ -1652,6 +1657,7 @@ function PickCard({
       label: "再给个例句",
       req: {
         ask: "再给个例句",
+        askKind: "example" as const,
         prompt: `用「${quote}」在这句里的这个意思，再给一个简单的英文例句，并附中文翻译。`,
       },
     },
@@ -1680,7 +1686,7 @@ function PickCard({
         : undefined;
 
     const body = req.wholeSentence
-      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt }
+      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default" }
       : {
           word: anchor.quote,
           prefix: aiContext.prefix,
@@ -1690,6 +1696,8 @@ function PickCard({
           monolingual: false,
           ...(req.prompt ? { prompt: req.prompt } : {}),
           ...(signals ? { signals } : {}),
+          askKind: req.askKind ?? "default",
+          ...(pick.contextId ? { contextId: pick.contextId } : {}),
         };
 
     try {
@@ -1741,7 +1749,7 @@ function PickCard({
     if (!q || busy) return;
     setAskPrompt("");
     setMenuOpen(false);
-    void triggerAI({ ask: q, prompt: q });
+    void triggerAI({ ask: q, prompt: q, askKind: "custom" as const });
   }
 
   return (

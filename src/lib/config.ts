@@ -80,6 +80,8 @@ export const SETTINGS_KEYS = {
   providerBaseUrl: (id: string) => `ai.${id}.baseUrl`,
   markjiToken: "markji.token",
   extensionToken: "extension.token",
+  /** P32：站级「个性化讲解」开关，默认 on；关掉后讲解规则回退到旧的按同句次数 */
+  aiPersonalized: "ai.personalized",
   // 个人资料：按账号隔离（profile.* 不回退站级），见 lib/settings-store.ts
   profileName: "profile.displayName",
   profileFullName: "profile.fullName",
