@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildLearnerBlock,
   dominantFeedback,
+  hasUsableProfile,
   LEARNER_BLOCK_MAX_CHARS,
 } from "../../src/lib/learner/profile-text";
 import { EMPTY_BEHAVIOR_STATS, type BehaviorStats, type LearnerLevel } from "../../src/lib/learner/types";
@@ -108,4 +109,15 @@ test("前面固定行本身就超长时：补充行整行丢掉，最后硬切�
   assert.ok(out.includes("估计水平"), "主要依据保留");
   assert.ok(!out.includes("老师笔记：") && !out.includes("常见难点") && !out.includes("以往反馈"),
     "补充行按 笔记 → 难点 → 反馈 的顺序让位");
+});
+
+test("有没有可依据的档案：问卷 / 查词满 30 次 / 老师笔记，任一即可；都没有 → 退回旧规则兜底", () => {
+  const none = { survey: null, stats: null, note: null };
+  assert.equal(hasUsableProfile(none), false);
+  assert.equal(hasUsableProfile({ ...none, survey: {} }), false, "空问卷不算");
+  assert.equal(hasUsableProfile({ ...none, survey: { exam: "cet6" } }), true);
+  assert.equal(hasUsableProfile({ ...none, stats: stats({ lookups: 29 }) }), false, "29 次不够");
+  assert.equal(hasUsableProfile({ ...none, stats: stats({ lookups: 30 }) }), true, "30 次刚好");
+  assert.equal(hasUsableProfile({ ...none, note: "  " }), false, "空白笔记不算");
+  assert.equal(hasUsableProfile({ ...none, note: "常卡在长句" }), true);
 });

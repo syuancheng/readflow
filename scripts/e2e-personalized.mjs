@@ -386,6 +386,23 @@ try {
 
   // 环境变量强制关闭：重启太重，这里只断言纯函数（单测已覆盖），接口层保持设置值
 
+  // ===== E+. 「同句第几次」：有档案时不再出现，没有档案时作为兜底 =====
+  const REPEAT_SIGNALS = { source: "word", position: "middle", selectionWords: 1, sentenceWords: 7, coverage: 0.15, sentence: "The build produced a useful artifact.", sentenceStart: 0, sentenceEnd: 37, repeatCount: 2, priorAsks: [{ selection: "build" }] };
+  await explain(owner, { signals: REPEAT_SIGNALS });
+  const sysHas = lastCall().messages[0]?.content ?? "";
+  const userHas = lastCall().messages[1]?.content ?? "";
+  check("E4 有档案（填过问卷）：提示词和观察里都没有「同句第几次」，之前问过的选区仍保留",
+    userHas.startsWith("学生档案（") && !userHas.includes("同句连续请教") && userHas.includes("之前问过的选区") &&
+    !sysHas.includes("同句连续请教") && !sysHas.includes("第 2 次请教") && !sysHas.includes("同句已问过 ≥2 次时"),
+    `观察含次数=${userHas.includes("同句连续请教")} 系统含次数=${sysHas.includes("同句连续请教")}`);
+  // 朋友：跳过了问卷、也没有查词记录 → 没有可依据的档案 → 这次请求按个性化关闭处理（旧规则兜底）
+  await explain(friendCookie, { signals: REPEAT_SIGNALS });
+  const sysNo = lastCall().messages[0]?.content ?? "";
+  const userNo = lastCall().messages[1]?.content ?? "";
+  check("E5 没有档案（跳过问卷、无查词记录）：退回旧规则——提示词与 P32 前逐字相同，观察里带「同句连续请教: 第 2 次」",
+    stripCardRule(sysNo) === LEGACY_ZH.replace(/\n+$/, "") && !userNo.includes("学生档案") && userNo.includes("同句连续请教: 第 2 次"),
+    `系统相同=${stripCardRule(sysNo) === LEGACY_ZH.replace(/\n+$/, "")} 含档案=${userNo.includes("学生档案")} 含次数=${userNo.includes("同句连续请教: 第 2 次")}`);
+
   // ===== F. 设置 →「学习档案」面板截图 =====
   await ownerPage.goto(BASE, { waitUntil: "networkidle" });
   await ownerPage.click(".pm-trigger");

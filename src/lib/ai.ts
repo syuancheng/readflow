@@ -78,12 +78,12 @@ export type ExplainParams = {
  * 只替换「答案深度」那一段，其余提示词一个字都不动——开关关闭时就是回退保障。
  */
 const DEPTH_GUIDANCE_ZH = `【答案深度由你判断，不要问我】
-根据「学生档案」和「观察」判断讲多深：L1 只给这句里的意思；L2 加上在这句里怎么理解或搭配；L3 再加「整句大意：」一句话概括；L4 再加句子地图，必要时给一个例句。同句连续请教、拖选长片段、档案显示长句是难点时往深处走；档案显示水平高、偏好简洁、以往反馈「太深」偏多时往浅处走。偏好简洁的学生即使同句连续请教，也只加「整句大意：」，不主动画句子地图。阅读目的会影响义项选择（例如技术文档读者优先给技术含义）。不论讲多深，第一行永远是「释义：」。
+根据「学生档案」和「观察」判断讲多深：L1 只给这句里的意思；L2 加上在这句里怎么理解或搭配；L3 再加「整句大意：」一句话概括；L4 再加句子地图，必要时给一个例句。拖选长片段、档案显示长句是难点时往深处走；档案显示水平高、偏好简洁、以往反馈「太深」偏多时往浅处走。「之前问过的选区」只用来避免重复讲同一内容，不决定讲多深。偏好简洁的学生最多加「整句大意：」，不主动画句子地图。阅读目的会影响义项选择（例如技术文档读者优先给技术含义）。不论讲多深，第一行永远是「释义：」。
 判断句法角色、两次选区是否重叠是老师的本职；不要输出判断过程，直接用答案体现。`;
 
 /** monolingual 人设的等义英文指引（文档只给了中文段落，这里保持两套人设行为一致） */
 const DEPTH_GUIDANCE_EN = `Depth is yours to judge from the observations and the "student profile":
-L1 gives only the meaning in this sentence; L2 adds how to read or pair it here; L3 adds a one-sentence "整句大意：" whole-sentence meaning; L4 adds a sentence map and, if needed, one example. Go deeper when the student keeps asking about the same sentence, selected a long span, or the profile shows long sentences are a weak point. Go lighter when the profile shows a high level, a preference for brevity, or mostly "太深" feedback. A student who prefers brevity gets only the one-line whole-sentence meaning even on repeated asks — never volunteer a sentence map unless they ask for structure. The reading goal affects which sense you choose (a technical reader gets the technical meaning of "artifact"). Keep the prose short and answer exactly the selection. Do not output your reasoning.`;
+L1 gives only the meaning in this sentence; L2 adds how to read or pair it here; L3 adds a one-sentence "整句大意：" whole-sentence meaning; L4 adds a sentence map and, if needed, one example. Go deeper when the student selected a long span, or the profile shows long sentences are a weak point. Go lighter when the profile shows a high level, a preference for brevity, or mostly "太深" feedback. The "prior asks" are only for avoiding repetition, not for deciding depth. A student who prefers brevity gets at most the one-line whole-sentence meaning — never volunteer a sentence map unless they ask for structure. The reading goal affects which sense you choose (a technical reader gets the technical meaning of "artifact"). Keep the prose short and answer exactly the selection. Do not output your reasoning.`;
 
 function personalizeDepth(prompt: string, monolingual: boolean): string {
   const start = monolingual
@@ -94,7 +94,48 @@ function personalizeDepth(prompt: string, monolingual: boolean): string {
   const j = i < 0 ? -1 : prompt.indexOf(end, i);
   if (i < 0 || j < 0) return prompt; // 找不到就原样返回，绝不破坏旧行为
   const guidance = monolingual ? DEPTH_GUIDANCE_EN : DEPTH_GUIDANCE_ZH;
-  return prompt.slice(0, i) + guidance + "\n\n" + prompt.slice(j);
+  const swapped = prompt.slice(0, i) + guidance + "\n\n" + prompt.slice(j);
+  return dropRepeatCountRules(swapped, monolingual);
+}
+
+/**
+ * 个性化模式下，核心规则里「同句第 N 次就给整句大意」的旧例外也要去掉，
+ * 否则它和档案判断同时生效、互相抢话。保留「整句大意必须是概括、不能逐字翻译」的约束。
+ * 任何一处找不到就原样保留（绝不破坏旧行为）。
+ */
+const REPEAT_RULE_SWAPS: { zh: [string, string][]; en: [string, string][] } = {
+  zh: [
+    [
+      "  · 例外：同句已问过 ≥2 次时，第一屏先给整句大意再给选区意思——见下方「答案深度」段。",
+      "  · 例外：按下方「答案深度」判断需要整句大意时，第一屏先给整句大意再给选区意思。",
+    ],
+    [
+      "  · 例外：同句第 2 次且选区不重叠、或第 3 次及以上时，可以给整句大意——但必须用「整句大意：」这个标记开头，",
+      "  · 例外：按下方「答案深度」判断需要整句大意时，可以给整句大意——但必须用「整句大意：」这个标记开头，",
+    ],
+    [
+      "- 即使同句已问过多次、要先写「整句大意：」，第一行也仍然是「释义：」这一行，「整句大意：」放在它下面。",
+      "- 即使要先写「整句大意：」，第一行也仍然是「释义：」这一行，「整句大意：」放在它下面。",
+    ],
+  ],
+  en: [
+    [
+      "   · Exception: when this is the 2nd+ ask on the same sentence, open with a whole-sentence meaning first — see Depth below.",
+      "   · Exception: when the Depth judgment below calls for it, open with a whole-sentence meaning first.",
+    ],
+    [
+      "   · Exception: on 2nd ask (non-overlapping) or 3rd+ ask, you may open with whole-sentence meaning — but label it",
+      "   · Exception: when the Depth judgment below calls for it, you may open with whole-sentence meaning — but label it",
+    ],
+  ],
+};
+
+function dropRepeatCountRules(prompt: string, monolingual: boolean): string {
+  let out = prompt;
+  for (const [from, to] of monolingual ? REPEAT_RULE_SWAPS.en : REPEAT_RULE_SWAPS.zh) {
+    if (out.includes(from)) out = out.replace(from, to);
+  }
+  return out;
 }
 
 /**
@@ -271,7 +312,8 @@ function observations(params: ExplainParams): string {
   if (typeof signals.dictHit === "boolean") {
     lines.push(`- 词典: ${signals.dictHit ? "已收录" : "未收录"}`);
   }
-  if (typeof signals.repeatCount === "number" && signals.repeatCount > 0) {
+  // 个性化模式下深度由档案判断，不再把「同句第几次」交给模型（没有档案时本请求按旧规则走，仍带次数）
+  if (!params.personalized && typeof signals.repeatCount === "number" && signals.repeatCount > 0) {
     lines.push(`- 同句连续请教: 第 ${signals.repeatCount} 次`);
   }
   if (signals.priorAsks && signals.priorAsks.length > 0) {

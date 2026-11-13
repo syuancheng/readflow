@@ -24,6 +24,14 @@ function withoutCardRule(p: string): string {
     .replace(/\n+$/, "");
 }
 
+/** 两段文字逐行比较，返回不同的行（行数必须一致） */
+function changedLines(after: string, before: string): { before: string; after: string }[] {
+  const a = after.split("\n");
+  const b = before.split("\n");
+  assert.equal(a.length, b.length, "行数不能变");
+  return a.flatMap((line, i) => (line === b[i] ? [] : [{ before: b[i], after: line }]));
+}
+
 const BASE = {
   word: "is",
   context: "The opposite problem is the classifier repeatedly stopping something.",
@@ -63,14 +71,19 @@ test("P33：制卡建议段在提示词最后，且建议行规则（30 字、�
 test("开关打开时：中文人设换成 L1–L4 深度指引，旧的「同句第 2/3 次」硬规则不再出现", () => {
   const p = buildSystemPrompt("en", false, "steer", { personalized: true });
   assert.ok(p.includes("L1 只给这句里的意思") && p.includes("L4 再加句子地图"));
-  assert.ok(p.includes("偏好简洁的学生即使同句连续请教"));
+  assert.ok(p.includes("偏好简洁的学生最多加「整句大意：」"));
+  assert.ok(!p.includes("同句连续请教"), "个性化模式下提示词里不再有「同句连续请教」");
   assert.ok(p.includes("阅读目的会影响义项选择"));
   assert.ok(p.includes("第一行永远是「释义：」"), "个性化不能打乱释义第一行");
   assert.ok(p.includes("【答案深度由你判断，不要问我】"));
   const depth = p.slice(p.indexOf("【答案深度"), p.indexOf("【硬性禁止】"));
   assert.ok(!depth.includes("第 2 次请教") && !depth.includes("第 3 次及以上"), "深度段里的旧硬规则换成画像判断");
-  // 其余部分一个字都没动（核心规则段里提到「第 2 次」的例外句照旧保留）
-  assert.equal(p.slice(0, p.indexOf("【答案深度")), ZH_BEFORE.slice(0, ZH_BEFORE.indexOf("【答案深度")));
+  // 深度段之前只有 3 行不同——全是按「同句第几次」给整句大意的旧例外，其余一个字没动
+  const changed = changedLines(p.slice(0, p.indexOf("【答案深度")), ZH_BEFORE.slice(0, ZH_BEFORE.indexOf("【答案深度")));
+  assert.equal(changed.length, 3, JSON.stringify(changed.map((c) => c.after)));
+  for (const c of changed) assert.ok(/同句已问过|同句第 2 次/.test(c.before), c.before);
+  for (const c of changed) assert.ok(!/同句已问过|同句第 2 次|第 3 次/.test(c.after), c.after);
+  assert.ok(p.includes("必须用「整句大意：」这个标记开头") && p.includes("概括一句话"), "整句大意必须是概括、不能逐字翻译的约束要保留");
   assert.equal(p.slice(p.indexOf("【硬性禁止】"), p.indexOf("【制卡建议")), ZH_BEFORE.slice(ZH_BEFORE.indexOf("【硬性禁止】")).replace(/\n+$/, "") + "\n\n");
   assert.ok(p.includes("制卡建议"), "个性化打开时制卡建议也要在");
 });
@@ -80,7 +93,10 @@ test("开关打开时：monolingual 人设同样换成个性化深度指引，�
   assert.ok(p.includes("student profile") && p.includes("L1 gives only the meaning"));
   assert.ok(p.includes("Do not output your reasoning."), "英文人设不能丢掉「不输出推理过程」的约束");
   assert.ok(!p.includes("Second ask on the same sentence"));
-  assert.equal(p.slice(0, p.indexOf("Depth is yours")), EN_BEFORE.slice(0, EN_BEFORE.indexOf("Depth is yours")));
+  const changedEn = changedLines(p.slice(0, p.indexOf("Depth is yours")), EN_BEFORE.slice(0, EN_BEFORE.indexOf("Depth is yours")));
+  assert.equal(changedEn.length, 2, JSON.stringify(changedEn.map((c) => c.after)));
+  for (const c of changedEn) assert.ok(/2nd/.test(c.before) && !/2nd|3rd/.test(c.after), c.after);
+  assert.ok(!p.includes("repeat count") && !p.includes("keeps asking about the same sentence"));
   assert.equal(
     p.slice(p.indexOf("Never: phonetic symbols"), p.indexOf("Card suggestion")),
     EN_BEFORE.slice(EN_BEFORE.indexOf("Never: phonetic symbols")).replace(/\n+$/, "") + "\n\n",
@@ -101,3 +117,16 @@ test("学生档案放在 user 消息最前面；为空时 user 消息和改动�
 // 让 linter 不抱怨未使用的导入（CARD_RULE_ZH 仅作文档说明保留）
 void CARD_RULE_ZH;
 void SUGGESTION_PREFIX;
+
+test("个性化模式下观察块不再告诉模型「同句第几次」；关闭时照旧；之前问过的选区仍保留（用来避免重复）", () => {
+  const signals = {
+    source: "word" as const, position: "middle" as const, selectionWords: 1, sentenceWords: 12, coverage: 0.1,
+    sentence: "x", sentenceStart: 0, sentenceEnd: 1, repeatCount: 2, priorAsks: [{ selection: "deliberately" }],
+  };
+  const on = buildUserMessage({ ...BASE, signals, personalized: true });
+  assert.ok(!on.includes("同句连续请教"));
+  assert.ok(on.includes("之前问过的选区") && on.includes("deliberately"));
+  const off = buildUserMessage({ ...BASE, signals, personalized: false });
+  assert.ok(off.includes("同句连续请教: 第 2 次"));
+  assert.equal(buildUserMessage({ ...BASE, signals }), off, "不传 personalized 等同关闭，保持旧行为");
+});

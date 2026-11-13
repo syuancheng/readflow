@@ -11,7 +11,7 @@ import { frequencyRank } from "./dict";
 import { isPersonalizedOn } from "./learner/flag";
 import { narrowAskKind } from "./learner/ask-kind";
 import { normalizeSurvey, surveyPrior, type SurveyAnswers } from "./learner/survey";
-import { buildLearnerBlock } from "./learner/profile-text";
+import { buildLearnerBlock, hasUsableProfile } from "./learner/profile-text";
 import { computeBehaviorStats, mergeProfile } from "./learner/model";
 import type { AskKind, BehaviorStats, Feedback, LearnerEvent, LearnerLevel } from "./learner/types";
 import { EMPTY_BEHAVIOR_STATS } from "./learner/types";
@@ -169,6 +169,10 @@ export function getProfileForPrompt(userId: string): PromptProfile {
 export function learnerBlockFor(userId: string): { block: string; detailed: boolean; personalized: boolean } {
   const p = getProfileForPrompt(userId);
   if (!p.personalized) return { block: "", detailed: false, personalized: false };
+  // 没有可依据的档案：按个性化关闭处理，用旧的「同句第几次」规则兜底
+  if (!hasUsableProfile({ survey: p.survey, stats: p.stats, note: p.note })) {
+    return { block: "", detailed: false, personalized: false };
+  }
   return {
     block: buildLearnerBlock({ level: p.level, survey: p.survey, stats: p.stats, note: p.note }),
     detailed: p.survey?.stylePref === "detailed",

@@ -14,8 +14,24 @@ import {
   type SurveyAnswers,
 } from "./survey";
 import type { BehaviorStats, LearnerLevel } from "./types";
+import { MIN_LOOKUPS } from "./model";
 
 export const LEARNER_BLOCK_MAX_CHARS = 600;
+
+/**
+ * 有没有「可依据的档案」：填过问卷，或最近查词够 30 次，或有老师笔记，任一即可。
+ * 有 → 个性化讲解（深度只看档案 / 选区 / 反馈，不再看「同句第几次」）；
+ * 没有 → 这次请求按个性化关闭处理，退回旧的「同句第 1/2/3 次」规则兜底。
+ */
+export function hasUsableProfile(input: {
+  survey: SurveyAnswers | null;
+  stats: BehaviorStats | null;
+  note: string | null;
+}): boolean {
+  const hasSurvey = Boolean(input.survey && Object.keys(input.survey).length > 0);
+  const enoughLookups = Boolean(input.stats && input.stats.lookups >= MIN_LOOKUPS);
+  return hasSurvey || enoughLookups || Boolean(input.note && input.note.trim());
+}
 
 const HEAD = "学生档案（供你判断讲多深、讲什么；回答里不要提到这些信息）：";
 const P_LEVEL = "- 估计水平：";
