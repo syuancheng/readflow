@@ -77,7 +77,7 @@ test("旧版三段式 / 字面量 \\n / 代码块也能收敛成一行", () => {
   assert.equal(cardGloss("**在这里的意思**\\n这里指河岸，不是银行"), "这里指河岸，不是银行");
   const withFence = cardGloss("```\ncode\n```\n真正的释义在这一行", 100);
   assert.equal(withFence, "真正的释义在这一行");
-  assert.equal(cardGloss(FULL, 200)?.includes("\n"), false, "卡片背面应是一行，避免 cardgen 拆成多个列表项");
+  assert.equal(cardGloss(FULL, 200)?.includes("\n"), false, "卡片背面应是一行，避免做卡时被拆成多个列表项");
 });
 
 test("P13：句子地图的 ==主干== 记号不进卡片背面或插件小标签", () => {

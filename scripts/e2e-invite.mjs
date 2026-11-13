@@ -151,9 +151,8 @@ try {
   check("9 普通账号看不到主账号的墨墨 Token / 模型 Key", fs1.markji?.configured === false && fs1.providers.every((p) => !p.configured) && fs1.canEditSite === false, JSON.stringify(fs1.markji));
   const decks = await json(await api(friend, "/api/markji/decks"));
   check("10 普通账号没填墨墨 Token：不能读牌组（不回退主账号的）", decks.ok === false && decks.error.includes("未配置"), decks.error);
-  const friendWordId = "w-friend";
-  const exp = await api(friend, "/api/export", { method: "POST", body: JSON.stringify({ deckId: "d", chapterId: "c", types: ["qa"], wordIds: [friendWordId] }) });
-  check("11 普通账号没填墨墨 Token：不能导出", exp.status === 400 && (await json(exp)).error.includes("墨墨 Token"), String(exp.status));
+  const exp = await api(friend, "/api/cards/push", { method: "POST", body: JSON.stringify({ deckId: "d", chapterMode: "fixed", chapterId: "c", cardIds: ["x"] }) });
+  check("11 普通账号没填墨墨 Token：不能推送（不回退主账号的）", exp.status === 400 && (await json(exp)).error.includes("墨墨 Token"), String(exp.status));
   await api(friend, "/api/settings", { method: "PUT", body: JSON.stringify({ markjiToken: "friend-markji-token-zzzz" }) });
   const ownerTok = q("select value from settings where user_id = 'local' and key = 'markji.token'")?.value;
   const friendTok = q("select value from settings where user_id = ? and key = 'markji.token'", friendRow.id)?.value;

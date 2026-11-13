@@ -10,7 +10,7 @@
  *   block.text 是「用户能看见的纯文本」，不含任何 Markdown / HTML 标记；
  *   contexts.start / end 永远是 text 的字符下标；
  *   一个 Block = paragraphs 表的一行 = 一个 data-pid 容器。
- * 只要守住这三条，resolveAnchor / sentenceAround / aiContextOf / cardgen
+ * 只要守住这三条，resolveAnchor / sentenceAround / aiContextOf / 做卡
  * 就都不需要改。
  */
 

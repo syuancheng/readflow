@@ -2,7 +2,7 @@
  * 临时验证脚本：用我们自己的 markji.ts 客户端做**只读**调用，
  * 证明 base URL、Bearer 鉴权、响应信封解析、路径编码都是对的。
  *
- * 不做任何写入（写卡是主流程，由 /api/export 在用户确认后执行）。
+ * 不做任何写入（写卡是主流程，由待推送里的 /api/cards/push 在用户确认后执行）。
  *
  * 用法：node .verify/scripts/verify-markji.js [deckId]
  */

@@ -11,7 +11,7 @@ import { usePathname } from "next/navigation";
  */
 const TABS = [
   { href: "/", label: "我的文本", match: (p: string) => p === "/" },
-  { href: "/words", label: "我的词库", match: (p: string) => p.startsWith("/words") || p.startsWith("/export") },
+  { href: "/words", label: "我的词库", match: (p: string) => p.startsWith("/words") },
   { href: "/stats", label: "战绩", match: (p: string) => p.startsWith("/stats") },
 ];
 

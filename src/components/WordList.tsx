@@ -91,11 +91,6 @@ type SortKey = "recent" | "oldest" | "alpha";
 
 const DELETED_KEY = "__deleted__";
 
-/** 导出页只导这些词（词 id 是 UUID，一两百个放进网址也不超长） */
-function exportHref(ids: string[]): string {
-  return `/export?ids=${ids.join(",")}`;
-}
-
 function SpeakerIcon() {
   return (
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -342,18 +337,11 @@ export default function WordList({
                 </div>
               )}
             </div>
-            {/* 只导出勾选的词（墨墨没有删除接口，不提供「一键全部」）；想导所有未导出的：左侧「未导出」→ 全选 */}
-            {shownSelected.length > 0 ? (
-              <Link
-                href={exportHref(shownSelected.map((w) => w.id))}
-                className="duo-btn duo-btn-primary duo-btn-sm wl-export-btn"
-              >
-                📤 导出选中的 {shownSelected.length} 个<span className="wl-hide-sm">到墨墨</span>
-              </Link>
-            ) : (
-              <span className="duo-btn duo-btn-sm wl-export-btn wl-export-btn-off" title="先勾选要导出的词" aria-disabled="true">
-                📤 导出到墨墨
-              </span>
+            {/* P33：旧的「导出到墨墨」已并入「待推送」：先在阅读页做成卡片，再到这里检查、推送 */}
+            {cardsEnabled && (
+              <button type="button" className="duo-btn duo-btn-sm wl-export-btn" onClick={() => setStatus("pending")}>
+                🃏 待推送{pendingTotal ? ` (${pendingTotal})` : ""}
+              </button>
             )}
             <span className="ml-auto text-sm font-bold text-ink-faint whitespace-nowrap">{shown.length} 个词</span>
             <select
@@ -515,9 +503,6 @@ export default function WordList({
                               {b.app} ✓ {b.cardTypes.join("·")}
                             </span>
                           ))}
-                          <Link href={exportHref([w.id])} className="wl-export-one">
-                            📤 导出这个词
-                          </Link>
                           <button className="wl-delete" onClick={() => remove([w.id])} title="彻底删除">
                             🗑 删除
                           </button>

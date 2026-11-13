@@ -3320,32 +3320,8 @@ body {
   font-size: var(--rf-text-sm);
 }
 
-.wl-export-btn-off {
-  background: var(--duo-surface);
-  color: var(--duo-ink-faint);
-  border-bottom-color: var(--duo-border);
-  cursor: not-allowed;
-}
-
-.wl-export-btn-off:active {
-  transform: none;
-  border-bottom-width: 3px;
-}
-
-.wl-export-one {
-  margin-left: auto;
-  padding: 4px 12px;
-  border-radius: var(--rf-radius-md);
-  font-size: var(--rf-text-xs);
-  font-weight: 700;
-  color: var(--rf-text-primary);
-}
-
-.wl-export-one:hover {
-  background: var(--rf-bg-selected);
-}
-
 .wl-delete {
+  margin-left: auto;
   padding: 4px 12px;
   border-radius: var(--rf-radius-md);
   font-size: var(--rf-text-xs);

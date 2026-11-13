@@ -23,7 +23,7 @@ function sentenceOf(prefix: string, quote: string, suffix: string): string {
   return `${prefixSent}${quote}${suffixSent}`.trim() || quote;
 }
 
-/** 回段落原文按句读扩成整句，和 /api/export 用同一套逻辑。 */
+/** 回段落原文按句读扩成整句，与旧导出用的是同一套逻辑。 */
 function fullSentence(c: {
   paraContent: string | null;
   start: number;
