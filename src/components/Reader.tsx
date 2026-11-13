@@ -1950,6 +1950,11 @@ function PickCard({
                       title={t.feedbackError || undefined}
                       onClick={() => void rate(i, r)}
                     >
+                      {t.feedback === r && (
+                        <span className="rf-feedback-check" aria-hidden>
+                          ✓
+                        </span>
+                      )}
                       {["太浅", "刚好", "太深"][j]}
                     </button>
                   </span>

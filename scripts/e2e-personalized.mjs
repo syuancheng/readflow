@@ -501,6 +501,19 @@ try {
       rightRows.length >= 1 && q("select feedback from explain_events where id = ?", rightRows.at(-1)?.id)[0]?.feedback === "right" &&
       q("select count(*) n from explain_events where feedback = 'deep'")[0].n === 0,
       `right=${rightRows.length} deep=${q("select count(*) n from explain_events where feedback = 'deep'")[0].n}`);
+    const fbState = await ownerPage.evaluate(() => {
+      const btns = [...document.querySelectorAll(".reader-note .rf-feedback-btn")];
+      const on = btns.filter((b) => b.getAttribute("aria-pressed") === "true");
+      const cs = on[0] ? getComputedStyle(on[0]) : null;
+      return {
+        on: on.map((b) => b.textContent.trim()),
+        check: on[0]?.querySelector(".rf-feedback-check")?.textContent ?? null,
+        color: cs?.color,
+        checks: document.querySelectorAll(".reader-note .rf-feedback-check").length,
+      };
+    });
+    check("G7b 选中的反馈变绿（#3f7f00）并在前面出现「✓」，其它两个没有勾",
+      fbState.on.join() === "✓刚好" && fbState.check === "✓" && fbState.color === "rgb(63, 127, 0)" && fbState.checks === 1, JSON.stringify(fbState));
     const feedbackId = rightRows.at(-1)?.id;
     const forbiddenFeedback = await api("/api/explain/feedback", {
       cookie: friendCookie, method: "POST", body: { answerId: feedbackId, rating: "shallow" },
