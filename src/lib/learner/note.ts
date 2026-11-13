@@ -10,7 +10,11 @@ import type { BehaviorStats } from "./types";
 export const NOTE_MAX_CHARS = 300;
 /** 距上次更新累计新增 25 次查词才允许再生成 */
 export const NOTE_MIN_NEW_LOOKUPS = 25;
-/** 距上次更新至少 24 小时（同时保证「每个用户每天最多 1 次」） */
+/**
+ * 距上次「成功」更新至少 24 小时。
+ * 它只约束成功路径：失败时游标与时间都不动，不能靠它保证失败后的重试节奏，
+ * 失败冷却与每日尝试上限在 note-throttle.ts 里单独实现。
+ */
 export const NOTE_MIN_INTERVAL_MS = 24 * 3600 * 1000;
 
 /** 评价人格的用词：笔记只写对讲解有用的观察，不评价人 */
@@ -31,8 +35,9 @@ export type ShouldUpdateNoteInput = {
 };
 
 /**
- * 新增查词数 ≥ 25，并且距上次更新 ≥ 24 小时。
+ * 新增查词数 ≥ 25，并且距上次「成功」更新 ≥ 24 小时。
  * 从来没有生成过笔记时，只需满足新增查词数 ≥ 25（PRD F3）。
+ * 失败后这个判断仍然为真（游标不动），调用方必须再加失败冷却，见 note-throttle.ts。
  */
 export function shouldUpdateNote(p: ShouldUpdateNoteInput): boolean {
   const newLookups = p.lookupsTotal - p.cursor;
@@ -132,7 +137,8 @@ export type NoteValidation = { ok: true; note: string } | { ok: false; reason: s
 /**
  * 校验笔记。
  * - 默认 `ai`：模型产出的笔记，全套规则；超长时先尝试截到最后一个句号，
- *   截完仍超长就拒绝。拒绝时调用方只记 note_last_error、游标不动，下次自动重试（§5.6）。
+ *   截完仍超长就拒绝。拒绝时调用方只记 note_last_error、游标不动，
+ *   下次是否重试由失败冷却决定（§5.6 / P32-修复）。
  * - `user`：用户手改的笔记（§5.1），只查长度和 Markdown —— 「不列英文词 / 不评价人格」
  *   是给模型的约束，不该拿来限制用户；超长直接拒绝，不擅自截断用户输入。
  */

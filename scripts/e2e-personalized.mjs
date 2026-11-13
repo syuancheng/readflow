@@ -50,6 +50,9 @@ const modelCalls = [];
 const noteCalls = [];
 const FAKE_NOTE =
   "词汇量约六千，技术语境的理解强于日常词汇；常在带长定语从句的句子上卡住，偏好简短直接的解释，很少追问例句，对介词搭配不太敏感。";
+// L 段用来复现「模型一直返回不合格笔记」：Markdown 会被 validateNote 拒绝
+const BAD_NOTE = "**不合格的笔记**";
+let badNoteMode = false;
 const fake = http.createServer((req, res) => {
   if (req.url.split("?")[0] === "/v1/chat/completions") {
     let buf = "";
@@ -66,7 +69,7 @@ const fake = http.createServer((req, res) => {
           object: "chat.completion",
           created: 0,
           model: "fake-model",
-          choices: [{ index: 0, message: { role: "assistant", content: FAKE_NOTE }, finish_reason: "stop" }],
+          choices: [{ index: 0, message: { role: "assistant", content: badNoteMode ? BAD_NOTE : FAKE_NOTE }, finish_reason: "stop" }],
         }));
         return;
       }
@@ -135,9 +138,26 @@ function lastCall() {
   return modelCalls[modelCalls.length - 1] ?? { messages: [] };
 }
 
-const shot = async (page, name, width) => {
+const shot = async (page, name, width, scrollSelector = null) => {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
   await page.waitForTimeout(250);
+  // 设置弹窗的右栏（.st-main）是内部滚动容器，fullPage 截图只会拍到它当前滚动到的位置。
+  // 需要先滚动到目标区域，否则「AI 眼中的你」在图片下方根本没进画面。
+  // 每次 shot 都重设视口，所以滚动必须在 setViewportSize 之后各做一次。
+  if (scrollSelector) {
+    await page.evaluate((sel) => {
+      document.querySelector(sel)?.scrollIntoView({ block: "start" });
+    }, scrollSelector);
+    await page.waitForTimeout(150);
+    const inView = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const modal = document.querySelector(".st-modal");
+      if (!el || !modal) return false;
+      const a = el.getBoundingClientRect(), b = modal.getBoundingClientRect();
+      return a.top < b.bottom && a.bottom > b.top;
+    }, scrollSelector);
+    check(`截图 ${name} ${width}px 已把 ${scrollSelector} 滚动到可见区域`, inView);
+  }
   const overflow = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
     client: document.documentElement.clientWidth,
@@ -146,6 +166,40 @@ const shot = async (page, name, width) => {
   await page.screenshot({ path: file, fullPage: true });
   check(`截图 ${name} ${width}px 无横向溢出`, overflow.scroll <= overflow.client,
     `${overflow.scroll} > ${overflow.client} → ${file}`);
+  // 390px 下弹窗右栏比新面板矮，fullPage 图只能拍到面板上半（按钮在下方可滚动处）。
+  // 再存一张面板特写：把面板底部滚进视口后再截元素，保证两种宽度都能完整看到老师笔记和两个操作按钮。
+  if (scrollSelector) {
+    const panelFile = path.join(SHOTS, `${name}-${width}-panel.png`);
+    // 390px 下整个面板比设置弹窗的右栏（.st-main）还高，元素截图必然裁掉底部，
+    // 所以改成「滚到面板底部 → 截当前视口的可视矩形」：保证老师笔记下半和两个操作按钮都入画。
+    await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      const scroller = el.closest(".st-main") ?? el.parentElement;
+      if (!scroller || scroller === el) return;
+      // 滚到面板底部（而不是顶部），底部按钮才会进入可见区。
+      const target = el.offsetTop + el.offsetHeight - scroller.clientHeight;
+      scroller.scrollTop = Math.max(0, target);
+    }, scrollSelector);
+    await page.waitForTimeout(150);
+    const box = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const scroller = el?.closest(".st-main");
+      if (!el || !scroller) return null;
+      const r = el.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      // 取「面板与滚动容器的交集」在视口里的矩形，就是实际能看到的部分
+      const top = Math.max(r.top, s.top);
+      const bottom = Math.min(r.bottom, s.bottom);
+      if (bottom <= top) return null;
+      return { x: Math.max(0, r.left), y: Math.max(0, top), width: Math.min(r.width, window.innerWidth), height: bottom - top };
+    }, scrollSelector);
+    if (box) {
+      await page.screenshot({ path: panelFile, clip: box });
+    } else {
+      await page.locator(scrollSelector).screenshot({ path: panelFile });
+    }
+  }
   return file;
 };
 
@@ -596,8 +650,8 @@ try {
     .evaluate((el) => getComputedStyle(el).backgroundColor);
   check("I3b 笔记块用紫色系底色 --rf-ai-soft（rgb 245,236,255）",
     noteBg === "rgb(245, 236, 255)", noteBg);
-  await shot(ownerPage, "learner-ai-view", 1440);
-  await shot(ownerPage, "learner-ai-view", 390);
+  await shot(ownerPage, "learner-ai-view", 1440, "#st-learner-ai-view");
+  await shot(ownerPage, "learner-ai-view", 390, "#st-learner-ai-view");
   // 关掉设置弹窗，后面 J/K 段要用阅读页
   await ownerPage.locator(".st-head .st-close").click();
   await ownerPage.waitForTimeout(200);
@@ -700,6 +754,47 @@ try {
       rowsBefore > 0 && rowsAfter === 0, `${rowsBefore} → ${rowsAfter}`);
   }
   await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: true } });
+
+  // ============ L. P32-修复：失败后的重试风暴（假模型一直返回不合格笔记） ============
+  // 用全新账号，避免 H/I 段已经消耗的尝试次数影响计数。
+  await sleep(600); // 等前几段的后台笔记任务都结束，别污染 noteCalls
+  const codeRetry = await invite();
+  await api("/api/auth/register", {
+    method: "POST",
+    body: { inviteCode: codeRetry, username: "p32_retry", phone: "13800138059", password: "p32-retry-2026" },
+  });
+  const retryCookie = cookieOf(await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account: "p32_retry", password: "p32-retry-2026" }),
+  }));
+  const retryId = q("select id from users where username = 'p32_retry'")[0].id;
+  {
+    const d = new Database(DB);
+    const ins = d.prepare(
+      "INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES (?, ?, 'lookup', 'reader', 'artifact', ?)",
+    );
+    d.transaction(() => {
+      for (let i = 0; i < 30; i++) ins.run(`l-lookup-${i}`, retryId, Date.now() - i * 1000);
+    })();
+    d.close();
+  }
+  badNoteMode = true;
+  const noteCallsLBefore = noteCalls.length;
+  for (let i = 0; i < 8; i++) {
+    await explain(retryCookie);
+    await sleep(250); // running Set 同时只允许一个任务，等它结束再发下一个
+  }
+  const noteCallsL = noteCalls.length - noteCallsLBefore;
+  const retryRow = q("select * from learner_profiles where user_id = ?", retryId)[0];
+  check("L1 假模型持续返回不合格笔记：连续 8 次满足条件的讲解只调用模型 1 次（失败冷却）",
+    noteCallsL === 1, `模型调用=${noteCallsL}（去掉冷却应为 8）`);
+  check("L2 失败写 note_last_error，游标不动、笔记仍为空",
+    retryRow.note === null && retryRow.note_lookup_cursor === 0 && Boolean(retryRow.note_last_error),
+    `note=${retryRow.note} cursor=${retryRow.note_lookup_cursor} err=${retryRow.note_last_error}`);
+  check("L3 后台笔记入口确实有失败冷却闸门（源码契约）",
+    /if \(noteBlockReason\(/.test(noteGenSrc) && /settleNoteAttempt\s*\(/.test(noteGenSrc));
+  badNoteMode = false;
 
   await ctxOwner.close();
 } catch (err) {

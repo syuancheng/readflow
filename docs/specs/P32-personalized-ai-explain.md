@@ -54,6 +54,7 @@
 - 发给模型的画像文本**不超过 600 个字符**（约 400 token），由 `buildLearnerBlock` 截断并保证这一点，并且要有单测。
 - 老师笔记的生成**不能阻塞**任何用户请求：在后台异步执行，失败只记日志。
 - 老师笔记**不扣**用户每天的免费 AI 次数（PRD F3）。
+- **失败不能形成重试风暴**（P32-修复）：失败后至少 1 小时不再调用模型，每个用户每天最多尝试 3 次（成功与否都算）；非流式 `completeChat` 统一 60 秒超时，超时按失败处理并进入上述冷却。
 
 ### 0.5 开关与回退（PRD §9、Q-D）
 - 站点级开关 `ai.personalized`（存在 settings 表的站级行 `user_id='local'`，值为 `on` / `off`，**默认 `on`**）。站长在「设置 → 模型」里切换，**马上生效，不需要重启**。
@@ -329,9 +330,14 @@ export function validateNote(raw: string): { ok: true; note: string } | { ok: fa
   - 同一个用户在**同一个进程里同时最多只跑一个**（用一个模块级的 `Set` 加锁）。
   - 先检查 `shouldUpdateNote`，满足才继续。
   - 模型用**站点配置**：`resolveProvider(allSettings(), process.env)`，不用用户自己的 Key，**不调用** `consumeAiQuota`。站点没配置模型时直接返回。
-  - 用 `buildNotePrompt` 生成提示词，非流式调用（参考 `providers.ts` 里测试连接用的非流式写法，或者收集 `streamTurns` 的全部输出），`temperature 0.3`，`maxTokens 400`。
+  - 用 `buildNotePrompt` 生成提示词，非流式调用（参考 `providers.ts` 里测试连接用的非流式写法，或者收集 `streamTurns` 的全部输出），`temperature 0.3`，`maxTokens 400`。`completeChat` 统一 60 秒硬超时，超时抛 `ProviderError(504)`。
   - 经过 `validateNote` 后，写入 `note / note_updated_at / note_lookup_cursor`，并把 `note_user_edited` 置回 0。
-  - 校验失败或出错时，写入 `note_last_error`，游标不动，下次满足条件时会自动重试。
+  - 校验失败、模型抛错或超时时，写入 `note_last_error`，游标不动。**因为游标不动，`shouldUpdateNote` 会一直为真，不能靠 24 小时间隔限制失败后的重试**（它只约束成功路径）。
+  - **失败冷却 / 每日上限（P32-修复）**：`src/lib/learner/note-throttle.ts` 是纯函数，`note-generator.ts` 用进程内的 `Map` 保存每个用户的当日次数与最近失败时间；调用模型前先过闸门，调用结束后（成功或失败）结算一次尝试。
+    - 失败后 `NOTE_FAILURE_COOLDOWN_MS`（1 小时）内不再调用模型；
+    - `NOTE_MAX_ATTEMPTS_PER_DAY`（3 次/用户/天）按本机本地日期清零，成功也计入；
+    - 不满足 25 次 + 24 小时、或站点没配模型，都不算一次尝试；
+    - 选进程内存而不是加列：不需要迁移、不增加失败时的 DB 写入，与已有的 `running` 并发锁同生命周期；服务重启后计数清空可接受，**权威的成功节奏仍是落库的 `note_updated_at` / `note_lookup_cursor`**。
 
 ### 5.7 学习档案接口（F1 / F6）
 - `GET /api/learner`：返回问卷题目定义、当前答案、`show_feedback`、合成后的水平（含依据，例如「最近 186 次查词 + 问卷」）、主要难点、笔记全文和更新时间、没有笔记的原因（`need_more_lookups: N` 或 `no_model`）、`needsSurvey`（首页卡片和注册后页面用来判断是否显示）。
@@ -402,6 +408,8 @@ export function validateNote(raw: string): { ok: true; note: string } | { ok: fa
 | `learner-model.test.ts` | 30 次的阈值（29 次和 30 次）；90 天窗口（89 天和 91 天）；第 20 百分位的计算和上下限；三种难点的阈值，以及最多 3 条；追问率的 10 分钟窗口；`mergeProfile` 在 29、30、65、99、100 次时的取值；`memory_reset_at` 之前的事件被排除 |
 | `learner-profile-text.test.ts` | 格式固定（逐行断言）；缺少的字段省略对应行；600 字符上限和截断顺序；「以往反馈」的显示条件（少于 5 次、占比没超过 50% 都不显示）；没有任何信息时返回 "" |
 | `learner-note.test.ts` | `shouldUpdateNote` 的四种组合（够数和不够数 × 满 24 小时和不满）以及从未生成过的情况；`validateNote` 的每一种拒绝原因，以及截到最后一个句号的情况；提示词里包含「不要列出具体单词」和「以统计为准」，用户改过笔记时提示词包含原文 |
+| `learner-note-throttle.test.ts`（P32-修复） | 1 小时冷却与每天 3 次的常量、边界、跨天清零；**假模型持续返回不合格笔记时连续 8 次请求只调用模型 1 次**、请求间隔超过 1 小时时最多 3 次；成功也计入次数 |
+| `providers-timeout.test.ts`（P32-修复） | `completeChat` 默认 60 秒；超时抛 `ProviderError(504)` 并 abort 底层请求（OpenAI / Anthropic 两条路径都测）；未超时时两种协议返回不变 |
 | `learner-flag.test.ts` | 环境变量 off 优先；设置为 off 或 on；没有设置时视为 on |
 | `ai-prompt.test.ts`（已有） | **原样通过**。另外新增一个测试文件 `ai-prompt-personalized.test.ts`：`personalized` 为假时，`buildSystemPrompt` 的结果和改动前一致（用快照断言）；为真时包含深度指引，并且仍然包含「释义：」第一行的约定；`learnerBlock` 出现在 user 消息开头，为空时 user 消息和原来逐字相同 |
 
