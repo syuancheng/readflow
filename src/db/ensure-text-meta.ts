@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { addColumnIfMissing } from "./alter";
 
 /**
  * 给已存在的 texts 表补「分类 + 阅读进度 + 已读完」列（P16 / P18）。
@@ -21,7 +22,7 @@ export function ensureTextMetaColumns(sqlite: Database.Database): void {
   const cols = sqlite.prepare("PRAGMA table_info(texts)").all() as { name: string }[];
   for (const [name, def] of META_COLUMNS) {
     if (!cols.some((c) => c.name === name)) {
-      sqlite.exec(`ALTER TABLE texts ADD COLUMN ${name} ${def}`);
+      addColumnIfMissing(sqlite, `ALTER TABLE texts ADD COLUMN ${name} ${def}`, "texts", name);
     }
   }
 }

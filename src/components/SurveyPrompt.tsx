@@ -21,7 +21,7 @@ export default function SurveyPrompt() {
     <div className="duo-card rf-survey-prompt">
       <span>花 30 秒告诉 AI 老师你的英语情况</span>
       <div className="flex items-center gap-2">
-        <Link href="/welcome?next=/" className="duo-btn-sm duo-btn-white">
+        <Link href="/welcome?next=/" className="duo-btn duo-btn-sm duo-btn-white">
           去填写
         </Link>
         <button type="button" className="rf-survey-close" aria-label="关闭提示" onClick={() => void dismiss()}>

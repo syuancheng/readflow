@@ -22,6 +22,7 @@
     "src/lib/annotation-range.ts",
     "src/lib/web-anchor.ts",
     "src/lib/learner/*.ts",
+    "src/db/alter.ts",
     "src/lib/cefr.ts",
     "src/lib/split.ts",
     "src/lib/tokenize.ts",

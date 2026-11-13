@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { InvalidAnchorError, ensureContextByAnchor, type WordAnchor } from "@/lib/word-store";
 import { currentUser } from "@/lib/auth";
+import { lookup } from "@/lib/dict";
+import { logLookup } from "@/lib/learner-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,9 +42,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    return NextResponse.json(
-      ensureContextByAnchor(
-        {
+    const saved = ensureContextByAnchor(
+      {
           word: body.word,
           textId: body.textId,
           paragraphId: body.paragraphId,
@@ -54,8 +55,26 @@ export async function POST(req: Request) {
           ...(typeof body.aiGloss === "string" ? { aiGloss: body.aiGloss } : {}),
         },
         user.id,
-      ),
-    );
+      );
+    // P32 F2：查词事件只用于行为推断，失败不能影响收词本身
+    try {
+      let dictHit: boolean | null = null;
+      try { dictHit = Boolean(lookup(body.quote).entry); } catch { /* 词典库没导入 */ }
+      const rc = (body as { repeatCount?: unknown }).repeatCount;
+      logLookup({
+        userId: user.id,
+        word: body.quote,
+        lemma: saved.lemma,
+        via: "reader",
+        contextId: saved.contextId,
+        textId: body.textId,
+        repeatCount: typeof rc === "number" ? rc : null,
+        dictHit,
+      });
+    } catch (err) {
+      console.error("[learner] 记录查词事件失败:", err);
+    }
+    return NextResponse.json(saved);
   } catch (err) {
     if (err instanceof InvalidAnchorError) {
       return NextResponse.json({ error: err.message }, { status: 404 });

@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { addColumnIfMissing } from "./alter";
 
 /**
  * 账户体系的表结构与老库迁移（P20）。
@@ -40,7 +41,7 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
   // SQLite 的 UNIQUE 允许多个 NULL，所以老账号不会互相冲突。
   const userCols = sqlite.prepare("PRAGMA table_info(users)").all() as { name: string }[];
   if (!userCols.some((c) => c.name === "phone")) {
-    sqlite.exec("ALTER TABLE users ADD COLUMN phone TEXT");
+    addColumnIfMissing(sqlite, "ALTER TABLE users ADD COLUMN phone TEXT", "users", "phone");
   }
   sqlite.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_phone ON users(phone)");
 
@@ -112,7 +113,7 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_explain_events_user_time ON explain_events(user_id, created_at);
   `);
   if (!userCols.some((c) => c.name === "invite_code")) {
-    sqlite.exec("ALTER TABLE users ADD COLUMN invite_code TEXT");
+    addColumnIfMissing(sqlite, "ALTER TABLE users ADD COLUMN invite_code TEXT", "users", "invite_code");
   }
 
   const table = sqlite
@@ -120,8 +121,11 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
     .get() as { name: string } | undefined;
 
   if (!table) {
+    // 空库构建时多个 worker 可能同时走到这里：都看见 settings 不存在，
+    // 再各自 CREATE TABLE 就会撞 "table settings already exists"。
+    // 和加列同理，用 IF NOT EXISTS 让第二个进程安静跳过。
     sqlite.exec(`
-      CREATE TABLE settings (
+      CREATE TABLE IF NOT EXISTS settings (
         user_id TEXT NOT NULL DEFAULT '${GLOBAL_USER}',
         key TEXT NOT NULL,
         value TEXT NOT NULL,

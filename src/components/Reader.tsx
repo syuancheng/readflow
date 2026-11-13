@@ -15,7 +15,7 @@ import { parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
 import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
-import type { AskKind } from "@/lib/learner/types";
+import type { AskKind, Feedback } from "@/lib/learner/types";
 
 /**
  * 一个 Block IR 落库后的一行。content 仍是「用户可见的纯文本」，
@@ -76,7 +76,14 @@ type AskReq = {
   /** P32：这次讲解的种类，随 /api/explain 送给服务端记事件 */
   askKind?: AskKind;
 };
-type Turn = ThreadTurn & { status: "loading" | "streaming" | "done" | "error"; req?: AskReq };
+type Turn = ThreadTurn & {
+  status: "loading" | "streaming" | "done" | "error";
+  req?: AskReq;
+  /** P32：这段回答的 id（X-RF-Answer-Id），回看历史时没有 */
+  answerId?: string;
+  feedback?: Feedback;
+  feedbackError?: string;
+};
 
 function turnsFrom(raw: string | null | undefined): Turn[] {
   return parseThread(raw).map((t) => ({ ...t, status: "done" as const }));
@@ -639,6 +646,18 @@ export default function Reader({
   focusParaId?: string;
 }) {
   const [pick, setPick] = useState<Pick | null>(null);
+  /** P32 F5：反馈行受「本人开关 + 站点开关」双重控制 */
+  const [feedbackEnabled, setFeedbackEnabled] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void fetch("/api/learner")
+      .then((r) => r.json())
+      .then((d: { showFeedback?: boolean; personalized?: boolean }) => {
+        if (alive) setFeedbackEnabled(d.showFeedback !== false && d.personalized !== false);
+      })
+      .catch(() => { /* 读不到就不显示反馈行，不影响阅读 */ });
+    return () => { alive = false; };
+  }, []);
   /** 拖动中的预览范围（按下即整词）；松手清空 */
   const [dragSel, setDragSel] = useState<{ pid: string; start: number; end: number } | null>(null);
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
@@ -1461,6 +1480,7 @@ export default function Reader({
             onClose={close}
             initialGloss={pick.initialGloss}
             initialDict={pick.initialDict}
+            feedbackEnabled={feedbackEnabled}
             /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境；
                「没看懂整句」信号（覆盖 ≥75% 词汇或句内生词密度 ≥75%）→ 前文额外带上一句 */
             aiContext={(() => {
@@ -1515,6 +1535,7 @@ function PickCard({
   initialDict,
   onAIGloss,
   aiContext,
+  feedbackEnabled,
 }: {
   pick: Pick;
   onClose: () => void;
@@ -1528,6 +1549,7 @@ function PickCard({
   onAIGloss?: (text: string) => void;
   /** AI 用的上下文（句子边界 + 按需带上一句；锚点的 40 字符窗口只够定位，会切碎句子） */
   aiContext: { prefix: string; suffix: string; withPrevSentence?: boolean };
+  feedbackEnabled: boolean;
 }) {
   const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
@@ -1715,7 +1737,8 @@ function PickCard({
       const reader = res.body?.getReader();
       if (!reader) throw new Error("无法读取流");
 
-      patch({ status: "streaming" });
+      // P32：这段回答的 id 用于「太浅 / 刚好 / 太深」反馈
+      patch({ answerId: res.headers.get("X-RF-Answer-Id") ?? undefined, status: "streaming" });
       const decoder = new TextDecoder();
       let text = "";
       while (true) {
@@ -1734,6 +1757,29 @@ function PickCard({
       // 被主动中止（切词 / 卸载）不是错误：半截答案不写回
       if (controller.signal.aborted) return;
       patch({ text: `[Error: ${err instanceof Error ? err.message : "AI 释义失败"}]`, status: "error" });
+    }
+  }
+
+  /** P32 F5：乐观更新，失败恢复原状并把原因放进 title */
+  async function rate(index: number, rating: Feedback) {
+    const prev = turnsRef.current[index]?.feedback;
+    const answerId = turnsRef.current[index]?.answerId;
+    if (!answerId) return;
+    const patchTurn = (p: Partial<Turn>) =>
+      updateTurns((list) => list.map((t, i) => (i === index ? { ...t, ...p } : t)));
+    patchTurn({ feedback: rating, feedbackError: undefined });
+    try {
+      const res = await fetch("/api/explain/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answerId, rating }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.error ?? "反馈没保存上");
+      }
+    } catch (err) {
+      patchTurn({ feedback: prev, feedbackError: err instanceof Error ? err.message : "反馈没保存上" });
     }
   }
 
@@ -1869,6 +1915,25 @@ function PickCard({
                 />
               )}
             </div>
+            {feedbackEnabled && t.status === "done" && !isNotAGloss(t.text) && t.answerId && (
+              <div className="rf-feedback-row" title={t.feedbackError}>
+                <span>这次讲得：</span>
+                {(["shallow", "right", "deep"] as const).map((r, j) => (
+                  <span key={r}>
+                    {j > 0 && <span aria-hidden> · </span>}
+                    <button
+                      type="button"
+                      className={`rf-feedback-btn ${t.feedback === r ? "rf-feedback-on" : ""}`}
+                      aria-pressed={t.feedback === r}
+                      title={t.feedbackError || undefined}
+                      onClick={() => void rate(i, r)}
+                    >
+                      {["太浅", "刚好", "太深"][j]}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}

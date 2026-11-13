@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { addColumnIfMissing } from "./alter";
 
 /**
  * 给已存在的 texts 表补 CEFR 列。
@@ -22,7 +23,7 @@ export function ensureCefrColumns(sqlite: Database.Database): void {
   const cols = sqlite.prepare("PRAGMA table_info(texts)").all() as { name: string }[];
   for (const [name, def] of CEFR_COLUMNS) {
     if (!cols.some((c) => c.name === name)) {
-      sqlite.exec(`ALTER TABLE texts ADD COLUMN ${name} ${def}`);
+      addColumnIfMissing(sqlite, `ALTER TABLE texts ADD COLUMN ${name} ${def}`, "texts", name);
     }
   }
 }

@@ -208,6 +208,26 @@ try {
   const oldPage = await ctxOld.newPage();
   await oldPage.goto(BASE, { waitUntil: "networkidle" });
   const cardBefore = await oldPage.locator(".rf-survey-prompt").count();
+  const cardStyle = await oldPage.locator(".rf-survey-prompt").evaluate((el) => ({
+    padding: getComputedStyle(el).paddingLeft,
+    linkClass: el.querySelector("a")?.className ?? "",
+  }));
+  check("C0 提示卡片有内边距，且「去填写」带基础的 .duo-btn 类",
+    parseFloat(cardStyle.padding) >= 16 && /(^|\s)duo-btn(\s|$)/.test(cardStyle.linkClass),
+    `padding=${cardStyle.padding} class=${cardStyle.linkClass}`);
+
+  // A 修复的「修复前」对照图：在同一个页面上把 DOM 还原成旧状态再截，随后 reload 恢复
+  await oldPage.evaluate(() => {
+    const card = document.querySelector(".rf-survey-prompt");
+    const link = card?.querySelector("a");
+    if (card) card.style.padding = "0";
+    if (link) link.className = "duo-btn-sm duo-btn-white";
+  });
+  for (const w of [1440, 390]) {
+    await oldPage.setViewportSize({ width: w, height: 900 });
+    await oldPage.screenshot({ path: path.join(SHOTS, `home-prompt-${w}-before.png`), fullPage: true });
+  }
+  await oldPage.reload({ waitUntil: "networkidle" });
   await shot(oldPage, "home-prompt", 1440);
   await shot(oldPage, "home-prompt", 390);
   await oldPage.getByRole("button", { name: "关闭提示" }).click();
@@ -302,6 +322,123 @@ try {
     (await ownerPage.getByRole("switch", { name: /太浅/ }).count()) === 1);
   await shot(ownerPage, "learner-settings", 1440);
   await shot(ownerPage, "learner-settings", 390);
+
+  // ===== G. 阶段二：行为推断 + 反馈行 =====
+  const doc = await api("/api/texts", {
+    cookie: owner,
+    method: "POST",
+    body: {
+      title: "P32 feedback text",
+      text: "The artifact was stored in a quiet archive. A careful engineer will scrutinize the deployment pipeline twice.",
+      format: "plain",
+    },
+  });
+  const textId = doc.data?.id;
+  const para = q("select id, content from paragraphs where text_id = ? order by idx", textId)[0];
+  const at = String(para?.content ?? "").toLowerCase().indexOf("artifact");
+  check("G0 导入测试文章成功", Boolean(textId) && at >= 0, `textId=${textId} at=${at}`);
+  const anchorBody = {
+    word: "artifact", textId, paragraphId: para.id, quote: "artifact",
+    start: at, end: at + 8,
+    prefix: para.content.slice(0, at), suffix: para.content.slice(at + 8),
+  };
+  for (let i = 0; i < 30; i++) {
+    await api("/api/contexts/ensure", { cookie: owner, method: "POST", body: anchorBody });
+  }
+  // 画像缓存 6 小时：清掉缓存让它按新事件重算（测试库内直接改，文档 §8.3 场景 7 同法）
+  {
+    const d = new Database(DB);
+    d.prepare("UPDATE learner_profiles SET stats = NULL, stats_updated_at = NULL WHERE user_id = (SELECT id FROM users WHERE username = 'p32_owner')").run();
+    d.close();
+  }
+  const learner2 = await api("/api/learner", { cookie: owner });
+  check("G1 30 次查词后给出行为推断，依据写着「最近 30 次查词」",
+    learner2.data?.stats?.lookups === 30 && /最近 30 次查词/.test(learner2.data?.level?.basisText ?? ""),
+    `lookups=${learner2.data?.stats?.lookups} basis=${learner2.data?.level?.basisText}`);
+  const lookupEvents = q("select count(*) n from explain_events where kind = 'lookup' and text_id = ?", textId)[0].n;
+  check("G2 查词事件带 text_id / context_id，且归属本人", lookupEvents === 30,
+    `事件=${lookupEvents}`);
+
+  // 客户端伪造别人的 textId / 不存在的 contextId：写入前必须被换成 null
+  const otherDoc = await api("/api/texts", {
+    cookie: oldCookie, method: "POST",
+    body: { title: "别人的文章", text: "Another artifact is here.", format: "plain" },
+  });
+  const forged = await explain(owner, { textId: otherDoc.data?.id, contextId: "not-a-real-context" });
+  const forgedId = forged.headers.get("x-rf-answer-id");
+  const forgedRow = q("select text_id, context_id from explain_events where id = ?", forgedId ?? "")[0];
+  check("G3 contextId / textId 不属于本人时存 null",
+    Boolean(forgedRow) && forgedRow.text_id === null && forgedRow.context_id === null,
+    JSON.stringify(forgedRow));
+
+  // 阅读页：点词 → 问 AI → 反馈行
+  await ownerPage.setViewportSize({ width: 1440, height: 900 });
+  await ownerPage.goto(`${BASE}/texts/${textId}`, { waitUntil: "load" });
+  await ownerPage.waitForTimeout(900);
+  const rect = await ownerPage.evaluate(() => {
+    const el = [...document.querySelectorAll("[data-pid] .w")].find((e) => e.textContent.trim() === "artifact");
+    if (!el) return null;
+    el.scrollIntoView({ block: "center" });
+    return el.getBoundingClientRect().toJSON();
+  });
+  check("G4 阅读页已 hydrate，能定位到测试词", Boolean(rect), JSON.stringify(rect));
+  if (rect) {
+    await ownerPage.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await ownerPage.waitForTimeout(1200);
+    await ownerPage.locator('.reader-note button:has-text("问 AI")').click();
+    await ownerPage.locator(".rf-ask-chip").first().click();
+    const feedbackVisible = await ownerPage
+      .waitForSelector(".reader-note .rf-feedback-row", { timeout: 12000 })
+      .then(() => true)
+      .catch(() => false);
+    check("G5 完成的讲解下面显示「这次讲得：太浅 · 刚好 · 太深」",
+      feedbackVisible && (await ownerPage.locator(".reader-note .rf-feedback-btn").count()) === 3,
+      `可见=${feedbackVisible}`);
+    await shot(ownerPage, "feedback-reader", 1440);
+    await shot(ownerPage, "feedback-reader", 390);
+
+    await ownerPage.setViewportSize({ width: 1440, height: 900 });
+    await ownerPage.locator('.reader-note .rf-feedback-btn:has-text("太深")').click();
+    await ownerPage.waitForTimeout(600);
+    const deepRows = q("select id, feedback from explain_events where feedback = 'deep'");
+    check("G6 点「太深」写进 explain_events", deepRows.length >= 1, JSON.stringify(deepRows.slice(-1)));
+    await ownerPage.locator('.reader-note .rf-feedback-btn:has-text("刚好")').click();
+    await ownerPage.waitForTimeout(600);
+    const rightRows = q("select id, feedback from explain_events where feedback = 'right'");
+    check("G7 改选「刚好」覆盖同一个 answerId",
+      rightRows.length >= 1 && q("select feedback from explain_events where id = ?", rightRows.at(-1)?.id)[0]?.feedback === "right" &&
+      q("select count(*) n from explain_events where feedback = 'deep'")[0].n === 0,
+      `right=${rightRows.length} deep=${q("select count(*) n from explain_events where feedback = 'deep'")[0].n}`);
+    const feedbackId = rightRows.at(-1)?.id;
+    const forbiddenFeedback = await api("/api/explain/feedback", {
+      cookie: friendCookie, method: "POST", body: { answerId: feedbackId, rating: "shallow" },
+    });
+    check("G8 别人的 answerId 反馈返回 404", forbiddenFeedback.status === 404,
+      `status=${forbiddenFeedback.status}`);
+
+    // 关掉本人开关后，重新问一次也不再显示反馈行
+    await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: false } });
+    await ownerPage.reload({ waitUntil: "load" });
+    await ownerPage.waitForTimeout(900);
+    const rect2 = await ownerPage.evaluate(() => {
+      const el = [...document.querySelectorAll("[data-pid] .w")].find((e) => e.textContent.trim() === "artifact");
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      return el.getBoundingClientRect().toJSON();
+    });
+    if (rect2) {
+      await ownerPage.mouse.click(rect2.x + rect2.width / 2, rect2.y + rect2.height / 2);
+      await ownerPage.waitForTimeout(1200);
+      await ownerPage.locator('.reader-note button:has-text("问 AI")').click();
+      await ownerPage.locator(".rf-ask-chip").first().click();
+      await ownerPage.waitForFunction(
+        () => (document.querySelector(".reader-note .rf-md")?.textContent ?? "").includes("假模型讲解"),
+        null, { timeout: 12000 },
+      ).catch(() => {});
+      check("G9 关闭「讲解下方显示反馈行」后不再出现", (await ownerPage.locator(".reader-note .rf-feedback-row").count()) === 0);
+    }
+    await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: true } });
+  }
   await ctxOwner.close();
 } catch (err) {
   fail++;

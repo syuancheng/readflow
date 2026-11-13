@@ -15,3 +15,9 @@
 - **墨墨单卡字数上限：普通 1800 / 专业 4000**（PRD 写的 4500 超过官方上限，是文档错误，以 1800/4000 为准）。P33 阶段一起执行。
 - P32 §0.5「开关 off 时提示词逐字不变」与 P33 §7.1「制卡建议在开关 on/off 都追加」的冲突：按 P33 §7.1 处理，到 P33 阶段一更新 P32 的快照测试并在汇报写明。
 - PRD 与实现说明冲突时以 PRD 的产品行为为准，并在汇报里写明冲突点。
+- 结论必须核对原文：`deploy/release-local.sh` 第 43–47 行确有 `sqlite3 data/readflow.db ".backup ..."` 快照代码；本仓库多个文件被 `file` 误判类型，Bash `grep` 会静默返回空，不能据此断言「文件里没有」。
+
+## 本机构建/测试的环境坑（2026-11-13）
+- `NODE_OPTIONS` 注入的 WorkBuddy shim 会拦截 Next build 的删除操作，导致空库构建偶发 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` / `FSPathMakeRefWithOptions failed (-43)`，与项目代码无关。当次命令用 `env -u NODE_OPTIONS DB_PATH=<隔离空库> npm run build` 稳定通过（不改全局配置）。
+- 后台任务被 Stop 后可能留 `.next/lock`，用 `mv .next/lock .next/lock-stale` 移走再构建。
+- 生产构建把服务端代码打包进 `.next`：改 TS 源码后只跑 `next start` 不会生效，变异验证要么重新 build，要么写直接 require `.unit/` 的单测。

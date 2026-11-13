@@ -42,6 +42,7 @@ test("开关打开时：中文人设换成 L1–L4 深度指引，旧的「同�
 test("开关打开时：monolingual 人设同样换成个性化深度指引，且不破坏后面的硬性禁止", () => {
   const p = buildSystemPrompt("en", true, "steer", { personalized: true });
   assert.ok(p.includes("student profile") && p.includes("L1 gives only the meaning"));
+  assert.ok(p.includes("Do not output your reasoning."), "英文人设不能丢掉「不输出推理过程」的约束");
   assert.ok(!p.includes("Second ask on the same sentence"));
   assert.equal(p.slice(0, p.indexOf("Depth is yours")), EN_BEFORE.slice(0, EN_BEFORE.indexOf("Depth is yours")));
   assert.equal(

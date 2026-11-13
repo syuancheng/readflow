@@ -23,7 +23,6 @@ export async function GET() {
 
   const row = getLearner(user.id);
   const profile = getProfileForPrompt(user.id);
-  // 阶段一只记讲解事件，查词事件由阶段二补上；这里从 0 起算即可
   const lookupCount = lookupCountSince(user.id, row.memory_reset_at);
   const modelReady = resolveProvider(allSettings(), process.env) !== null;
 
@@ -40,10 +39,17 @@ export async function GET() {
           cefr: profile.level.cefr,
           vocab: profile.level.vocab,
           basis: profile.level.basis ?? null,
-          basisText: profile.survey ? "问卷" : "还没有足够的信息",
+          basisText:
+            [
+              (profile.stats?.lookups ?? 0) >= 30 ? `最近 ${profile.stats?.lookups} 次查词` : null,
+              profile.survey ? "问卷" : null,
+            ]
+              .filter(Boolean)
+              .join(" + ") || "还没有足够的信息",
         }
       : null,
-    difficulties: [],
+    stats: profile.stats,
+    difficulties: profile.stats?.difficulties ?? [],
     note: row.note,
     noteUpdatedAt: row.note_updated_at,
     noteReason: !modelReady

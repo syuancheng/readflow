@@ -7,11 +7,13 @@
 import { randomUUID } from "node:crypto";
 import { sqlite } from "../db/sqlite";
 import { allSettings } from "./settings-store";
+import { frequencyRank } from "./dict";
 import { isPersonalizedOn } from "./learner/flag";
 import { narrowAskKind } from "./learner/ask-kind";
 import { normalizeSurvey, surveyPrior, type SurveyAnswers } from "./learner/survey";
 import { buildLearnerBlock } from "./learner/profile-text";
-import type { AskKind, LearnerLevel } from "./learner/types";
+import { computeBehaviorStats, mergeProfile } from "./learner/model";
+import type { AskKind, BehaviorStats, Feedback, LearnerEvent, LearnerLevel } from "./learner/types";
 
 export type LearnerRow = {
   user_id: string;
@@ -31,6 +33,8 @@ export type LearnerRow = {
 };
 
 const SELECT_ONE = "SELECT * FROM learner_profiles WHERE user_id = ?";
+/** 行为推断缓存 6 小时；单次讲解请求只查一行 + 最多 500 条事件 */
+const STATS_TTL_MS = 6 * 3600 * 1000;
 
 export function getLearner(userId: string): LearnerRow {
   const found = sqlite.prepare(SELECT_ONE).get(userId) as LearnerRow | undefined;
@@ -86,15 +90,59 @@ export function setShowFeedback(userId: string, show: boolean): void {
     .run(show ? 1 : 0, Date.now(), userId);
 }
 
+/* ------------------------------------------------------------------ *
+ * 归属校验：contextId / textId 都来自客户端，写入事件前必须确认属于本人。
+ * 不属于一律存 null（阶段二算追问率依赖这两个字段，不能串到别人身上）。
+ * ------------------------------------------------------------------ */
+function ownedRefs(
+  userId: string,
+  contextId?: string | null,
+  textId?: string | null,
+): { contextId: string | null; textId: string | null; textCefr: string | null } {
+  const ctx = contextId
+    ? sqlite
+        .prepare(
+          `SELECT c.id FROM contexts c JOIN user_words w ON w.id = c.user_word_id
+           WHERE c.id = ? AND w.user_id = ?`,
+        )
+        .get(contextId, userId)
+    : null;
+  const txt = textId
+    ? (sqlite
+        .prepare("SELECT cefr_level FROM texts WHERE id = ? AND user_id = ?")
+        .get(textId, userId) as { cefr_level: string | null } | undefined)
+    : undefined;
+  return {
+    contextId: ctx ? (contextId as string) : null,
+    textId: txt ? (textId as string) : null,
+    textCefr: txt?.cefr_level ?? null,
+  };
+}
+
 export type PromptProfile = {
   level: LearnerLevel | null;
   survey: SurveyAnswers | null;
-  /** 阶段二接入行为推断；阶段一恒为 null，画像只来自问卷 */
-  stats: null;
+  stats: BehaviorStats | null;
   note: string | null;
   showFeedback: boolean;
   personalized: boolean;
 };
+
+/** 6 小时内复用缓存，过期就按最近 90 天、清空记忆之后的事件重算 */
+function cachedStats(row: LearnerRow, now: number): BehaviorStats {
+  if (row.stats && row.stats_updated_at && now - row.stats_updated_at < STATS_TTL_MS) {
+    try {
+      return JSON.parse(row.stats) as BehaviorStats;
+    } catch {
+      /* 缓存坏了就重算 */
+    }
+  }
+  const s = computeBehaviorStats(loadEvents(row.user_id, now), now, row.memory_reset_at);
+  sqlite
+    .prepare("UPDATE learner_profiles SET stats = ?, stats_updated_at = ?, updated_at = ? WHERE user_id = ?")
+    .run(JSON.stringify(s), now, now, row.user_id);
+  return s;
+}
 
 /**
  * 一次讲解请求前读一次档案。只查一行 + 纯函数换算，远低于 §0.4 的 20ms 预算。
@@ -103,11 +151,12 @@ export type PromptProfile = {
 export function getProfileForPrompt(userId: string): PromptProfile {
   const row = getLearner(userId);
   const survey = surveyOf(row);
+  const stats = cachedStats(row, Date.now());
   const prior = survey ? surveyPrior(survey) : null;
   return {
-    level: prior ? { ...prior, basis: "survey" } : null,
+    level: mergeProfile(prior, stats),
     survey,
-    stats: null,
+    stats,
     note: row.note,
     showFeedback: row.show_feedback === 1,
     personalized: isPersonalizedOn(allSettings(userId), process.env),
@@ -140,12 +189,13 @@ export type ExplainEventInput = {
 export function logExplain(input: ExplainEventInput): string {
   const id = randomUUID();
   const word = input.word.slice(0, 120);
+  const refs = ownedRefs(input.userId, input.contextId, input.textId);
   sqlite
     .prepare(
       `INSERT INTO explain_events
          (id, user_id, kind, ask_kind, via, word, is_phrase, dict_hit, repeat_count,
-          text_id, context_id, created_at)
-       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          text_id, text_cefr, context_id, created_at)
+       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -156,11 +206,74 @@ export function logExplain(input: ExplainEventInput): string {
       /\s/.test(word.trim()) ? 1 : 0,
       typeof input.dictHit === "boolean" ? (input.dictHit ? 1 : 0) : null,
       typeof input.repeatCount === "number" ? input.repeatCount : null,
-      input.textId ?? null,
-      input.contextId ?? null,
+      refs.textId,
+      refs.textCefr,
+      refs.contextId,
       Date.now(),
     );
   return id;
+}
+
+export type LookupEventInput = {
+  userId: string;
+  word: string;
+  lemma?: string | null;
+  via: "reader" | "extension";
+  contextId?: string | null;
+  textId?: string | null;
+  repeatCount?: number | null;
+  dictHit?: boolean | null;
+  isPhrase?: boolean;
+};
+
+/** 写一条查词事件。词频排名查不到、词典库没导入都不影响查词本身。 */
+export function logLookup(input: LookupEventInput): string {
+  const id = randomUUID();
+  const word = input.word.slice(0, 120);
+  const lemma = (input.lemma ?? word).slice(0, 120);
+  const refs = ownedRefs(input.userId, input.contextId, input.textId);
+  let freqRank: number | null = null;
+  try {
+    freqRank = frequencyRank(lemma);
+  } catch {
+    /* 词典库缺失时保持 null */
+  }
+  const isPhrase = input.isPhrase ?? /\s/.test(word.trim());
+  sqlite
+    .prepare(
+      `INSERT INTO explain_events
+         (id, user_id, kind, via, word, lemma, freq_rank, is_phrase, dict_hit,
+          repeat_count, text_id, text_cefr, context_id, created_at)
+       VALUES (?, ?, 'lookup', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      input.userId,
+      input.via,
+      word,
+      lemma,
+      freqRank,
+      isPhrase ? 1 : 0,
+      typeof input.dictHit === "boolean" ? (input.dictHit ? 1 : 0) : null,
+      typeof input.repeatCount === "number" ? input.repeatCount : null,
+      refs.textId,
+      refs.textCefr,
+      refs.contextId,
+      Date.now(),
+    );
+  return id;
+}
+
+/** 反馈可改选，以最后一次为准；事件不存在 / 不属于本人 / 不是讲解都返回 false */
+export function setFeedback(userId: string, eventId: string, feedback: Feedback): boolean {
+  const row = sqlite
+    .prepare("SELECT kind FROM explain_events WHERE id = ? AND user_id = ?")
+    .get(eventId, userId) as { kind: string } | undefined;
+  if (!row || row.kind !== "explain") return false;
+  sqlite
+    .prepare("UPDATE explain_events SET feedback = ?, feedback_at = ? WHERE id = ?")
+    .run(feedback, Date.now(), eventId);
+  return true;
 }
 
 /** 「再查 N 个词」的计数：清空记忆之前的事件不算 */
@@ -173,14 +286,37 @@ export function lookupCountSince(userId: string, since: number): number {
   return Number(r.n);
 }
 
-/** 阶段二算行为画像用：最近 90 天、最多 500 条，且只在「清空记忆」之后 */
-export function loadEvents(userId: string, now: number = Date.now()): Record<string, unknown>[] {
+type EventRow = {
+  kind: string;
+  ask_kind: string | null;
+  freq_rank: number | null;
+  is_phrase: number;
+  repeat_count: number | null;
+  text_cefr: string | null;
+  feedback: string | null;
+  created_at: number;
+  context_id: string | null;
+};
+
+/** 最近 90 天、最多 500 条，且只在「清空记忆」之后 */
+export function loadEvents(userId: string, now: number = Date.now()): LearnerEvent[] {
   const row = getLearner(userId);
-  return sqlite
+  const rows = sqlite
     .prepare(
       `SELECT * FROM explain_events
        WHERE user_id = ? AND created_at >= ? AND created_at > ?
        ORDER BY created_at DESC LIMIT 500`,
     )
-    .all(userId, now - 90 * 24 * 3600 * 1000, row.memory_reset_at) as Record<string, unknown>[];
+    .all(userId, now - 90 * 24 * 3600 * 1000, row.memory_reset_at) as EventRow[];
+  return rows.map((r) => ({
+    kind: r.kind === "explain" ? "explain" : "lookup",
+    askKind: (r.ask_kind as AskKind) ?? undefined,
+    freqRank: r.freq_rank,
+    isPhrase: r.is_phrase === 1,
+    repeatCount: r.repeat_count,
+    textCefr: r.text_cefr,
+    feedback: (r.feedback as Feedback) ?? null,
+    createdAt: r.created_at,
+    contextId: r.context_id,
+  }));
 }

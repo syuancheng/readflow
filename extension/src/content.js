@@ -137,6 +137,10 @@
     .rf-turn-text ul { margin: 4px 0 8px; padding-left: 20px; }
     .rf-turn-text li { margin: 2px 0; }
     .rf-turn-text code { background: #f7f7f7; border-radius: 4px; padding: 0 3px; }
+    .rf-feedback-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px; font-size: 12px; color: #6b6b6b; }
+    .rf-fb-dot { color: #afafaf; }
+    .rf-feedback-btn { border: 0; background: transparent; padding: 0; color: #6b6b6b; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .rf-feedback-btn.rf-feedback-on { color: #7a3cc0; font-weight: 700; }
     .rf-gloss-line { color: #3f7f00; }
     .rf-gap { height: 6px; }
     .rf-retry { margin-top: 6px; border: 1px solid #e5e5e5; background: #fff; border-radius: 8px;
@@ -257,6 +261,10 @@
         return;
       }
       if (act === "ask-custom") return askCustom();
+      if (act === "rate") {
+        void rateTurn(Number(btn.dataset.idx), btn.dataset.rating);
+        return;
+      }
       if (act === "retry") {
         const i = Number(btn.dataset.idx);
         const turn = threadTurns[i];
@@ -517,7 +525,43 @@
         : RF.renderMarkdown(t.text || (t.status === "loading" ? "生成中…" : ""));
     const retry =
       t.status === "error" ? `<button class="rf-retry" data-act="retry" data-idx="${i}">重试</button>` : "";
-    return `<div class="rf-turn">${ask}<div class="rf-turn-text" data-turn="${i}">${body}</div>${retry}</div>`;
+    return `<div class="rf-turn">${ask}<div class="rf-turn-text" data-turn="${i}">${body}</div>${retry}${feedbackHtml(t, i)}</div>`;
+  }
+
+  /** P32 F5：只在「已完成 + 有 answerId + 两个开关都开着」时显示反馈行 */
+  function feedbackHtml(t, i) {
+    if (!panelState?.feedbackEnabled || t.status !== "done" || !t.answerId) return "";
+    if (!t.text || /^\[Error:/.test(t.text)) return "";
+    const labels = [["shallow", "太浅"], ["right", "刚好"], ["deep", "太深"]];
+    const parts = labels
+      .map(([r, label], j) => {
+        const dot = j > 0 ? '<span class="rf-fb-dot"> · </span>' : "";
+        const on = t.feedback === r ? " rf-feedback-on" : "";
+        return `${dot}<button class="rf-feedback-btn${on}" data-act="rate" data-idx="${i}" data-rating="${r}" aria-pressed="${t.feedback === r}">${label}</button>`;
+      })
+      .join("");
+    const titleAttr = t.feedbackError ? ' title="' + esc(t.feedbackError) + '"' : "";
+    return '<div class="rf-feedback-row"' + titleAttr + '><span>这次讲得：</span>' + parts + "</div>";
+  }
+
+  /** 乐观更新；失败恢复原状并把原因放进 title，不打断阅读 */
+  async function rateTurn(i, rating) {
+    const turn = threadTurns[i];
+    if (!turn || !turn.answerId) return;
+    const prev = turn.feedback;
+    turn.feedback = rating;
+    turn.feedbackError = "";
+    renderPanel();
+    try {
+      await send({ type: "rf:feedback", body: { answerId: turn.answerId, rating } });
+    } catch (err) {
+      const cur = threadTurns[i];
+      if (cur === turn) {
+        cur.feedback = prev;
+        cur.feedbackError = err instanceof Error ? err.message : "反馈没保存上";
+        renderPanel();
+      }
+    }
   }
 
   /** 选项文案与出现条件与 Reader.tsx 的 askOptions 一字不差 */
@@ -534,16 +578,17 @@
     if (!hasDefault) {
       opts.push({
         label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思",
-        req: {},
+        req: { askKind: "default" },
       });
     } else if (repeat >= 2) {
-      opts.push({ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true } });
+      opts.push({ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true, askKind: "word_only" } });
     }
     if (!isWholeSentence) {
       opts.push({
         label: "整句没看懂",
         req: {
           ask: "整句没看懂",
+          askKind: "whole_sentence",
           word: sentence,
           wholeSentence: true,
           prompt:
@@ -556,6 +601,7 @@
       label: "讲讲句子结构",
       req: {
         ask: "讲讲句子结构",
+        askKind: "structure",
         prompt: `讲讲这句话的结构：主干（主语、谓语、宾语或表语）是什么，「${s.quote}」在其中充当什么、修饰谁。`,
       },
     });
@@ -563,6 +609,7 @@
       label: "再给个例句",
       req: {
         ask: "再给个例句",
+        askKind: "example",
         prompt: `用「${s.quote}」在这句里的这个意思，再给一个简单的英文例句，并附中文翻译。`,
       },
     });
@@ -680,6 +727,7 @@
       wordId: "",
       sourceUrl: location.href,
       imported: false,
+      feedbackEnabled: false,
       error: "",
       busy: false,
     };
@@ -700,6 +748,7 @@
       wordId: p.wordId || "",
       sourceUrl: location.href,
       imported: p.imported === true,
+      feedbackEnabled: p.feedbackEnabled === true,
       error: "",
       busy: false,
     };
@@ -773,6 +822,7 @@
           suffix: "",
           language: config?.language || "en",
           monolingual: false,
+          askKind: req.askKind || "default",
           ...(req.prompt ? { prompt: req.prompt } : {}),
         }
       : {
@@ -782,6 +832,7 @@
           ...(s.aiContext?.withPrevSentence ? { withPrevSentence: true } : {}),
           language: config?.language || "en",
           monolingual: false,
+          askKind: req.askKind || "default",
           ...(req.prompt ? { prompt: req.prompt } : {}),
           ...(signals ? { signals } : {}),
         };
@@ -811,6 +862,10 @@
       }
       const turn = threadTurns[index];
       if (!turn || turn !== turnRef) return;
+      if (msg && typeof msg.answerId === "string") {
+        turn.answerId = msg.answerId;
+        return;
+      }
       if (msg && typeof msg.chunk === "string") {
         turn.text += msg.chunk;
         if (turn.text.includes(STREAM_RESET)) turn.text = turn.text.split(STREAM_RESET).pop() || "";
@@ -857,7 +912,7 @@
     const q = (input?.value || "").trim();
     if (!q || !panelState || panelState.busy) return;
     menuOpen = false;
-    triggerAI({ ask: q, prompt: q });
+    triggerAI({ ask: q, prompt: q, askKind: "custom" });
   }
 
   /** 每段回答结束后把「所有成功且不是错误提示的回答」整串写回这条记录 */
@@ -963,7 +1018,7 @@
       const payload = res?.json ?? res;
       if (!payload?.quote) throw new Error(payload?.error || "记录失败");
       applyPayload(payload);
-      if (payload.autoExplain) triggerAI({});
+      if (payload.autoExplain) triggerAI({ askKind: "auto" });
       void resync();
     } catch (err) {
       if (!panelState || seq !== panelSeq) return;

@@ -730,6 +730,42 @@ try {
       `流式=${aiDone} 落库=${Boolean(savedGloss)} 长度=${savedGloss?.length ?? 0}`,
     );
 
+    // P32 阶段二：插件侧栏里同样有「太浅 · 刚好 · 太深」反馈行，且计入画像
+    const fbRow = await p31.evaluate(() => {
+      const row = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-feedback-row");
+      return {
+        has: Boolean(row),
+        labels: [...(row?.querySelectorAll("button") ?? [])].map((b) => (b.textContent || "").trim()),
+      };
+    });
+    check(
+      "D5c 插件侧栏的 AI 回答下面也有反馈行，文案与网站一致",
+      fbRow.has && fbRow.labels.join(" · ") === "太浅 · 刚好 · 太深",
+      `has=${fbRow.has} labels=${fbRow.labels.join("/")}`,
+    );
+    {
+      const shots = path.join(ROOT, ".verify", "personas", "shots");
+      fs.mkdirSync(shots, { recursive: true });
+      for (const w of [1440, 390]) {
+        await p31.setViewportSize({ width: w, height: 900 });
+        await p31.screenshot({ path: path.join(shots, `feedback-extension-${w}.png`) });
+      }
+      await p31.setViewportSize({ width: 1100, height: 800 });
+    }
+    await p31.evaluate(() => {
+      const btn = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector('.rf-feedback-btn[data-rating="deep"]');
+      btn?.click();
+    });
+    for (let i = 0; i < 20; i++) {
+      if (q("select count(*) n from explain_events where feedback = 'deep'")[0]?.n > 0) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    check(
+      "D5d 插件点「太深」写进 explain_events（与网站同一张表）",
+      q("select count(*) n from explain_events where feedback = 'deep'")[0]?.n > 0,
+      `deep=${q("select count(*) n from explain_events where feedback = 'deep'")[0]?.n}`,
+    );
+
     // D6 「问 AI」的选项文案与网站阅读页一字不差。
     // 这里同一句里已经问过两次（先 rehearse 再这个短语），所以会多出「只讲这个词」一项，
     // 最后三项与状态无关，顺序固定。

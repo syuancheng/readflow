@@ -3667,6 +3667,7 @@ a:focus-visible,
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
+  padding: 24px;
   margin-bottom: 24px;
 }
 .rf-survey-close {
@@ -3682,4 +3683,31 @@ a:focus-visible,
 }
 .rf-survey-close:hover {
   background: var(--rf-bg-hover);
+}
+
+/* P32 F5：每段 AI 讲解下方的「太浅 · 刚好 · 太深」反馈行 */
+.rf-feedback-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}
+.rf-feedback-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rf-feedback-btn:hover {
+  color: var(--rf-ai-text);
+}
+.rf-feedback-btn.rf-feedback-on {
+  color: var(--rf-ai-text);
+  font-weight: 700;
 }

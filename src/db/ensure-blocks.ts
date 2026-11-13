@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { addColumnIfMissing } from "./alter";
 
 /**
  * 结构化导入（Block IR）需要的列。
@@ -23,7 +24,7 @@ function ensure(sqlite: Database.Database, table: "texts" | "paragraphs", column
   const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   for (const [name, def] of columns) {
     if (!cols.some((c) => c.name === name)) {
-      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+      addColumnIfMissing(sqlite, `ALTER TABLE ${table} ADD COLUMN ${name} ${def}`, table, name);
     }
   }
 }

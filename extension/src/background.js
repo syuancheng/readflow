@@ -272,6 +272,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return apiRequest({ path: "/api/extension/gloss", method: "POST", body: msg.body || {} });
       case "rf:word":
         return apiRequest({ path: `/api/extension/word/${encodeURIComponent(String(msg.id || ""))}` });
+      case "rf:feedback":
+        // 覆盖写入，重试幂等（同一段讲解只能反馈一次，可以改选）
+        return apiRequest({ path: "/api/extension/feedback", method: "POST", body: msg.body || {} }, 2);
       case "rf:openReadflow": {
         const config = await getConfig();
         // 只允许打开 ReadFlow 自己的页面（网页里的 content script 也能发这个消息）
@@ -321,6 +324,9 @@ chrome.runtime.onConnect.addListener((port) => {
         port.postMessage({ error: errorText(text, res.status) });
         return;
       }
+      // P32：响应头先给 content script，反馈行靠这个 id 定位「这段回答」
+      const answerId = res.headers.get("X-RF-Answer-Id");
+      if (answerId) port.postMessage({ answerId });
       if (!res.body) {
         port.postMessage({ error: "浏览器不支持流式响应，请升级 Chrome" });
         return;
