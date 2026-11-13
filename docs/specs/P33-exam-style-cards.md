@@ -340,7 +340,7 @@ validateCard(spec: CardSpec, ctx: {
   - 「这个词在其他文章里也查过 N 次」：N 从 contexts 里统计，统计的是**别的** text_id。
   - 「这个词已经做过卡（已推送到墨墨）」：取值同 `carded_before`。
 - **`src/lib/cards/suggestion.ts`**（纯函数）：
-  - `splitCardSuggestion(text) → { body: string; suggestion: string | null }`：只识别最后一个非空行，并且必须以「制卡建议：」开头。超过 30 个字的理由截断。
+  - `splitCardSuggestion(text) → { body: string; suggestion: string | null }`：只识别最后一个非空行，并且必须以「制卡建议：」开头。**不截断**（2026-11-13 用户决定修订）：「不超过 30 个字」只写在给模型的提示词里，模型写长了也完整显示，因为截到半句话会让人看不懂。
   - **所有读取讲解内容的地方都必须先调用它**，把建议行去掉：
     - `src/lib/gloss.ts` 的 `inlineGloss`、`cardGloss`、`shortGloss` 的输入。
     - `ai-thread.ts` 序列化时可以保留原文，但 `parseThread` 之后，给界面显示时要拆开。

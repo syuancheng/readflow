@@ -1209,27 +1209,14 @@ body {
   border-top: 1px solid var(--duo-border);
 }
 
-/* 右栏唯一的主按钮：展开 / 收起问题选项（紧凑 pill，行为不变） */
-.rf-ai-primary {
-  display: inline-flex;
+/* 「问 AI」与「做成卡片」并排：同一个按钮底盘（.duo-btn-sm.duo-btn-white），紫色只做点缀（规范 §1.1） */
+.rf-ai-actions {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  height: 36px;
-  padding: 0 16px;
-  border: 1px solid var(--rf-purple-500);
-  border-bottom-width: 4px;
-  border-radius: var(--rf-radius-md);
-  background: var(--rf-ai-soft);
-  color: var(--rf-ai-text);
-  font-size: var(--rf-text-sm);
-  font-weight: 700;
-  cursor: pointer;
-  transition: filter var(--rf-duration-fast) var(--rf-ease);
 }
-/* 紫色 = AI（规范 §1.1）；阅读页的绿色主操作留给「标记已读完」之外的场景 */
-.rf-ai-primary:hover:not(:disabled) { filter: brightness(0.97); }
-.rf-ai-primary:disabled { opacity: 0.55; cursor: default; }
+.rf-ai-btn { color: var(--rf-ai-text); }
 
 /* 「问 AI」展开后的选项面板（P26）：一行一条，像选择题 */
 .rf-ask-menu {
@@ -3631,11 +3618,38 @@ a:focus-visible,
   min-width: 0;
 }
 .rf-survey-q-title {
+  display: block;
   font-size: var(--rf-text-sm);
   font-weight: 600;
   color: var(--rf-text-primary);
   padding: 0;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+.rf-survey-hint { margin-left: 4px; font-size: var(--rf-text-xs); font-weight: 400; color: var(--rf-text-secondary); }
+/* 下拉：沿用全站输入框，高度与按钮对齐 */
+.rf-survey-select { min-height: 44px; padding-top: 8px; padding-bottom: 8px; cursor: pointer; }
+/* 多选：一项一行的复选框，选中用中性灰（规范 §1.3，不用绿） */
+.rf-survey-checks { display: flex; flex-direction: column; gap: 8px; }
+.rf-survey-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  font-size: var(--rf-text-md);
+  font-weight: 600;
+  color: var(--rf-text-primary);
+  cursor: pointer;
+}
+.rf-survey-check:hover { border-color: var(--rf-border-strong); }
+.rf-survey-check-on { background: var(--rf-bg-selected); }
+.rf-survey-check input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--rf-text-primary); }
+@media (min-width: 640px) {
+  .rf-survey-checks { flex-direction: row; flex-wrap: wrap; }
+  .rf-survey-check { min-width: 0; }
 }
 .rf-survey-prompt {
   display: flex;
@@ -3732,65 +3746,54 @@ a:focus-visible,
   color: var(--rf-text-secondary);
 }
 
-/* ===== P33：阅读页「做成卡片」（紫色 = AI，规范 §1.1；右栏已有主操作，不用绿色）===== */
-.rf-card-action {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 12px;
-}
+/* ===== P33：阅读页「做成卡片」（紫色 = AI，只做点缀；右栏已有主操作，不用绿色）===== */
+/* 建议条：浅紫底 + 次要灰正文，只有「建议做成卡片」几个字用 AI 紫；排到按钮组上方，整句完整显示 */
 .rf-card-suggest {
+  order: -1;
+  flex: 1 0 100%;
   margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-ai-soft);
   font-size: var(--rf-text-sm);
   line-height: 1.5;
-  color: var(--rf-ai-text);
+  color: var(--rf-text-secondary);
+  overflow-wrap: anywhere;
 }
-.rf-card-btn {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--rf-purple-500);
-  border-bottom-width: 3px;
-  border-radius: var(--rf-radius-md);
-  font-size: var(--rf-text-sm);
-  font-weight: 700;
-  cursor: pointer;
-}
+.rf-card-suggest b { font-weight: 700; color: var(--rf-ai-text); }
 .rf-card-btn-suggest {
   background: var(--rf-ai-soft);
   color: var(--rf-ai-text);
 }
-.rf-card-btn:disabled { opacity: 0.55; cursor: default; }
-.rf-card-done {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  font-size: var(--rf-text-sm);
-  font-weight: 700;
-  color: var(--rf-text-secondary);
-}
-.rf-card-link {
-  color: var(--rf-ai-text);
-  text-decoration: underline;
-}
+.rf-card-btn[disabled] { opacity: 0.7; cursor: default; }
 .rf-card-again {
   border: 0;
   background: none;
-  padding: 0;
+  padding: 0 4px;
   font: inherit;
+  font-size: var(--rf-text-sm);
   font-weight: 600;
   color: var(--rf-text-secondary);
   text-decoration: underline;
   cursor: pointer;
 }
 .rf-card-error {
+  flex: 1 0 100%;
   margin: 0;
   font-size: var(--rf-text-xs);
   color: var(--rf-danger-text);
 }
+/* 生成中的小转圈 */
+.rf-spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--rf-radius-full);
+  animation: rf-spin 0.8s linear infinite;
+}
+@keyframes rf-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rf-spin { animation-duration: 2.4s; } }
 
 /* ===== P33：待推送（词库）/ 卡片预览 / 卡片修改 ===== */
 .pc-wrap { display: flex; flex-direction: column; gap: 16px; }

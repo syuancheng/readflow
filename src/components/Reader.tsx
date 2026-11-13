@@ -1962,14 +1962,29 @@ function PickCard({
 
       {/* 唯一的 AI 入口（P26）：合并原来的「AI 释义」和「追问」。展开后选一个常见问题，或自己输入 */}
       <div className="rf-ai-section">
-        <button
-          className="rf-ai-primary"
-          disabled={busy}
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          ✨ 问 AI {menuOpen ? "▴" : "▾"}
-        </button>
+        <div className="rf-ai-actions">
+          <button
+            type="button"
+            className="duo-btn duo-btn-sm duo-btn-white rf-ai-btn"
+            disabled={busy}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ✨ 问 AI {menuOpen ? "▴" : "▾"}
+          </button>
+          {/* P33 F2：做成卡片。建议理由取最后一段讲解末尾的「制卡建议：」；answerId 取最近一段，让做卡接着讲解对话走 */}
+          {!busy && (
+            <MakeCardButton
+              contextId={pick.contextId}
+              answerId={[...turns].reverse().find((t) => t.answerId)?.answerId}
+              suggestion={
+                splitCardSuggestion(
+                  [...turns].reverse().find((t) => t.status === "done" && !isNotAGloss(t.text))?.text ?? "",
+                ).suggestion
+              }
+            />
+          )}
+        </div>
         {menuOpen && !busy && (
           <div className="rf-ask-menu">
             {askOptions.map((o) => (
@@ -2015,18 +2030,6 @@ function PickCard({
               </button>
             </div>
           </div>
-        )}
-        {/* P33 F2：做成卡片。建议理由取最后一段讲解末尾的「制卡建议：」；answerId 取最近一段，让做卡接着讲解对话走 */}
-        {!busy && (
-          <MakeCardButton
-            contextId={pick.contextId}
-            answerId={[...turns].reverse().find((t) => t.answerId)?.answerId}
-            suggestion={
-              splitCardSuggestion(
-                [...turns].reverse().find((t) => t.status === "done" && !isNotAGloss(t.text))?.text ?? "",
-              ).suggestion
-            }
-          />
         )}
       </div>
 

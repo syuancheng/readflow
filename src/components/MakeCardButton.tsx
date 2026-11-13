@@ -18,7 +18,7 @@ const POLL_MAX = 120; // 4 分钟；服务端 5 分钟没结束会自己标失�
 /**
  * 阅读页右栏「＋ 做成卡片」按钮（P33 F2）。
  * - 生成在后台进行，不阻塞阅读：状态每 2 秒查一次，切到别的词也不会中断（服务端自己在跑）。
- * - 有 AI 建议时用紫色强调；没有建议时用普通白色小按钮；不用绿色（右栏已有主操作）。
+ * - 与「问 AI」同一个按钮底盘（按下有反馈）；有建议时只多一点紫色点缀，不用绿色（右栏已有主操作）。
  */
 export default function MakeCardButton({
   contextId,
@@ -107,16 +107,23 @@ export default function MakeCardButton({
 
   const state = st?.state ?? "none";
   const suggested = suggestion !== null && (state === "none" || state === "failed");
+  // 与「问 AI」同一个按钮底盘（.duo-btn-sm.duo-btn-white）：高度、圆角、按下反馈都一致；
+  // 有建议时只多一点紫色点缀。各状态在原位变化，不整块换成别的元素。
+  const cls = `duo-btn duo-btn-sm duo-btn-white rf-card-btn${suggested ? " rf-card-btn-suggest" : ""}`;
 
+  // 注意：这是一个片段，直接放进父级的 flex 行里；建议条用 order:-1 排到按钮组上方
   return (
-    <div className="rf-card-action">
+    <>
       {suggestion !== null && state === "none" && (
-        <p className="rf-card-suggest">💡 建议做成卡片：{suggestion}</p>
+        <p className="rf-card-suggest">
+          💡 <b>建议做成卡片：</b>
+          {suggestion}
+        </p>
       )}
       {state === "none" && (
         <button
           type="button"
-          className={suggested ? "rf-card-btn rf-card-btn-suggest" : "duo-btn-sm duo-btn-white"}
+          className={cls}
           disabled={!contextId || starting}
           title={contextId ? undefined : "正在保存这条记录…"}
           onClick={() => void generate(false)}
@@ -125,44 +132,41 @@ export default function MakeCardButton({
         </button>
       )}
       {state === "generating" && (
-        <button type="button" className="duo-btn-sm duo-btn-white" disabled aria-busy="true">
+        <button type="button" className={cls} disabled aria-busy="true">
+          <span className="rf-spin" aria-hidden />
           正在做卡…
         </button>
       )}
       {state === "ready" && (
-        <span className="rf-card-done">
-          <span>✓ 已做成 {st?.count} 张卡 · </span>
-          <a className="rf-card-link" href={`/words?status=pending&word=${encodeURIComponent(st?.wordId ?? "")}`}>
-            查看
+        <>
+          <a className={cls} href={`/words?status=pending&word=${encodeURIComponent(st?.wordId ?? "")}`}>
+            ✓ 已做成 {st?.count} 张卡 · 查看
           </a>
           <button type="button" className="rf-card-again" onClick={again}>
             再做一组
           </button>
-        </span>
+        </>
       )}
       {state === "failed" && (
-        <button
-          type="button"
-          className={suggested ? "rf-card-btn rf-card-btn-suggest" : "duo-btn-sm duo-btn-white"}
-          title={st?.error ?? undefined}
-          onClick={() => void generate(true)}
-        >
+        <button type="button" className={cls} title={st?.error ?? undefined} onClick={() => void generate(true)}>
           做卡失败，重试
         </button>
       )}
       {state === "pushed" && (
-        <span className="rf-card-done">
-          <span>✓ 已在墨墨</span>
+        <>
+          <button type="button" className={cls} disabled>
+            ✓ 已在墨墨
+          </button>
           <button type="button" className="rf-card-again" onClick={again}>
             再做一组
           </button>
-        </span>
+        </>
       )}
       {error && (
         <p className="rf-card-error" role="alert">
           {error}
         </p>
       )}
-    </div>
+    </>
   );
 }

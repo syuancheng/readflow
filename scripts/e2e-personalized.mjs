@@ -317,13 +317,13 @@ try {
   await ctxOwner.addCookies([{ name: "readflow_session", value: owner, domain: "127.0.0.1", path: "/" }]);
   const ownerPage = await ctxOwner.newPage();
   await ownerPage.goto(`${BASE}/welcome?next=/`, { waitUntil: "networkidle" });
-  const chip = (label) => ownerPage.getByRole("button", { name: label, exact: true });
-  await chip("已工作 3–10 年").click();
-  await chip("大学英语六级").click();
-  await chip("550 以上").click();
-  await chip("技术文档和编程").click();
-  await chip("偶尔查个生词").click();
-  await chip("越简洁越好，点到为止").click();
+  // 问卷是表单控件：单选用下拉框，阅读目的用复选框
+  await ownerPage.locator("#survey-identity").selectOption({ label: "已工作 3–10 年" });
+  await ownerPage.locator("#survey-exam").selectOption({ label: "大学英语六级" });
+  await ownerPage.locator("#survey-examScore").selectOption({ label: "550 以上" });
+  await ownerPage.getByLabel("技术文档和编程").check();
+  await ownerPage.locator("#survey-readingFeel").selectOption({ label: "偶尔查个生词" });
+  await ownerPage.locator("#survey-stylePref").selectOption({ label: "越简洁越好，点到为止" });
   await ownerPage.getByRole("button", { name: "开始阅读" }).click();
   await ownerPage.waitForURL((u) => u.pathname === "/", { timeout: 10000 }).catch(() => {});
   const ownerLearner = await api("/api/learner", { cookie: owner });

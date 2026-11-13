@@ -6,8 +6,11 @@
 /** 建议行必须以这个前缀开头（模型按系统提示词的约定输出） */
 export const SUGGESTION_PREFIX = "制卡建议：";
 
-/** 理由上限 30 个字（PRD F1）；超过截断 */
-export const SUGGESTION_REASON_CAP = 30;
+/**
+ * 理由建议 ≤30 个字（PRD F1），这个数字只写在给模型的提示词里。
+ * 模型写长了也**完整显示、不截断**（用户 2026-11-13 决定）：截到半句话会让人看不懂。
+ */
+export const SUGGESTION_REASON_HINT = 30;
 
 export type SplitResult = { body: string; suggestion: string | null };
 
@@ -16,7 +19,7 @@ export type SplitResult = { body: string; suggestion: string | null };
  * - 建议行在中间 → 不识别（那是正文，不是建议）。
  * - 多行都带前缀 → 只取最后一行（模型约定建议只出现在最后一行）。
  * - 只有建议行没有正文 → body 为空串。
- * - 理由超过 30 个字截断到 30 字。
+ * - 理由原样返回（只去掉首尾空白），不按字数截断。
  */
 export function splitCardSuggestion(text: string | null | undefined): SplitResult {
   if (!text) return { body: "", suggestion: null };
@@ -34,9 +37,7 @@ export function splitCardSuggestion(text: string | null | undefined): SplitResul
   const last = lines[lastIdx].trim();
   if (last.startsWith(SUGGESTION_PREFIX)) {
     const reason = last.slice(SUGGESTION_PREFIX.length).trim();
-    const suggestion = Array.from(reason).length > SUGGESTION_REASON_CAP
-      ? `${Array.from(reason).slice(0, SUGGESTION_REASON_CAP).join("")}…`
-      : reason || null; // 前缀后没有内容 → 不当建议处理
+    const suggestion = reason || null; // 前缀后没有内容 → 不当建议处理
     if (suggestion === null) return { body: text.trimEnd(), suggestion: null };
     return { body: lines.slice(0, lastIdx).join("\n").trimEnd(), suggestion };
   }
