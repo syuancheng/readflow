@@ -17,6 +17,8 @@ import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 import type { AskKind, Feedback } from "@/lib/learner/types";
 import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
+import MakeCardButton from "@/components/MakeCardButton";
+import { splitCardSuggestion } from "@/lib/cards/suggestion";
 
 /**
  * 一个 Block IR 落库后的一行。content 仍是「用户可见的纯文本」，
@@ -85,6 +87,16 @@ type Turn = ThreadTurn & {
   feedback?: Feedback;
   feedbackError?: string;
 };
+
+/**
+ * 讲解末尾的「制卡建议：」行不属于正文（P33 F1）：显示时去掉，理由单独放到按钮上方。
+ * 流式输出时这一行可能只到一半（「制卡」「制卡建议」），也一并先藏起来，免得闪一下。
+ */
+function shownText(t: { text: string; status: string }): string {
+  const { body } = splitCardSuggestion(t.text);
+  if (t.status !== "streaming") return body;
+  return body.replace(/\n+制(卡(建(议(：.*)?)?)?)?$/, "");
+}
 
 function turnsFrom(raw: string | null | undefined): Turn[] {
   return parseThread(raw).map((t) => ({ ...t, status: "done" as const }));
@@ -1917,7 +1929,7 @@ function PickCard({
               )}
             </div>
             <div className="rf-md text-sm leading-relaxed text-ink">
-              <MarkdownText text={t.text} />
+              <MarkdownText text={shownText(t)} />
               {t.status === "streaming" && (
                 <span
                   className="inline-block w-1.5 h-4 ml-1 align-middle animate-pulse"
@@ -2003,6 +2015,18 @@ function PickCard({
               </button>
             </div>
           </div>
+        )}
+        {/* P33 F2：做成卡片。建议理由取最后一段讲解末尾的「制卡建议：」；answerId 取最近一段，让做卡接着讲解对话走 */}
+        {!busy && (
+          <MakeCardButton
+            contextId={pick.contextId}
+            answerId={[...turns].reverse().find((t) => t.answerId)?.answerId}
+            suggestion={
+              splitCardSuggestion(
+                [...turns].reverse().find((t) => t.status === "done" && !isNotAGloss(t.text))?.text ?? "",
+              ).suggestion
+            }
+          />
         )}
       </div>
 

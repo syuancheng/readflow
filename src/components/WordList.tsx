@@ -7,13 +7,14 @@
  * 一行一个词：勾选 / 发音 / 星标 / 原句片段（生词加粗）/ 简短中文 / 来源文章；
  * 点一行展开详情（音标、词性、完整释义、这篇文章里的全部原句、删除）。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
 import type { ExportBadge, Snippet } from "@/lib/word-library";
 import { textFragmentUrl } from "@/lib/web-anchor";
+import PendingCards, { fetchPendingTotal } from "@/components/PendingCards";
 
 export type WordContextRow = {
   id: string;
@@ -84,16 +85,11 @@ function sourceTarget(c: WordContextRow): { href: string; external: boolean } | 
 }
 
 /** 状态筛选：不绑死墨墨，以后接 Anki 等也是这几档 */
-type StatusFilter = "all" | "starred" | "todo" | "done";
+type StatusFilter = "all" | "starred" | "todo" | "done" | "pending";
 type TypeFilter = "all" | "word" | "phrase";
 type SortKey = "recent" | "oldest" | "alpha";
 
 const DELETED_KEY = "__deleted__";
-
-/** 导出页只导这些词（词 id 是 UUID，一两百个放进网址也不超长） */
-function exportHref(ids: string[]): string {
-  return `/export?ids=${ids.join(",")}`;
-}
 
 function SpeakerIcon() {
   return (
@@ -107,12 +103,28 @@ function SpeakerIcon() {
 export default function WordList({
   words: initial,
   articles,
+  cardsEnabled = false,
+  initialStatus,
+  focusWordId,
 }: {
   words: WordRow[];
   articles: ArticleOption[];
+  /** P33：做卡开关（站长在设置里切）；关闭时隐藏「待推送」，已有草稿保留 */
+  cardsEnabled?: boolean;
+  /** URL ?status=pending 直接打开待推送 */
+  initialStatus?: string;
+  /** URL ?word= 直接展开这个词 */
+  focusWordId?: string;
 }) {
   const [words, setWords] = useState(initial);
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [status, setStatus] = useState<StatusFilter>(cardsEnabled && initialStatus === "pending" ? "pending" : "all");
+  const [pendingTotal, setPendingTotal] = useState<number | null>(null);
+  useEffect(() => {
+    if (!cardsEnabled) return;
+    void fetchPendingTotal().then((n) => {
+      if (n !== null) setPendingTotal(n);
+    });
+  }, [cardsEnabled]);
   const [type, setType] = useState<TypeFilter>("all");
   const [article, setArticle] = useState<string>("");
   const [query, setQuery] = useState("");
@@ -222,6 +234,7 @@ export default function WordList({
     ["starred", "★ 星标", counts.starred],
     ["todo", "未导出", counts.todo],
     ["done", "已导出", counts.done],
+    ...(cardsEnabled ? ([["pending", "待推送", pendingTotal ?? 0]] as [StatusFilter, string, number][]) : []),
   ];
 
   return (
@@ -295,6 +308,9 @@ export default function WordList({
           </div>
         </div>
 
+        {status === "pending" ? (
+          <PendingCards articleKey={article} focusWordId={focusWordId} onTotal={setPendingTotal} />
+        ) : (
         <div className="wl-table">
           {/* 工具栏 */}
           <div className="wl-toolbar">
@@ -321,18 +337,11 @@ export default function WordList({
                 </div>
               )}
             </div>
-            {/* 只导出勾选的词（墨墨没有删除接口，不提供「一键全部」）；想导所有未导出的：左侧「未导出」→ 全选 */}
-            {shownSelected.length > 0 ? (
-              <Link
-                href={exportHref(shownSelected.map((w) => w.id))}
-                className="duo-btn duo-btn-primary duo-btn-sm wl-export-btn"
-              >
-                📤 导出选中的 {shownSelected.length} 个<span className="wl-hide-sm">到墨墨</span>
-              </Link>
-            ) : (
-              <span className="duo-btn duo-btn-sm wl-export-btn wl-export-btn-off" title="先勾选要导出的词" aria-disabled="true">
-                📤 导出到墨墨
-              </span>
+            {/* P33：旧的「导出到墨墨」已并入「待推送」：先在阅读页做成卡片，再到这里检查、推送 */}
+            {cardsEnabled && (
+              <button type="button" className="duo-btn duo-btn-sm wl-export-btn" onClick={() => setStatus("pending")}>
+                🃏 待推送{pendingTotal ? ` (${pendingTotal})` : ""}
+              </button>
             )}
             <span className="ml-auto text-sm font-bold text-ink-faint whitespace-nowrap">{shown.length} 个词</span>
             <select
@@ -494,9 +503,6 @@ export default function WordList({
                               {b.app} ✓ {b.cardTypes.join("·")}
                             </span>
                           ))}
-                          <Link href={exportHref([w.id])} className="wl-export-one">
-                            📤 导出这个词
-                          </Link>
                           <button className="wl-delete" onClick={() => remove([w.id])} title="彻底删除">
                             🗑 删除
                           </button>
@@ -551,6 +557,7 @@ export default function WordList({
             </ul>
           )}
         </div>
+        )}
       </section>
     </div>
   );

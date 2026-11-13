@@ -60,6 +60,9 @@ type SettingsPayload = {
   aiQuota?: { ownKey: boolean; siteAvailable: boolean; limit: number; usedToday: number };
   /** P32：站级「个性化讲解」开关 */
   aiPersonalized?: "on" | "off";
+  /** P33：站级做卡开关（站长改）、本人的墨墨会员档位 */
+  cardsEnabled?: "on" | "off";
+  markjiMembership?: "basic" | "pro";
   profile?: Profile;
 };
 
@@ -922,6 +925,25 @@ export default function SettingsDialog({
                           </button>
                         </div>
                       )}
+                      {data?.canEditSite === true && (
+                        <div className="st-reading-row st-reading-row-static">
+                          <span className="st-reading-text">
+                            <b>做卡</b>
+                            <span>关闭后隐藏阅读页的「＋ 做成卡片」和词库的「待推送」，已有草稿保留</span>
+                          </span>
+                          <button
+                            type="button"
+                            className={`st-switch ${data?.cardsEnabled !== "off" ? "on" : ""}`}
+                            role="switch"
+                            aria-checked={data?.cardsEnabled !== "off"}
+                            aria-label="做卡"
+                            disabled={isBusy}
+                            onClick={() => void put({ cardsEnabled: data?.cardsEnabled === "off" ? "on" : "off" })}
+                          >
+                            <span className="st-switch-knob" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <p className="st-security">
@@ -1027,6 +1049,33 @@ export default function SettingsDialog({
                             清除
                           </button>
                         )}
+                      </div>
+                    </div>
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">墨墨会员等级</h3>
+                          <p className="st-panel-desc">决定每张卡最多多少字：普通 1800 字，专业 4000 字。</p>
+                        </div>
+                        <div className="rf-seg" role="group" aria-label="墨墨会员等级">
+                          {(
+                            [
+                              ["basic", "普通"],
+                              ["pro", "专业"],
+                            ] as const
+                          ).map(([k, label]) => (
+                            <button
+                              key={k}
+                              type="button"
+                              className={`duo-tab ${data?.markjiMembership === k ? "duo-tab-active" : ""}`}
+                              aria-pressed={data?.markjiMembership === k}
+                              disabled={isBusy}
+                              onClick={() => void put({ markjiMembership: k })}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                     <p className="st-security">

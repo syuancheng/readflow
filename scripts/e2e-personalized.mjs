@@ -30,6 +30,9 @@ const LEGACY_ZH = fs.readFileSync(
   "utf8",
 );
 
+// P33：系统提示词末尾多了制卡建议段（有意追加），比对 P32 快照时先去掉
+const stripCardRule = (p) => p.replace(/\n*【制卡建议（可选，只在最后一行）】[\s\S]*$/, "").replace(/\n+$/, "");
+
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
   if (ok) pass++; else fail++;
@@ -372,8 +375,8 @@ try {
   const userOff = lastCall().messages[1]?.content ?? "";
   check("E1 站长关闭开关后，system 与 P32 改动前逐字相同，user 不再带档案",
     off.status === 200 && off.data?.aiPersonalized === "off" &&
-    sysOff === LEGACY_ZH && !userOff.includes("学生档案"),
-    `status=${off.status} sysSame=${sysOff === LEGACY_ZH} hasBlock=${userOff.includes("学生档案")}`);
+    stripCardRule(sysOff) === LEGACY_ZH.replace(/\n+$/, "") && !userOff.includes("学生档案"),
+    `status=${off.status} sysSame=${stripCardRule(sysOff) === LEGACY_ZH.replace(/\n+$/, "")} hasBlock=${userOff.includes("学生档案")}`);
   const offWelcome = await api("/api/learner", { cookie: oldCookie });
   check("E2 开关关闭不影响问卷收集（问卷数据照常读得到）", offWelcome.status === 200,
     `status=${offWelcome.status} personalized=${offWelcome.data?.personalized}`);

@@ -1309,3 +1309,17 @@ P20 之后所有旧 E2E 脚本（裸 `fetch` / 裸 `goto`）都会得到一整�
 3. 导出改成后台任务（11.6）——现在是同步串行，词一多请求就长；应该有 job 表 + 进度轮询。
 
 （`lookup()` 的 lemma 判断已于 2026-11-02 修掉，见 2.3。）
+
+---
+
+## P33 更新：做卡与推送（取代旧的「导出」）
+
+> 本文件前面讲 `cardgen.ts` / `/api/export` / 导出页 / `verify:cards` / `push:one` 的部分是 P33 之前的设计，**已全部下线**：
+> `src/lib/cardgen.ts`、`ExportPanel`、`/export` 页（现在只跳转到 `/words?status=pending`）、`/api/export`（一律 410）都已删除或改成跳转。`exports` 表和 `src/lib/markji.ts` 保留。
+
+- **纯函数（`src/lib/cards/`，单测编译）**：`spec`（AI 输出解析）、`validate`（11 条校验，渲染后统一查长度）、`render`（CardSpec → 墨墨语法 + 预览）、`lint`、`style`（考试风格）、`prompt`、`explain-cache`、`rate-limit`、`quota`、`flags`、`suggestion`、`edit`。
+- **有副作用的**：`store`（数据库读取）、`generate`（出题流程）、`pusher`（推送任务）。
+- **流程**：阅读页讲解 → 末尾「制卡建议：」行（`splitCardSuggestion` 拆出）→ 「＋ 做成卡片」→ `POST /api/cards/generate`（命中讲解缓存则前缀复用）→ 草稿 → 词库「待推送」检查 / 修改 / 换一道 → `POST /api/cards/push`（后台任务，限速、重试、防重复）→ 墨墨。
+- **防重复建卡**：建卡前标 `pushing`；重启遗留或 5xx 后先在章节末尾认领「内容一致且未登记」的卡，找不到才重建。
+- 一个词的多张卡在 `exports` 里用 `card_type = exam:<卡 id>` 区分。
+- 测试：`npm run test:coverage`（含 cards）、`scripts/e2e-cards.mjs`（后端 + 推送，假模型 + 假墨墨）、`scripts/e2e-cards-ui.mjs`（前端冒烟 + 截图）。

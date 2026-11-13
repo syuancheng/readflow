@@ -23,7 +23,7 @@ export default function BottomNav() {
             item.href === "/"
               ? path === "/" || path.startsWith("/texts")
               : item.href === "/words"
-                ? path.startsWith("/words") || path.startsWith("/export")
+                ? path.startsWith("/words")
                 : path.startsWith(item.href);
           return (
             <Link

@@ -30,7 +30,7 @@ export function countWords(text: string): number {
  *
  * 卡片正面要放「原句」，而 contexts 只存了段内偏移和前后各 40 字符——
  * 40 字符常常不够一整句（长句会被截断），所以这里回到段落原文按句读边界扩。
- * 返回的 offset 是给 cardgen 做「把目标词单独包起来 / 替换成空格」用的。
+ * 返回的 offset 是给做卡（制卡）做「把目标词单独包起来 / 替换成空格」用的。
  */
 export function sentenceAround(
   text: string,

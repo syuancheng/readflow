@@ -105,6 +105,15 @@ test("导出标签：只算成功的，按应用分组，卡片类型按固定�
   assert.deepEqual(exportBadges([{ target: "markji", cardType: "qa", status: "failed" }]), []);
 });
 
+test("导出标签：P33 的考试卡（exam:<卡 id>）一个词有多张也只写一次「考试卡」，排在旧卡型之后", () => {
+  const badges = exportBadges([
+    { target: "markji", cardType: "exam:b", status: "done" },
+    { target: "markji", cardType: "exam:a", status: "done" },
+    { target: "markji", cardType: "qa", status: "done" },
+  ]);
+  assert.deepEqual(badges, [{ target: "markji", app: "墨墨", cardTypes: ["看词猜义", "考试卡"] }]);
+});
+
 test("原句片段：生词单独拿出来，两侧按词截断、补省略号", async () => {
   const { snippetAround } = await import("../../src/lib/word-library");
   const sent =

@@ -303,3 +303,96 @@ export type Context = typeof contexts.$inferSelect;
 export type ExportRow = typeof exports.$inferSelect;
 export type LearnerProfile = typeof learnerProfiles.$inferSelect;
 export type ExplainEvent = typeof explainEvents.$inferSelect;
+
+/**
+ * P33：阅读时做卡。建表在 db/ensure-auth.ts，这里只给 drizzle 查询用的形状，
+ * 两处字段一一对应（spec §3）。
+ */
+export const cardSets = sqliteTable(
+  "card_sets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    userWordId: text("user_word_id").notNull(),
+    contextId: text("context_id").notNull(),
+    textId: text("text_id").notNull(),
+    status: text("status").notNull(),
+    error: text("error"),
+    mergedFrom: text("merged_from"),
+    regenCount: integer("regen_count").notNull().default(0),
+    cacheHitTokens: integer("cache_hit_tokens"),
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_card_sets_user").on(t.userId, t.createdAt)],
+);
+
+export const cards = sqliteTable(
+  "cards",
+  {
+    id: text("id").primaryKey(),
+    setId: text("set_id")
+      .notNull()
+      .references(() => cardSets.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    seq: integer("seq").notNull(),
+    spec: text("spec").notNull(),
+    content: text("content").notNull(),
+    status: text("status").notNull().default("draft"),
+    needsReview: text("needs_review"),
+    edited: integer("edited").notNull().default(0),
+    markjiDeckId: text("markji_deck_id"),
+    markjiChapterId: text("markji_chapter_id"),
+    markjiCardId: text("markji_card_id"),
+    pushError: text("push_error"),
+    pushedAt: integer("pushed_at"),
+    withdrawnAt: integer("withdrawn_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [index("idx_cards_user_status").on(t.userId, t.status)],
+);
+
+export const ttsAudio = sqliteTable("tts_audio", {
+  hash: text("hash").primaryKey(),
+  text: text("text").notNull(),
+  voice: text("voice").notNull(),
+  speed: text("speed").notNull(),
+  filePath: text("file_path").notNull(),
+  bytes: integer("bytes").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const markjiMedia = sqliteTable("markji_media", {
+  userId: text("user_id").notNull(),
+  audioHash: text("audio_hash").notNull(),
+  fileId: text("file_id").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const cardUsage = sqliteTable("card_usage", {
+  userId: text("user_id").notNull(),
+  day: text("day").notNull(),
+  count: integer("count").notNull().default(0),
+});
+
+export const pushJobs = sqliteTable("push_jobs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  deckId: text("deck_id").notNull(),
+  chapterMode: text("chapter_mode").notNull(),
+  chapterId: text("chapter_id"),
+  cardIds: text("card_ids").notNull(),
+  done: integer("done").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  status: text("status").notNull(),
+  error: text("error"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export type CardSet = typeof cardSets.$inferSelect;
+export type CardRow = typeof cards.$inferSelect;
+export type PushJob = typeof pushJobs.$inferSelect;

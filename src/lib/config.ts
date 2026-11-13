@@ -82,6 +82,11 @@ export const SETTINGS_KEYS = {
   extensionToken: "extension.token",
   /** P32：站级「个性化讲解」开关，默认 on；关掉后讲解规则回退到旧的按同句次数 */
   aiPersonalized: "ai.personalized",
+  /** P33：站级做卡开关（默认 on）与听力零件开关（默认 off），只有主账号能改 */
+  cardsEnabled: "cards.enabled",
+  cardsListening: "cards.listening",
+  /** P33：墨墨会员档位 basic / pro，**按账号**（决定每张卡的字数上限），不回退站级 */
+  markjiMembership: "markji.membership",
   // 个人资料：按账号隔离（profile.* 不回退站级），见 lib/settings-store.ts
   profileName: "profile.displayName",
   profileFullName: "profile.fullName",

@@ -517,12 +517,28 @@
     return parts.join("") || `<p class="rf-muted">这条没有释义内容</p>`;
   }
 
+  /**
+   * 讲解末尾的「制卡建议：」行不属于正文（P33 F1，与网页端 splitCardSuggestion 同一规则）：
+   * 只认最后一个非空行；流式输出时这一行可能只到一半，一并先藏起来。
+   * 第一阶段插件还没有「做成卡片」按钮，所以这里只负责把它从显示里去掉。
+   */
+  function shownText(t) {
+    const lines = String(t.text || "").split(/\r?\n/);
+    let last = lines.length - 1;
+    while (last >= 0 && !lines[last].trim()) last--;
+    if (last < 0) return "";
+    const line = lines[last].trim();
+    const partial = t.status === "streaming" && /^制(卡(建(议)?)?)?$/.test(line);
+    if (line.startsWith("制卡建议：") || partial) return lines.slice(0, last).join("\n").trimEnd();
+    return String(t.text || "");
+  }
+
   function turnHtml(t, i) {
     const ask = t.ask ? `<div class="rf-turn-ask">${esc(t.ask)}</div>` : "";
     const body =
       t.status === "error"
         ? esc(t.text || "（失败）")
-        : RF.renderMarkdown(t.text || (t.status === "loading" ? "生成中…" : ""));
+        : RF.renderMarkdown(shownText(t) || (t.status === "loading" ? "生成中…" : ""));
     const retry =
       t.status === "error" ? `<button class="rf-retry" data-act="retry" data-idx="${i}">重试</button>` : "";
     return `<div class="rf-turn">${ask}<div class="rf-turn-text" data-turn="${i}">${body}</div>${retry}${feedbackHtml(t, i)}</div>`;
@@ -787,7 +803,7 @@
   function paintTurn(i) {
     const t = threadTurns[i];
     const el = panel?.querySelector(`.rf-turn-text[data-turn="${i}"]`);
-    if (t && el) el.innerHTML = RF.renderMarkdown(t.text);
+    if (t && el) el.innerHTML = RF.renderMarkdown(shownText(t));
   }
 
   /**

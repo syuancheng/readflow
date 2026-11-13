@@ -54,11 +54,16 @@ export type ExplainParams = {
   personalized?: boolean;
   /** P32：偏好「讲细一点」时把 maxTokens 放到 600，其余保持 400 */
   detailed?: boolean;
-  /** P32：这次讲解的种类，只用于服务端记事件，不发给模型 */
+  /** P33：服务端记事件用，不发给模型 */
   askKind?: string;
-  /** P32：服务端记事件用，不发给模型 */
   contextId?: string;
   textId?: string;
+  /** P33：观察信息——这个词在其他文章里查过 N 次（只统计别的 text_id） */
+  otherTextLookups?: number;
+  /** P33：观察信息——这个词已推送过卡片（取值同 explain_events.carded_before） */
+  cardedBefore?: boolean;
+  /** P33：做卡开关关闭时不追加制卡建议段（服务端在 handleExplain 里决定） */
+  cardsEnabled?: boolean;
 };
 
 /**
@@ -92,15 +97,38 @@ function personalizeDepth(prompt: string, monolingual: boolean): string {
   return prompt.slice(0, i) + guidance + "\n\n" + prompt.slice(j);
 }
 
+/**
+ * P33（spec §7.1）：制卡建议规则，追加在系统提示词末尾。
+ * 个性化开关打开和关闭时都追加（PRD 规定两者互不依赖）——「P32 快照逐字不变」
+ * 指的是讲解深度那部分，制卡建议是 P33 新增的，快照测试同步更新（用户已确认）。
+ */
+const CARD_SUGGESTION_ZH = `【制卡建议（可选，只在最后一行）】
+回答结束后，如果你认为这个词值得做成记忆卡，在最后一行输出：
+制卡建议：<理由，一句话不超过 30 个字>
+- 值得做：正好在他词汇量的边缘；和他的阅读目的相关；在不同文章里第二次遇到；是值得掌握的搭配或短语。
+- 不值得做：专有名词、产品名、人名；对他太简单（多半是一时没反应过来）；太生僻、以后基本遇不到。
+- 不值得做时什么都不输出；建议行之后不能再有任何内容。`;
+
+const CARD_SUGGESTION_EN = `Card suggestion (optional, last line only):
+After the answer, if you think this word is worth turning into a flashcard, output one final line:
+制卡建议：<reason, one clause, at most 30 characters>
+- Worth it: at the edge of the student's vocabulary; relevant to their reading goal; a second encounter across articles; a collocation worth mastering.
+- Not worth it: proper nouns, product names, people's names; too easy for them; too rare to meet again.
+- Output nothing when not worth it. Nothing may follow this line.`;
+
 /** 导出供单测断言输出结构（不对外承诺稳定性） */
 export function buildSystemPrompt(
   language: string,
   monolingual: boolean,
   _word: string,
-  opts?: { personalized?: boolean },
+  opts?: { personalized?: boolean; cardsEnabled?: boolean },
 ): string {
   const base = legacySystemPrompt(language, monolingual);
-  return opts?.personalized ? personalizeDepth(base, monolingual) : base;
+  const depth = opts?.personalized ? personalizeDepth(base, monolingual) : base;
+  // P33：默认追加（cards.enabled 默认 on）；显式传 false 才不追加
+  return opts?.cardsEnabled === false
+    ? depth
+    : `${depth}\n\n${monolingual ? CARD_SUGGESTION_EN : CARD_SUGGESTION_ZH}`;
 }
 
 /** 旧提示词原样保留：开关关闭时逐字返回，不做任何「顺手优化」 */
@@ -222,12 +250,13 @@ function contextBlock(params: ExplainParams): string {
     base = `用户选中: "${word}"
 所在句子: "${context}"`;
   }
-  const obs = observations(params.signals);
+  const obs = observations(params);
   return obs ? `${base}\n\n${obs}` : base;
 }
 
 /** 只摆客观证据，不下结论——判断句法权重与答案深度是模型的事 */
-function observations(signals?: SelectionSignals): string {
+function observations(params: ExplainParams): string {
+  const signals = params.signals;
   if (!signals) return "";
   const lines: string[] = [];
   lines.push(`- 操作: ${signals.source === "word" ? "点了一个词" : "拖选了一段"}`);
@@ -249,6 +278,13 @@ function observations(signals?: SelectionSignals): string {
     const items = signals.priorAsks.map((a) => `"${a.selection}"`).join("、");
     lines.push(`- 之前问过的选区: ${items}`);
   }
+  // P33（spec §7.1）：做卡相关的两条观察
+  if (typeof params.otherTextLookups === "number" && params.otherTextLookups > 0) {
+    lines.push(`- 这个词在其他文章里也查过 ${params.otherTextLookups} 次`);
+  }
+  if (params.cardedBefore) {
+    lines.push(`- 这个词已经做过卡（已推送到墨墨）`);
+  }
   return `观察（客观信号，不是结论）：\n${lines.join("\n")}`;
 }
 
@@ -260,21 +296,30 @@ function observations(signals?: SelectionSignals): string {
  *     // chunk 是一段文本
  *   }
  */
-export async function* streamExplain(
-  params: ExplainParams,
-  ai?: AiConfig,
-): AsyncGenerator<string, void, unknown> {
+/**
+ * 构建「讲解」这一轮的完整 messages（P33：供 handleExplain 缓存做卡复用）。
+ * 与 streamExplain 内部用的逐字一致——做卡时前缀命中模型缓存的前提（spec §13 第 2 条）。
+ */
+export function explainTurns(params: ExplainParams): ChatTurn[] {
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
-  const turns: ChatTurn[] = [
+  return [
     {
       role: "system",
       content: buildSystemPrompt(language, monolingual, params.word, {
         personalized: params.personalized === true,
+        cardsEnabled: params.cardsEnabled !== false,
       }),
     },
     { role: "user", content: buildUserMessage(params) },
   ];
+}
+
+export async function* streamExplain(
+  params: ExplainParams,
+  ai?: AiConfig,
+): AsyncGenerator<string, void, unknown> {
+  const turns = explainTurns(params);
 
   yield* streamTurns(
     turns,

@@ -185,54 +185,27 @@ try {
     await page.waitForTimeout(200);
   }
 
-  // ---- 导出只带勾选的词 ----
-  const offBtn = page.locator(".wl-export-btn");
+  // ---- 旧的导出入口已并入「待推送」（P33）----
+  const pendBtn = page.locator(".wl-export-btn");
   check(
-    "14 没勾选时「导出到墨墨」是灰的，不可点",
-    (await offBtn.getAttribute("aria-disabled")) === "true" && (await offBtn.evaluate((e) => e.tagName)) === "SPAN",
-    await offBtn.innerText(),
+    "14 工具栏没有「导出到墨墨」，换成「待推送」按钮",
+    (await pendBtn.count()) === 1 && (await pendBtn.innerText()).includes("待推送") && (await page.locator("text=导出到墨墨").count()) === 0,
+    await pendBtn.innerText(),
   );
-  await item("owner").locator(".wl-check").click();
-  await item("database").locator(".wl-check").click();
-  const exportLink = page.locator("a.wl-export-btn");
-  const href = (await exportLink.getAttribute("href")) ?? "";
-  const ownerId = q("select id from user_words where lemma = 'owner'").id;
-  const dbId = q("select id from user_words where lemma = 'database'").id;
-  const skillId = q("select id from user_words where lemma = 'skill'").id;
-  check(
-    "15 勾两个：按钮变成「导出选中的 2 个到墨墨」，只带这两个词",
-    (await exportLink.innerText()).includes("导出选中的 2 个") && href.includes(ownerId) && href.includes(dbId) && !href.includes(skillId),
-    href.slice(0, 60),
-  );
-  await exportLink.click();
-  await page.waitForURL(/\/export\?ids=/);
-  await page.waitForSelector('[data-testid="export-selection"]');
-  const sel = await page.locator('[data-testid="export-selection"]').innerText();
-  check("16 导出页写明「选中的 2 个词」并列出它们", sel.includes("选中的 2 个词") && sel.includes("owner") && sel.includes("database") && !sel.includes("skill"), sel.replace(/\s+/g, " "));
-  const previewReq = page.waitForRequest((r) => r.url().endsWith("/api/export") && r.method() === "POST");
-  await page.locator("button", { hasText: "预览卡片" }).click();
-  const sent = JSON.parse((await previewReq).postData() || "{}");
-  await page.waitForTimeout(1500);
-  const previewWords = await page.evaluate(() =>
-    [...new Set([...document.querySelectorAll("span.text-\\[14px\\].font-extrabold")].map((e) => e.textContent.trim()))],
-  );
-  check(
-    "17 预览只针对这两个词（请求只带两个 id，结果里没有 skill）",
-    JSON.stringify([...sent.wordIds].sort()) === JSON.stringify([ownerId, dbId].sort()) && !previewWords.includes("skill"),
-    `wordIds=${sent.wordIds?.length} 预览词=${previewWords.join(",")}`,
-  );
-  const noIds = await page.evaluate(async () => {
-    const r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ types: ["qa"], dryRun: true }) });
+  await pendBtn.click();
+  await page.waitForSelector("text=没有待推送的卡片");
+  check("15 点「待推送」切到待推送视图，左侧该项高亮", (await page.locator(".wl-side-item-on", { hasText: "待推送" }).count()) === 1);
+  await page.goto(`${BASE}/export`, { waitUntil: "load" });
+  check("16 旧的 /export 页面跳转到 /words?status=pending", new URL(page.url()).pathname === "/words" && new URL(page.url()).searchParams.get("status") === "pending", page.url());
+  const gone = await page.evaluate(async () => {
+    const r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ types: ["qa"], wordIds: ["x"] }) });
     return { status: r.status, body: await r.json() };
   });
-  check("18 接口不带 wordIds 一律拒绝，不再默认导出全部", noIds.status === 400 && noIds.body.error.includes("勾选"), JSON.stringify(noIds));
-  await page.goto(`${BASE}/export`, { waitUntil: "load" });
-  check("19 直接打开导出页：提示去词库勾选，没有导出按钮", (await page.locator("text=还没有选要导出的词").count()) === 1 && (await page.locator("button", { hasText: "预览卡片" }).count()) === 0);
+  check("17 旧的 /api/export 一律返回 410，提示改去待推送", gone.status === 410 && gone.body.error.includes("待推送"), JSON.stringify(gone));
   await page.goto(`${BASE}/words`, { waitUntil: "load" });
   await page.waitForTimeout(600);
   await item("database").locator(".wl-snippet").click();
-  const oneHref = (await item("database").locator(".wl-export-one").getAttribute("href")) ?? "";
-  check("20 详情里「导出这个词」只带这一个词", oneHref === `/export?ids=${dbId}`, oneHref);
+  check("18 词的详情里不再有「导出这个词」", (await item("database").locator(".wl-export-one").count()) === 0 && (await page.locator("text=导出这个词").count()) === 0);
   await item("database").locator(".wl-snippet").click();
 
   // 批量：勾两个 → 加星标

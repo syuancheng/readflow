@@ -6,7 +6,12 @@
  * 2. 导出状态按卡片应用汇总（墨墨，以后 Anki / Quizlet…）：
  *    任一种卡片导出成功就算「已导出」，标签注明应用和卡片类型。
  */
-import { CARD_TYPES } from "./cardgen";
+/** 历史导出记录里的卡型名（旧导出功能已下线，记录保留）；P33 的考试卡用 exam:<卡 id> 记，统一叫「考试卡」 */
+const OLD_CARD_TYPES = [
+  { key: "qa", label: "看词猜义" },
+  { key: "cloze", label: "挖空填空" },
+  { key: "choice", label: "选择题" },
+];
 
 /** 文章已删除的词统一归到这个键 */
 export const DELETED_ARTICLE = "__deleted__";
@@ -104,12 +109,19 @@ export function exportBadges(rows: readonly { target: string; cardType: string; 
     set.add(r.cardType);
     byTarget.set(r.target, set);
   }
-  const order = CARD_TYPES.map((t) => t.key as string);
-  const labelOf = (k: string) => CARD_TYPES.find((t) => t.key === k)?.label ?? k;
+  const order = [...OLD_CARD_TYPES.map((t) => t.key as string), "exam:"];
+  const labelOf = (k: string) => (k.startsWith("exam:") ? "考试卡" : (OLD_CARD_TYPES.find((t) => t.key === k)?.label ?? k));
   return [...byTarget.entries()].map(([target, set]) => ({
     target,
     app: TARGET_LABEL[target] ?? target,
-    cardTypes: [...set].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map(labelOf),
+    // 一个词可能有多张考试卡（exam:<id>），标签只写一次「考试卡」
+    cardTypes: [
+      ...new Set(
+        [...set]
+          .sort((a, b) => order.indexOf(a.startsWith("exam:") ? "exam:" : a) - order.indexOf(b.startsWith("exam:") ? "exam:" : b))
+          .map(labelOf),
+      ),
+    ],
   }));
 }
 
