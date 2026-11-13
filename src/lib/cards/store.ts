@@ -4,7 +4,7 @@
  */
 import { sqlite } from "@/db/sqlite";
 import { GLOBAL_USER } from "@/db/ensure-auth";
-import { charLimitFor, listeningEnabled } from "./flags";
+import { cardsEnabled, charLimitFor, listeningEnabled } from "./flags";
 import { cardQuotaDay } from "./quota";
 
 /** 站级 cards.* 开关（owner 在设置里改，所有人共用） */
@@ -20,9 +20,14 @@ export function siteCardsSettings(): Record<string, string> {
  * 站级那行是 owner 的，别人的卡不能按 owner 的会员算字数上限。
  */
 export function userMembership(userId: string): string | null {
+  return ownSetting("markji.membership", userId);
+}
+
+/** 只读这个用户自己的设置行（getSetting 会回退到站级，个人偏好不能用它） */
+export function ownSetting(key: string, userId: string): string | null {
   const row = sqlite
-    .prepare("SELECT value FROM settings WHERE user_id = ? AND key = 'markji.membership'")
-    .get(userId) as { value: string } | undefined;
+    .prepare("SELECT value FROM settings WHERE user_id = ? AND key = ?")
+    .get(userId, key) as { value: string } | undefined;
   return row?.value ?? null;
 }
 
@@ -112,4 +117,42 @@ export function otherTextLookups(userId: string, lemma: string, textId: string):
     )
     .all(userId, lemma.toLowerCase(), textId) as { tid: string }[];
   return rows.length;
+}
+
+export type CardState = {
+  enabled: boolean;
+  state: "none" | "generating" | "ready" | "failed" | "pushed";
+  setId: string | null;
+  /** ready：还在草稿里的卡数；pushed：已推送的卡数 */
+  count: number;
+  error: string | null;
+  wordId: string | null;
+};
+
+/** 阅读页「做成卡片」按钮的状态（PRD F2 的五种），按批注所在的这一处算 */
+export function cardStateFor(userId: string, contextId: string): CardState {
+  const enabled = cardsEnabled(siteCardsSettings());
+  const none: CardState = { enabled, state: "none", setId: null, count: 0, error: null, wordId: null };
+  const ctx = loadCardContext(userId, contextId);
+  if (!ctx) return none;
+  const base = { ...none, wordId: ctx.word_id };
+  const set = sqlite
+    .prepare(
+      `SELECT id, status, error FROM card_sets WHERE user_id = ? AND context_id = ? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(userId, contextId) as { id: string; status: string; error: string | null } | undefined;
+  if (!set) return base;
+  if (set.status === "generating") return { ...base, state: "generating", setId: set.id };
+  if (set.status === "failed") return { ...base, state: "failed", setId: set.id, error: set.error };
+  const n = (status: string) =>
+    (
+      sqlite.prepare("SELECT COUNT(*) AS n FROM cards WHERE set_id = ? AND status = ?").get(set.id, status) as {
+        n: number;
+      }
+    ).n;
+  const drafts = n("draft");
+  if (drafts > 0) return { ...base, state: "ready", setId: set.id, count: drafts };
+  const pushed = n("pushed");
+  if (pushed > 0) return { ...base, state: "pushed", setId: set.id, count: pushed };
+  return base; // 卡都被删光 / 撤回了：回到「未做卡」
 }

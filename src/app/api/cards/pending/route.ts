@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { sqlite } from "@/db/sqlite";
+import { activeJobId, KEY_CHAPTER, KEY_DECK, KEY_MODE } from "@/lib/cards/pusher";
+import { markjiTokenFor } from "@/lib/user-secrets";
+import { ownSetting } from "@/lib/cards/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,7 +75,21 @@ export async function GET() {
   }));
 
   const total = (rows ?? []).length;
-  return NextResponse.json({ texts, total });
+  // 推送栏要用的：上次选的牌组 / 章节、正在跑的任务（刷新页面后接着看进度）、有没有配墨墨 Token
+  const defaults = {
+    deckId: ownSetting(KEY_DECK, user.id),
+    chapterId: ownSetting(KEY_CHAPTER, user.id),
+    chapterMode: ownSetting(KEY_MODE, user.id) === "per_article" ? "per_article" : "fixed",
+  };
+  return NextResponse.json({
+    texts,
+    total,
+    /** 有草稿卡的词数：词库「待推送 (N)」显示它（列表一行是一个词） */
+    wordCount: new Set((rows ?? []).map((r) => r.user_word_id)).size,
+    defaults,
+    activeJobId: activeJobId(user.id),
+    markjiConfigured: markjiTokenFor(user) !== null,
+  });
 }
 
 type WordSummary = {

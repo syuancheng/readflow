@@ -134,9 +134,53 @@ const fake = http.createServer((req, res) => {
   });
 });
 
+// ---------- 假墨墨（开放 API 的最小子集）----------
+const MJ_PORT = 3139;
+const mj = { chapters: [{ id: "ch-fixed", name: "固定章节", card_ids: [] }], cards: new Map(), created: 0, chapterCreates: 0, mode: "ok", seq: 0 };
+const mjFake = http.createServer((req, res) => {
+  let buf = "";
+  req.on("data", (d) => (buf += d));
+  req.on("end", () => {
+    const url = new URL(req.url, "http://x");
+    const send = (status, data) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(status < 300 ? { success: true, errors: [], data } : { success: false, errors: [{ message: data }], data: null }));
+    };
+    const m = url.pathname.replace("/open/api/v1/markji", "");
+    const body = buf ? JSON.parse(buf) : {};
+    if (req.method === "GET" && m === "/decks") return send(200, { decks: [{ id: "d1", name: "测试牌组" }] });
+    if (req.method === "GET" && m === "/decks/d1/chapters") return send(200, { chapters: mj.chapters.map((c) => ({ ...c, deck_id: "d1" })) });
+    if (req.method === "POST" && m === "/decks/d1/chapters") {
+      mj.chapterCreates++;
+      const c = { id: `ch-${++mj.seq}`, name: body.name, card_ids: [] };
+      mj.chapters.push(c);
+      return send(200, { chapter: { ...c, deck_id: "d1" } });
+    }
+    let r;
+    if ((r = m.match(/^\/decks\/d1\/chapters\/([^/]+)\/cards$/)) && req.method === "POST") {
+      const ch = mj.chapters.find((c) => c.id === r[1]);
+      if (!ch) return send(404, "chapter not found");
+      if (mj.mode === "429-once") { mj.mode = "ok"; return send(429, "too many requests"); }
+      if (mj.mode === "400-all") return send(400, "invalid card");
+      const content = body.card?.content ?? "";
+      if (mj.mode === "400-bad" && content.includes("BADCARD")) return send(400, "invalid card");
+      const id = `mc-${++mj.seq}`;
+      mj.cards.set(id, content);
+      ch.card_ids.push(id);
+      mj.created++;
+      if (mj.mode === "500-after-create") { mj.mode = "ok"; return send(500, "boom"); }
+      return send(200, { card: { id, content } });
+    }
+    if ((r = m.match(/^\/decks\/d1\/cards\/([^/]+)$/)) && req.method === "GET") {
+      return mj.cards.has(r[1]) ? send(200, { card: { id: r[1], content: mj.cards.get(r[1]) } }) : send(404, "no card");
+    }
+    send(404, "unknown " + m);
+  });
+});
+
 const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", String(PORT)], {
   cwd: ROOT,
-  env: { ...process.env, DB_PATH: DB, NODE_ENV: "production", NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" },
+  env: { ...process.env, DB_PATH: DB, MARKJI_BASE_URL: `http://127.0.0.1:${3139}/open/api/v1/markji`, NODE_ENV: "production", NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let serverLog = "";
@@ -186,6 +230,7 @@ const callsOf = (kind) => calls.filter((c) => c.kind === kind);
 
 try {
   await new Promise((resolve) => fake.listen(SITE_PORT, "127.0.0.1", resolve));
+  await new Promise((resolve) => mjFake.listen(MJ_PORT, "127.0.0.1", resolve));
   let up = false;
   for (let i = 0; i < 90 && !up; i++) {
     try { await fetch(`${BASE}/api/auth/status`); up = true; } catch { await new Promise((r) => setTimeout(r, 400)); }
@@ -410,6 +455,151 @@ try {
   const cardsPrompt = callsOf("cards")[0].messages.at(-1).content;
   check("M1 听力默认关：出题指令不含音频零件；备考风格段落在", !cardsPrompt.includes("整句音频") && cardsPrompt.includes("因人而异") && cardsPrompt.includes("四六级"), `整句音频=${cardsPrompt.includes("整句音频")} 因人而异=${cardsPrompt.includes("因人而异")} 四六级=${cardsPrompt.includes("四六级")}`);
 
+  // ===== 推送到墨墨（假墨墨）=====
+  cardsMode = "good";
+  reviewMode = "ok";
+  const waitJob = async (cookie, jobId, ms = 60000) => {
+    const t0 = Date.now();
+    for (;;) {
+      const r = await api(`/api/cards/push/${jobId}`, { cookie });
+      if (r.data && r.data.status !== "running") return r.data;
+      if (Date.now() - t0 > ms) return r.data;
+      await new Promise((x) => setTimeout(x, 300));
+    }
+  };
+  const makeSet = async (cookie, title) => {
+    const c = await seedContext(cookie, title);
+    const g = await api("/api/cards/generate", { cookie, method: "POST", body: { contextId: c.contextId } });
+    const r = await waitSet(cookie, g.data.setId);
+    return { ...c, setId: g.data.setId, cardIds: r.cards.map((x) => x.id), cards: r.cards };
+  };
+  const pushBody = (cardIds, extra = {}) => ({ cardIds, deckId: "d1", chapterMode: "fixed", chapterId: "ch-fixed", ...extra });
+
+  const pa = await makeSet(owner, "Push text A");
+  const noTok = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pa.cardIds) });
+  check("P1 没配墨墨 Token → 400，提示去设置里填", noTok.status === 400 && /Token/.test(noTok.data?.error ?? ""), `status=${noTok.status} ${noTok.data?.error}`);
+  const pendNoTok = await api("/api/cards/pending", { cookie: owner });
+  check("P1b 待推送接口告诉前端「没配 Token」，草稿仍在", pendNoTok.data?.markjiConfigured === false && pendNoTok.data.total >= 2);
+
+  await api("/api/settings", { cookie: owner, method: "PUT", body: { markjiToken: "fake-markji-token" } });
+  const deckList = await api("/api/markji/decks", { cookie: owner });
+  check("P2 牌组列表走假墨墨", deckList.data?.ok === true && deckList.data.decks?.[0]?.id === "d1", JSON.stringify(deckList.data)?.slice(0, 100));
+
+  await api("/api/settings", { cookie: friend, method: "PUT", body: { markjiToken: "friend-fake-token" } });
+  const v1 = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody([]) });
+  const v2 = await api("/api/cards/push", { cookie: owner, method: "POST", body: { ...pushBody(pa.cardIds), chapterId: undefined } });
+  const v3 = await api("/api/cards/push", { cookie: friend, method: "POST", body: pushBody(pa.cardIds) });
+  check("P3 参数校验：没有卡 / 固定章节没选章节 → 400；别人的卡 → 404", v1.status === 400 && v2.status === 400 && v3.status === 404, `${v1.status}/${v2.status}/${v3.status}`);
+
+  const createdA = mj.created;
+  const pj = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pa.cardIds) });
+  check("P4 推送立刻返回 jobId", pj.status === 200 && Boolean(pj.data?.jobId), JSON.stringify(pj.data));
+  const pjDone = await waitJob(owner, pj.data.jobId);
+  const rowsA = dbAll("SELECT status, markji_card_id, markji_chapter_id, content FROM cards WHERE set_id = ?", pa.setId).filter((r) => r.status !== "discarded");
+  check("P5 推送完成：2 张都是 pushed，进度 2/2，假墨墨里恰好多 2 张且内容一致",
+    pjDone.status === "done" && pjDone.done === 2 && pjDone.failed === 0 && rowsA.every((r) => r.status === "pushed") &&
+    mj.created - createdA === 2 && rowsA.every((r) => mj.cards.get(r.markji_card_id) === r.content),
+    `status=${pjDone.status} done=${pjDone.done} created=${mj.created - createdA}`);
+  const exRows = dbAll("SELECT e.card_type, e.status FROM exports e JOIN user_words w ON w.id = e.user_word_id WHERE w.user_id = ? AND e.status = 'done'", ownerId);
+  check("P6 每张卡写一行 exports（卡型用卡 id 区分），词计入「已导出」", exRows.length >= 2 && exRows.every((x) => x.card_type.startsWith("exam:")), `rows=${exRows.length}`);
+  const pend2 = await api("/api/cards/pending", { cookie: owner });
+  check("P7 推过的卡从待推送里消失；牌组 / 章节记成下次的默认值", !JSON.stringify(pend2.data.texts).includes(pa.cardIds[0]) && pend2.data.defaults.deckId === "d1" && pend2.data.defaults.chapterId === "ch-fixed" && pend2.data.defaults.chapterMode === "fixed");
+  const again = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pa.cardIds) });
+  check("P8 已推送的卡不能再推 → 400（墨墨删不掉，不能重复写）", again.status === 400, `status=${again.status}`);
+  const ptState = await api(`/api/cards/state?contextId=${pa.contextId}`, { cookie: owner });
+  check("P9 阅读页按钮状态：已推送", ptState.data?.state === "pushed" && ptState.data.count === 2, JSON.stringify(ptState.data));
+
+  // 按文章建章节：先查同名，不重复建
+  const pb = await makeSet(owner, "Push text B");
+  const pb2 = await makeSet(owner, "Push text B");
+  const pj2 = await api("/api/cards/push", { cookie: owner, method: "POST", body: { cardIds: pb.cardIds, deckId: "d1", chapterMode: "per_article" } });
+  const pj2Done = await waitJob(owner, pj2.data.jobId);
+  const chB = mj.chapters.filter((c) => c.name === "Push text B");
+  check("P10 按文章自动建章节：建了 1 个章节，卡片进了这个章节", pj2Done.status === "done" && chB.length === 1 && chB[0].card_ids.length === 2, `chapters=${chB.length} cards=${chB[0]?.card_ids.length}`);
+  const pj3 = await api("/api/cards/push", { cookie: owner, method: "POST", body: { cardIds: pb2.cardIds, deckId: "d1", chapterMode: "per_article" } });
+  await waitJob(owner, pj3.data.jobId);
+  check("P11 同一篇文章再推一次：直接用已有章节，不再新建", mj.chapters.filter((c) => c.name === "Push text B").length === 1 && chB[0].card_ids.length === 4 && mj.chapterCreates === 1, `creates=${mj.chapterCreates}`);
+
+  // 失败：4xx 只标这一张，后面的继续
+  const pc = await makeSet(owner, "Push text C");
+  dbRun("UPDATE cards SET content = content || 'BADCARD' WHERE id = ?", pc.cardIds[0]);
+  mj.mode = "400-bad";
+  const pj4 = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pc.cardIds) });
+  const pj4Done = await waitJob(owner, pj4.data.jobId);
+  const cRows = dbAll("SELECT id, status, push_error FROM cards WHERE set_id = ? ORDER BY seq", pc.setId);
+  check("P12 墨墨拒绝一张（400）：这张标失败并留在草稿，其它照常推送；任务结束后给出失败原因",
+    pj4Done.done === 1 && pj4Done.failed === 1 && cRows[0].status === "draft" && Boolean(cRows[0].push_error) && cRows[1].status === "pushed" && pj4Done.failures.length === 1,
+    JSON.stringify({ done: pj4Done.done, failed: pj4Done.failed, rows: cRows.map((r) => r.status) }));
+  mj.mode = "ok";
+  dbRun("UPDATE cards SET content = REPLACE(content, 'BADCARD', '') WHERE id = ?", pc.cardIds[0]);
+  const retry = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody([pc.cardIds[0]]) });
+  const retryDone = await waitJob(owner, retry.data.jobId);
+  check("P13 失败的卡可以重试，成功后 push_error 清空", retryDone.done === 1 && dbAll("SELECT status, push_error FROM cards WHERE id = ?", pc.cardIds[0])[0].push_error === null);
+
+  // 429：等一会儿再试，不丢卡也不重复
+  const pd = await makeSet(owner, "Push text D");
+  const createdBefore = mj.created;
+  mj.mode = "429-once";
+  const pj5 = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pd.cardIds) });
+  const pj5Done = await waitJob(owner, pj5.data.jobId, 90000);
+  check("P14 429 → 等 5 秒重试：2 张都推成功，假墨墨里恰好 2 张", pj5Done.done === 2 && pj5Done.failed === 0 && mj.created - createdBefore === 2, `done=${pj5Done.done} created=${mj.created - createdBefore}`);
+
+  // 5xx 但其实已经建成功：重试前先认领，不能重复建卡
+  const pe = await makeSet(owner, "Push text E");
+  const createdE = mj.created;
+  mj.mode = "500-after-create";
+  const pj6 = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pe.cardIds) });
+  const pj6Done = await waitJob(owner, pj6.data.jobId, 90000);
+  const eRows = dbAll("SELECT markji_card_id FROM cards WHERE set_id = ? AND status = 'pushed'", pe.setId);
+  check("P15 建卡返回 500（其实已建成）：认领已有的卡，不重复建，假墨墨里恰好 2 张", pj6Done.done === 2 && mj.created - createdE === 2 && new Set(eRows.map((r) => r.markji_card_id)).size === 2, `created=${mj.created - createdE} done=${pj6Done.done}`);
+
+  // 服务重启：running 的任务 + pushing 的卡，墨墨里已经有了 → 认领，不重建
+  const pf = await makeSet(owner, "Push text F");
+  const content0 = dbAll("SELECT content FROM cards WHERE id = ?", pf.cardIds[0])[0].content;
+  const orphan = `mc-orphan`;
+  mj.cards.set(orphan, content0);
+  mj.chapters.find((c) => c.id === "ch-fixed").card_ids.push(orphan);
+  const jobId = "resume-job";
+  dbRun("UPDATE cards SET status = 'pushing' WHERE id = ?", pf.cardIds[0]);
+  dbRun(
+    `INSERT INTO push_jobs (id, user_id, deck_id, chapter_mode, chapter_id, card_ids, done, failed, status, created_at, updated_at)
+     VALUES (?, ?, 'd1', 'fixed', 'ch-fixed', ?, 0, 0, 'running', ?, ?)`,
+    jobId, ownerId, JSON.stringify(pf.cardIds), Date.now(), Date.now(),
+  );
+  const createdF = mj.created;
+  const resumed = await api(`/api/cards/push/${jobId}`, { cookie: owner });
+  const resumedDone = await waitJob(owner, jobId);
+  const f0 = dbAll("SELECT status, markji_card_id FROM cards WHERE id = ?", pf.cardIds[0])[0];
+  check("P16 重启后查询状态接着跑：pushing 的卡认领墨墨里已有的那张，只新建另一张", resumed.status === 200 && resumedDone.status === "done" && f0.status === "pushed" && f0.markji_card_id === orphan && mj.created - createdF === 1, `claimed=${f0.markji_card_id} created=${mj.created - createdF}`);
+
+  // 一个用户同一时间只有一个任务；别人看不到我的任务
+  const pg = await makeSet(owner, "Push text G");
+  dbRun("INSERT INTO push_jobs (id, user_id, deck_id, chapter_mode, chapter_id, card_ids, done, failed, status, created_at, updated_at) VALUES ('busy-job', ?, 'd1', 'fixed', 'ch-fixed', '[]', 0, 0, 'paused', ?, ?)", ownerId, Date.now(), Date.now());
+  const noView = await api("/api/cards/push/busy-job", { cookie: friend });
+  check("P17 别人查我的任务 → 404", noView.status === 404);
+  dbRun("UPDATE push_jobs SET status = 'running' WHERE id = 'busy-job'");
+  const conflict = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pg.cardIds) });
+  check("P18 已有任务在跑 → 409，并带上那个任务的 id", conflict.status === 409 && conflict.data?.jobId === "busy-job", `status=${conflict.status}`);
+  dbRun("UPDATE push_jobs SET status = 'done' WHERE id = 'busy-job'");
+
+  // 每天 600 条上限
+  const nowTs = Date.now();
+  const wid = dbAll("SELECT id FROM user_words WHERE user_id = ? LIMIT 1", ownerId)[0].id;
+  const d = new Database(DB);
+  const ins = d.prepare("INSERT INTO exports (id, user_word_id, target, deck_id, chapter_id, card_id, card_type, status, pushed_at) VALUES (?, ?, 'markji', 'dx', 'cx', ?, ?, 'done', ?)");
+  d.transaction(() => { for (let i = 0; i < 600; i++) ins.run(`cap-${i}`, wid, `x${i}`, `cap:${i}`, nowTs); })();
+  d.close();
+  const cap = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pg.cardIds) });
+  const capDone = await waitJob(owner, cap.data.jobId);
+  check("P19 今天已经创建 600 条 → 暂停并提示明天继续，卡片仍是草稿", capDone.status === "paused" && /600/.test(capDone.error ?? "") && dbAll("SELECT status FROM cards WHERE id = ?", pg.cardIds[0])[0].status === "draft", `status=${capDone.status} ${capDone.error}`);
+  dbRun("DELETE FROM exports WHERE id LIKE 'cap-%'");
+
+  // 做卡开关关闭时不能推送
+  await api("/api/settings", { cookie: owner, method: "PUT", body: { cardsEnabled: "off" } });
+  const offPush = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pg.cardIds) });
+  await api("/api/settings", { cookie: owner, method: "PUT", body: { cardsEnabled: "on" } });
+  check("P20 做卡关闭 → 推送被拒绝（403）", offPush.status === 403);
+
   // ===== 失败日志里没有残留进程错误 =====
   check("N1 服务端日志没有未捕获异常", !/unhandled|TypeError|ReferenceError/i.test(serverLog), serverLog.split("\n").filter((l) => /unhandled|TypeError|ReferenceError/i.test(l)).slice(0, 2).join(" | "));
 } catch (err) {
@@ -418,6 +608,7 @@ try {
 } finally {
   server.kill("SIGTERM");
   await new Promise((r) => fake.close(r));
+  await new Promise((r) => mjFake.close(r));
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* ignore */ }
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

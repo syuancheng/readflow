@@ -174,6 +174,9 @@ export function validateCard(spec: CardSpec, ctx: ValidateCtx): ValidateResult {
 
   // ---------- 7. 听力 ----------
   const allBlocks = [...spec.front, ...(spec.hints ?? []), ...spec.back.answer, ...(spec.back.explanation ?? [])];
+  if (!ctx.listeningEnabled && (spec.back.audio?.length ?? 0) > 0) {
+    reasons.push("听力零件未开放（背面不能附发音）");
+  }
   if (!ctx.listeningEnabled && allBlocks.some((b) => b.t === "audio")) {
     reasons.push("听力零件未开放");
   }

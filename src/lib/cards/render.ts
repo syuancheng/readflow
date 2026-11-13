@@ -130,7 +130,7 @@ function section(title: string, body: string[]): string[] {
 }
 
 /** 分区小标题的固定 emoji（PRD F3「卡片外观」） */
-const SECTIONS = {
+export const SECTIONS = {
   hint: "🧭 提示",
   answer: "✅ 答案",
   explanation: "💡 解析",

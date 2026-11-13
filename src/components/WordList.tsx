@@ -7,13 +7,14 @@
  * 一行一个词：勾选 / 发音 / 星标 / 原句片段（生词加粗）/ 简短中文 / 来源文章；
  * 点一行展开详情（音标、词性、完整释义、这篇文章里的全部原句、删除）。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
 import type { ExportBadge, Snippet } from "@/lib/word-library";
 import { textFragmentUrl } from "@/lib/web-anchor";
+import PendingCards, { fetchPendingTotal } from "@/components/PendingCards";
 
 export type WordContextRow = {
   id: string;
@@ -84,7 +85,7 @@ function sourceTarget(c: WordContextRow): { href: string; external: boolean } | 
 }
 
 /** 状态筛选：不绑死墨墨，以后接 Anki 等也是这几档 */
-type StatusFilter = "all" | "starred" | "todo" | "done";
+type StatusFilter = "all" | "starred" | "todo" | "done" | "pending";
 type TypeFilter = "all" | "word" | "phrase";
 type SortKey = "recent" | "oldest" | "alpha";
 
@@ -107,12 +108,28 @@ function SpeakerIcon() {
 export default function WordList({
   words: initial,
   articles,
+  cardsEnabled = false,
+  initialStatus,
+  focusWordId,
 }: {
   words: WordRow[];
   articles: ArticleOption[];
+  /** P33：做卡开关（站长在设置里切）；关闭时隐藏「待推送」，已有草稿保留 */
+  cardsEnabled?: boolean;
+  /** URL ?status=pending 直接打开待推送 */
+  initialStatus?: string;
+  /** URL ?word= 直接展开这个词 */
+  focusWordId?: string;
 }) {
   const [words, setWords] = useState(initial);
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [status, setStatus] = useState<StatusFilter>(cardsEnabled && initialStatus === "pending" ? "pending" : "all");
+  const [pendingTotal, setPendingTotal] = useState<number | null>(null);
+  useEffect(() => {
+    if (!cardsEnabled) return;
+    void fetchPendingTotal().then((n) => {
+      if (n !== null) setPendingTotal(n);
+    });
+  }, [cardsEnabled]);
   const [type, setType] = useState<TypeFilter>("all");
   const [article, setArticle] = useState<string>("");
   const [query, setQuery] = useState("");
@@ -222,6 +239,7 @@ export default function WordList({
     ["starred", "★ 星标", counts.starred],
     ["todo", "未导出", counts.todo],
     ["done", "已导出", counts.done],
+    ...(cardsEnabled ? ([["pending", "待推送", pendingTotal ?? 0]] as [StatusFilter, string, number][]) : []),
   ];
 
   return (
@@ -295,6 +313,9 @@ export default function WordList({
           </div>
         </div>
 
+        {status === "pending" ? (
+          <PendingCards articleKey={article} focusWordId={focusWordId} onTotal={setPendingTotal} />
+        ) : (
         <div className="wl-table">
           {/* 工具栏 */}
           <div className="wl-toolbar">
@@ -551,6 +572,7 @@ export default function WordList({
             </ul>
           )}
         </div>
+        )}
       </section>
     </div>
   );

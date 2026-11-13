@@ -8,6 +8,8 @@ import { sentenceAround } from "@/lib/split";
 import WordList, { type WordRow } from "@/components/WordList";
 import { latestArticle, contextsOfArticle, articleOptions, exportBadges, snippetAround } from "@/lib/word-library";
 import { inlineGloss, shortGloss } from "@/lib/gloss";
+import { cardsEnabled } from "@/lib/cards/flags";
+import { siteCardsSettings } from "@/lib/cards/store";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,12 @@ function fullSentence(c: {
   return sentenceAround(c.paraContent, hit.start, hit.end).sentence;
 }
 
-export default async function WordsPage() {
+export default async function WordsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; word?: string }>;
+}) {
+  const sp = await searchParams;
   const user = await currentUser();
   if (!user) redirect("/login?next=/words");
   const rows = db
@@ -151,7 +158,13 @@ export default async function WordsPage() {
       {/* 页面标题由顶部导航高亮表达，这里只留一句说明（不重复写「我的词库」） */}
       <p className="rf-page-desc">阅读时点过的词都在这里，带着原句，可跳回原文定位。点一行看完整释义。</p>
 
-      <WordList words={words} articles={articles} />
+      <WordList
+        words={words}
+        articles={articles}
+        cardsEnabled={cardsEnabled(siteCardsSettings())}
+        initialStatus={sp.status}
+        focusWordId={sp.word}
+      />
     </div>
   );
 }

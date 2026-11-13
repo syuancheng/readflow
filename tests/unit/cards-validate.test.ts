@@ -132,6 +132,9 @@ test("规则7：听力关闭时不能有音频；听力卡的正面约束", () =
   const withAudio = baseClozeCard({ front: [...baseClozeCard().front, { t: "audio", of: "word", text: "ephemeral" }] });
   assert.ok(has(withAudio, "听力零件未开放"));
   assert.ok(!has(withAudio, "听力零件未开放", { listeningEnabled: true }));
+  const backAudio = baseClozeCard({ back: { answer: [{ t: "fill", answer: "ephemeral" }], audio: ["word"] } });
+  assert.ok(has(backAudio, "背面不能附发音"));
+  assert.ok(!has(backAudio, "背面不能附发音", { listeningEnabled: true }));
 
   const on = { listeningEnabled: true };
   const choose = baseChoiceCard({ kind: "listen_choose", front: [{ t: "audio", of: "sentence", text: SENTENCE }, { t: "sentence", source: "original", text: SENTENCE }, baseChoiceCard().front[2]] });

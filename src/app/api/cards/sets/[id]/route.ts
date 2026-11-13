@@ -51,6 +51,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       status: c.status,
       needsReview: c.needs_review,
       edited: c.edited === 1,
+      spec,
       preview: renderPreview(spec, { sourceTitle: text?.title ?? "" }),
       content: c.content,
     };

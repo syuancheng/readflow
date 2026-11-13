@@ -135,10 +135,14 @@ export async function listDecks(token?: string | null): Promise<MarkjiDeck[]> {
   }));
 }
 
-/** 列某个牌组下的章节 */
-export async function listChapters(deckId: string, token?: string | null): Promise<MarkjiChapter[]> {
+/** 列某个牌组下的章节；withCards = true 时带上每章的 card_ids */
+export async function listChapters(
+  deckId: string,
+  token?: string | null,
+  opts: { withCards?: boolean } = {},
+): Promise<MarkjiChapter[]> {
   const data = await call<{ chapters?: MarkjiChapter[] }>(
-    `/decks/${encodeURIComponent(deckId)}/chapters`,
+    `/decks/${encodeURIComponent(deckId)}/chapters${opts.withCards ? "?with_cards=true" : ""}`,
     undefined,
     token,
   );
@@ -148,6 +152,31 @@ export async function listChapters(deckId: string, token?: string | null): Promi
     name: c.name,
     card_ids: c.card_ids,
   }));
+}
+
+/**
+ * 新建章节（2026-10 起开放 API 支持，但**不能删**，所以调用方必须先 listChapters 查重名）。
+ * 请求体里的 deck 字段可能和建卡一样被服务端按 ObjectId 校验：先带上，命中
+ * `not a valid ObjectId` 就去掉重试一次。
+ */
+export async function createChapter(
+  deckId: string,
+  name: string,
+  token?: string | null,
+): Promise<MarkjiChapter> {
+  const path = `/decks/${encodeURIComponent(deckId)}/chapters`;
+  const post = (body: Record<string, unknown>) =>
+    serialize(() => call<{ chapter?: MarkjiChapter }>(path, { method: "POST", body: JSON.stringify(body) }, token));
+  let data: { chapter?: MarkjiChapter };
+  try {
+    data = await post({ deck: deckId, name });
+  } catch (err) {
+    if (err instanceof MarkjiError && /ObjectId/i.test(err.message)) data = await post({ name });
+    else throw err;
+  }
+  if (!data?.chapter?.id) throw new MarkjiError("墨墨没有返回章节 id", 502);
+  const c = data.chapter;
+  return { id: c.id, deck_id: c.deck_id ?? deckId, name: c.name ?? name, card_ids: c.card_ids };
 }
 
 /**
@@ -209,9 +238,11 @@ export async function updateCard(
 }
 
 /** 读回一张卡片（改卡前先取原内容，避免全量替换时丢掉别的部分） */
-export async function getCard(deckId: string, cardId: string): Promise<MarkjiCard> {
+export async function getCard(deckId: string, cardId: string, token?: string | null): Promise<MarkjiCard> {
   const data = await call<{ card: MarkjiCard }>(
     `/decks/${encodeURIComponent(deckId)}/cards/${encodeURIComponent(cardId)}`,
+    undefined,
+    token,
   );
   if (!data?.card) throw new MarkjiError("墨墨没有返回卡片内容", 502);
   return data.card;

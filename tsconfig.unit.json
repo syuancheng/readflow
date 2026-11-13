@@ -35,6 +35,7 @@
     "src/lib/cards/rate-limit.ts",
     "src/lib/cards/prompt.ts",
     "src/lib/cards/style.ts",
+    "src/lib/cards/edit.ts",
     "src/db/alter.ts",
     "src/lib/cefr.ts",
     "src/lib/split.ts",
