@@ -3686,21 +3686,43 @@ a:focus-visible,
   color: var(--rf-text-secondary);
 }
 .rf-feedback-btn {
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
   border: 0;
+  border-radius: var(--rf-radius-xs);
   background: transparent;
   color: var(--rf-text-secondary);
   font-size: var(--rf-text-xs);
   font-weight: 600;
   cursor: pointer;
+  transition: background var(--rf-duration-fast) var(--rf-ease), color var(--rf-duration-fast) var(--rf-ease), transform 80ms ease;
 }
 .rf-feedback-btn:hover {
-  color: var(--rf-ai-text);
+  background: var(--rf-bg-hover);
+  color: var(--rf-text-primary);
 }
-.rf-feedback-btn.rf-feedback-on {
-  color: var(--rf-ai-text);
+/* 按下有手感 */
+.rf-feedback-btn:active {
+  transform: scale(0.92);
+}
+/* 选中：变绿 + 前面出现一个勾（成功 / 已记录的含义，规范 §1.1 绿色用于成功） */
+.rf-feedback-btn.rf-feedback-on,
+.rf-feedback-btn.rf-feedback-on:hover {
+  background: var(--rf-success-soft);
+  color: var(--rf-success-text);
   font-weight: 700;
 }
+.rf-feedback-check {
+  animation: rf-check-pop 220ms var(--rf-ease);
+}
+@keyframes rf-check-pop {
+  0% { transform: scale(0.2); opacity: 0; }
+  70% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .rf-feedback-check { animation: none; } }
 
 /* P32 F6：「AI 眼中的你」。紫色只用于 AI 的判断与笔记（design-system §1.1）。 */
 .rf-learner-ai {
