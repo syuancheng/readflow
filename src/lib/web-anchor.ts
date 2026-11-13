@@ -105,13 +105,60 @@ function findQuotePositions(
   return found;
 }
 
+/** 相似度只看词：小写、去掉标点，按空白切开 */
+function tokensOf(s: string): string[] {
+  return normalizeBlockText(s)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s'’-]+/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * 段落和网页块的相似度（0–1）：两边共有的词数 ÷ 较长一边的词数。
+ * 用「较长一边」做分母，是为了让很短的段落（例如标题 "Skills"）即使整个被块包含，
+ * 得分也很低——它只占块的一小部分，不可能是同一段。
+ */
+export function blockSimilarity(a: string, b: string): number {
+  const ta = tokensOf(a);
+  const tb = tokensOf(b);
+  if (ta.length === 0 || tb.length === 0) return 0;
+  const count = new Map<string, number>();
+  for (const t of ta) count.set(t, (count.get(t) ?? 0) + 1);
+  let common = 0;
+  for (const t of tb) {
+    const n = count.get(t) ?? 0;
+    if (n > 0) {
+      common++;
+      count.set(t, n - 1);
+    }
+  }
+  return common / Math.max(ta.length, tb.length);
+}
+
+/** 不完全相同的段落，至少要这么像才算「同一段」（网页多了脚注、少了个标点这类差异） */
+export const MIN_BLOCK_SIMILARITY = 0.8;
+
+/** 原文下标 → 归一化文本里的下标（归一化规则同 normalizeBlockText） */
+function normalizedOffset(raw: string, at: number): number {
+  // 末尾补一个非空白占位符，防止 trim 吃掉选区前的那个空格
+  return normalizeBlockText(raw.slice(0, at) + "\u0001").length - 1;
+}
+
 /**
  * 在已导入文章的段落里找到这个块，并把选区换算成段落内坐标。
  *
- * 1. 归一化后先找完全相等的段落，没有再找「段落包含块」或「块包含段落」的；
- * 2. `quote = block.slice(start, end)`，在命中段落的 content 里找它出现的位置，
- *    多处时取前文（quote 前 30 字符）匹配最好的那一处；
- * 3. 返回的坐标必须满足 `content.slice(start, end) === quote`，否则返回 null。
+ * 候选段落按可信度分四档，依次尝试，先在哪一档找到选区就用哪一档：
+ * 1. 归一化后与块完全相等；
+ * 2. 与块高度相似（`blockSimilarity` ≥ MIN_BLOCK_SIMILARITY，例如网页多了脚注 [1]），相似度高的先试；
+ * 3. 段落包含整个块（网页把一段拆成了几个元素）；
+ * 4. 块包含整个段落（网页把几段塞进了一个元素），**并且选区落在这段在块里的位置上**。
+ *    只看「包含」不够：标题 "Skills" 也被正文块包含，点正文里的 Skills 会被画到标题上
+ *    （P31 验收时复现过）。
+ *
+ * 选区在段落里出现多处时，取前文（选区前 30 字符）最贴合的一处。
+ * 返回的坐标落在段落原文上，与选区一致（空白差异按归一化比较）；找不到返回 null，
+ * 由调用方退回「网页摘录」。
  */
 export function locateInParagraphs(
   paragraphs: { id: string; content: string }[],
@@ -124,31 +171,63 @@ export function locateInParagraphs(
 
   const normBlock = normalizeBlockText(block);
   if (!normBlock) return null;
+  const quoteAt = normalizedOffset(block, start);
+  const quoteLen = normalizeBlockText(quote).length;
 
-  // 先精确相等，再互相包含。两轮都保持段落原顺序，命中即按序尝试。
   const exact: { id: string; content: string }[] = [];
-  const loose: { id: string; content: string }[] = [];
-  for (const p of paragraphs) {
-    const normContent = normalizeBlockText(p.content);
-    if (normContent === normBlock) exact.push(p);
-    else if (normContent.includes(normBlock) || normBlock.includes(normContent)) loose.push(p);
-  }
+  const similar: { p: { id: string; content: string }; score: number; order: number }[] = [];
+  const containsBlock: { id: string; content: string }[] = [];
+  const insideBlock: { p: { id: string; content: string }; len: number }[] = [];
 
-  const prefixText = block.slice(Math.max(0, start - 30), start);
-  for (const p of exact.length > 0 ? exact : loose) {
-    const positions = findQuotePositions(p.content, quote, prefixText);
-    if (positions.length === 0) continue;
-    // 多处出现：取前文最贴合的一处；分数相同取最靠前的
-    let best = positions[0];
-    let bestScore = prefixScore(p.content, best.start, prefixText);
-    for (const pos of positions.slice(1)) {
-      const s = prefixScore(p.content, pos.start, prefixText);
-      if (s > bestScore) {
-        best = pos;
-        bestScore = s;
+  paragraphs.forEach((p, order) => {
+    const normContent = normalizeBlockText(p.content);
+    if (!normContent) return;
+    if (normContent === normBlock) {
+      exact.push(p);
+      return;
+    }
+    const score = blockSimilarity(normContent, normBlock);
+    if (score >= MIN_BLOCK_SIMILARITY) {
+      similar.push({ p, score, order });
+      return;
+    }
+    if (normContent.includes(normBlock)) {
+      containsBlock.push(p);
+      return;
+    }
+    // 第 4 档：这段在块里出现的某一处，必须盖住选区。
+    // 另外排除「很短的段落」（标题、图注）：网页把几段合进一个元素时，合进去的正文段
+    // 通常不会少于 5 个词；而标题被正文块包含、又恰好盖住选区，是最常见的误判来源。
+    if (tokensOf(normContent).length < 5 && normContent.length < normBlock.length * 0.4) return;
+    for (let at = normBlock.indexOf(normContent); at !== -1; at = normBlock.indexOf(normContent, at + 1)) {
+      if (at <= quoteAt && quoteAt + quoteLen <= at + normContent.length) {
+        insideBlock.push({ p, len: normContent.length });
+        break;
       }
     }
-    return { paragraphId: p.id, start: best.start, end: best.end };
+  });
+  similar.sort((a, b) => b.score - a.score || a.order - b.order);
+  // 选区落在多段里（例如短标题和正文同时盖住了它）时，长的那段更可能是正文
+  insideBlock.sort((a, b) => b.len - a.len);
+
+  const tiers = [exact, similar.map((x) => x.p), containsBlock, insideBlock.map((x) => x.p)];
+  const prefixText = block.slice(Math.max(0, start - 30), start);
+  for (const tier of tiers) {
+    for (const p of tier) {
+      const positions = findQuotePositions(p.content, quote, prefixText);
+      if (positions.length === 0) continue;
+      // 多处出现：取前文最贴合的一处；分数相同取最靠前的
+      let best = positions[0];
+      let bestScore = prefixScore(p.content, best.start, prefixText);
+      for (const pos of positions.slice(1)) {
+        const sc = prefixScore(p.content, pos.start, prefixText);
+        if (sc > bestScore) {
+          best = pos;
+          bestScore = sc;
+        }
+      }
+      return { paragraphId: p.id, start: best.start, end: best.end };
+    }
   }
 
   return null;

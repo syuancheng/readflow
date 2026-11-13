@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { preflight, requireExtensionUser, withCors, extensionError } from "@/lib/extension-http";
 import { recordFromWeb, type RecordInput } from "@/lib/extension-record";
 import { deleteWordContexts } from "@/lib/word-store";
+import { pruneEmptyExcerpt, textIdOfContext } from "@/lib/extension-record";
 import { stripHash } from "@/lib/web-anchor";
 
 export const runtime = "nodejs";
@@ -116,9 +117,14 @@ export async function DELETE(req: Request) {
   const contextId = q.get("contextId")?.trim() ?? "";
   if (!wordId || !contextId) return extensionError("缺少要删除的记录", 400);
 
+  // 删之前记下这条记录挂在哪篇文章上：删完如果那是一篇已经空了的「网页摘录」，一并清掉
+  const textId = textIdOfContext(wordId, contextId);
+
   // 别人的词条一律按「不存在」处理，不暴露数据是否存在
   const result = deleteWordContexts(wordId, auth.user.id, { contextId });
   if (!result.ok) return extensionError("记录不存在", 404);
+
+  if (textId) pruneEmptyExcerpt(textId, auth.user.id);
 
   return withCors(NextResponse.json({ ok: true, prunedWord: result.prunedWord }));
 }

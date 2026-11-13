@@ -79,6 +79,26 @@ const site = http.createServer((req, res) => {
   // 假模型：OpenAI 兼容的流式端点。P31 的「自动 AI 讲解」必须在这里跑，
   // 不能真的连外部模型（e2e 要能离线、可重复、不花钱）。
   if (u === "/v1/chat/completions") {
+    // 请求里带 SLOWTEST：慢速流式回一段「上一个词」的回答，用于 D10 验证换词时不会串到别的记录里
+    let buf = "";
+    req.on("data", (d) => (buf += d));
+    req.on("end", async () => {
+      if (!buf.includes("SLOWTEST")) return fastAnswer(res);
+      res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
+      for (const part of ["释义：上一个词的回答", "（不该出现 A）", "（不该出现 B）", "（不该出现 C）"]) {
+        res.write(`data: ${JSON.stringify({ id: "slow", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
+        await new Promise((r) => setTimeout(r, 900));
+      }
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+    return;
+  }
+  return siteRest(req, res, u);
+});
+
+function fastAnswer(res) {
+  {
     res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
     const parts = ["释义：**rehearsed quietly** 在这句里是", "「安静地排练」", "的意思。\n\n- 假模型第 1 行\n- 假模型第 2 行"];
     for (const part of parts) {
@@ -95,6 +115,10 @@ const site = http.createServer((req, res) => {
     res.write("data: [DONE]\n\n");
     return res.end();
   }
+}
+
+/** 测试网页（非模型请求） */
+function siteRest(req, res, u) {
   if (u === "/p31") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(P31_PAGE);
@@ -117,7 +141,7 @@ const site = http.createServer((req, res) => {
   }
   res.writeHead(404);
   res.end("nope");
-});
+}
 await new Promise((r) => site.listen(0, "127.0.0.1", r));
 const SITE = `http://127.0.0.1:${site.address().port}`;
 
@@ -625,6 +649,12 @@ try {
       d4closed && leftCtx === 0 && leftWord === 0 && hlGone,
       `关闭=${d4closed} 记录=${leftCtx} 词条=${leftWord} 高亮已清=${hlGone}`,
     );
+    const leftExcerpt = q(
+      "select count(*) n from texts t join users u on u.id = t.user_id where u.id = ? and t.source_type = 'web' and t.source_url = ?",
+      friendId,
+      `${SITE}/p31`,
+    )[0].n;
+    check("D4b 摘录里最后一条记录取消后，这篇空的网页摘录也一并清掉", leftExcerpt === 0, `剩余摘录=${leftExcerpt}`);
 
     // D5 拖选一个词典查不到的短语 → 自动请 AI（假模型），讲完写进 contexts.ai_gloss
     const phraseRect = await p31.evaluate((phrase) => {
@@ -770,6 +800,68 @@ try {
         shelf.data.texts.some((t) => t.id === importedId),
       `首页出现=${home.text.includes("Quiet rehearsal notes")} 书架=${shelf.data.texts.length} 篇`,
     );
+    // D10 换词时停掉上一个词的回答：A 的回答还在输出时点回已存词 B，
+    //     A 的后半段不能出现在 B 的侧栏里，更不能存进 B 的记录（P31 验收时复现过的 bug）
+    {
+      const PH = "rehearsed quietly";
+      const before = q("select id, ai_gloss from contexts where quote = ? order by created_at desc limit 1", PH)[0];
+      await p31.goto(`${SITE}/p31`, { waitUntil: "load" });
+      await p31.waitForSelector(".rf-hl", { timeout: 15000 });
+      await p31.waitForTimeout(800);
+      const eng = await pointOfWord(p31, "engineer");
+      await p31.mouse.click(eng.x, eng.y);
+      await p31.waitForFunction(
+        () => {
+          const p = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on");
+          const dict = p?.querySelector(".rf-dict")?.textContent || "";
+          // 等记录回来（词典显示出来）再问：此时 A 才是一条有记录 ID 的正常查词
+          return (
+            p?.querySelector(".rf-word")?.textContent?.trim() === "engineer" &&
+            dict.includes("工程师") &&
+            !p.querySelector('[data-act="ask-toggle"]')?.disabled
+          );
+        },
+        null,
+        { timeout: 10000 },
+      );
+      await p31.evaluate(() => {
+        const r = document.getElementById("rf-ext-host").shadowRoot;
+        r.querySelector('[data-act="ask-toggle"]').click();
+        const i = r.querySelector(".rf-ask-input");
+        i.value = "SLOWTEST 慢一点讲";
+        i.dispatchEvent(new Event("input", { bubbles: true }));
+        i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      // A 的回答开始输出（第一段很快到，之后每段间隔 0.9 秒）；等不到也继续，后面的断言照样有效
+      await p31
+        .waitForFunction(
+          () => (document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-turn-text")?.textContent || "").includes("上一个词"),
+          null,
+          { timeout: 4000 },
+        )
+        .catch(() => {});
+      await p31.waitForTimeout(300);
+      const markPt = await p31.evaluate((ph) => {
+        const m = [...document.querySelectorAll(".rf-hl")].find((e) => e.dataset.rfText === ph);
+        if (!m) return null;
+        const b = m.getBoundingClientRect();
+        return { x: b.left + 8, y: b.top + b.height / 2 };
+      }, PH);
+      if (markPt) await p31.mouse.click(markPt.x, markPt.y);
+      await p31.waitForTimeout(5000); // 等 A 的慢速回答本来该结束的时间
+      const panelNow = await panelOf(p31);
+      const after = q("select ai_gloss from contexts where id = ?", before.id)[0];
+      const engGloss = q("select ai_gloss from contexts where quote = 'engineer' order by created_at desc limit 1")[0]?.ai_gloss ?? null;
+      check(
+        "D10 回答还在输出时换到别的词：上一个词的回答不出现在新词侧栏，也不写进任何记录",
+        Boolean(markPt) &&
+          panelNow.word === PH &&
+          !panelNow.turns.join("").includes("不该出现") &&
+          after.ai_gloss === before.ai_gloss &&
+          !(engGloss ?? "").includes("不该出现"),
+        `侧栏=${panelNow.word} B 被改动=${after.ai_gloss !== before.ai_gloss} A 半截已存=${(engGloss ?? "").includes("不该出现")}`,
+      );
+    }
     await p31.close();
 
     if (process.env.SHOT_DIR) {

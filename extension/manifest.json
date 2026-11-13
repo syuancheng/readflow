@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ReadFlow · 网页阅读助手",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "把正在看的网页一键导入 ReadFlow；在任意网页高亮你存过的单词/短语，划词即可查词、收进词库。",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],

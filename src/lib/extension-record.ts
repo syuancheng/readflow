@@ -339,3 +339,29 @@ export function recallWord(
     },
   };
 }
+
+/** 这条记录挂在哪篇文章上（只认这个词条下的记录，contextId 是客户端传来的） */
+export function textIdOfContext(wordId: string, contextId: string): string | null {
+  const row = db
+    .select({ textId: contexts.textId })
+    .from(contexts)
+    .where(and(eq(contexts.id, contextId), eq(contexts.userWordId, wordId)))
+    .get();
+  return row?.textId ?? null;
+}
+
+/**
+ * 「取消记录」之后，如果这篇网页摘录已经没有任何记录了，就把它删掉（段落随外键级联删除）。
+ * 只删本人的、source_type='web' 的摘录；整篇导入的文章绝不动。
+ */
+export function pruneEmptyExcerpt(textId: string, userId: string): void {
+  const text = db
+    .select({ id: texts.id })
+    .from(texts)
+    .where(and(eq(texts.id, textId), eq(texts.userId, userId), eq(texts.sourceType, "web")))
+    .get();
+  if (!text) return;
+  const left = db.select({ id: contexts.id }).from(contexts).where(eq(contexts.textId, textId)).get();
+  if (left) return;
+  db.delete(texts).where(eq(texts.id, textId)).run();
+}

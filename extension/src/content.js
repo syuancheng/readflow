@@ -573,7 +573,7 @@
     const s = panelState;
     const opts = askOptions();
     return `
-      <button class="rf-ai-primary" data-act="ask-toggle" ${s.busy ? "disabled" : ""}>✨ 问 AI ▾</button>
+      <button class="rf-ai-primary" data-act="ask-toggle" ${s.busy || s.dictLoading ? "disabled" : ""}>✨ 问 AI ▾</button>
       <div class="rf-ask-menu">
         ${opts
           .map(
@@ -661,6 +661,9 @@
   }
 
   function openShell(quote) {
+    // 换词必须先停掉上一个词还在流式输出的回答：否则它的后半段会拼进新词的对话串，
+    // 讲完还会被 saveGloss 存进新词的记录（P31 验收时复现过）
+    abortStream();
     panelSeq++;
     currentWord = quote;
     threadTurns = [];
@@ -743,7 +746,9 @@
    * req 为空 = 默认讲解；forceWord 把「同句加深」清零；wholeSentence 用整句提问。
    */
   function triggerAI(req = {}) {
-    if (!panelState || panelState.busy) return;
+    // 记录还没回来（dictLoading）时不能问：回来后 applyPayload 会换掉整个对话串，
+    // 这时发起的回答既显示不出来、也没有记录 ID 可存
+    if (!panelState || panelState.busy || panelState.dictLoading) return;
     if (typeof chrome.runtime.connect !== "function") {
       panelState.error = "当前浏览器不支持流式请求，请升级 Chrome";
       renderPanel();
@@ -782,16 +787,30 @@
         };
 
     const index = threadTurns.length;
-    threadTurns.push({ ask: req.ask, text: "", status: "loading", req });
+    const turnRef = { ask: req.ask, text: "", status: "loading", req };
+    threadTurns.push(turnRef);
     s.busy = true;
     renderPanel();
+
+    // 这段回答属于「发起时」的那个词：记下面板序号和记录 ID。
+    // 之后面板换了词或关了，迟到的片段一律丢弃，也不能写进别的记录。
+    const seq = panelSeq;
+    const contextId = s.contextId;
 
     const port = chrome.runtime.connect({ name: "rf:explainStream" });
     streamPort = port;
 
     port.onMessage.addListener((msg) => {
+      if (seq !== panelSeq) {
+        try {
+          port.disconnect();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       const turn = threadTurns[index];
-      if (!turn) return;
+      if (!turn || turn !== turnRef) return;
       if (msg && typeof msg.chunk === "string") {
         turn.text += msg.chunk;
         if (turn.text.includes(STREAM_RESET)) turn.text = turn.text.split(STREAM_RESET).pop() || "";
@@ -816,7 +835,7 @@
         turn.status = "done";
         if (panelState) panelState.busy = false;
         renderPanel();
-        void saveGloss();
+        void saveGloss(contextId);
         try {
           port.disconnect();
         } catch {
@@ -842,14 +861,15 @@
   }
 
   /** 每段回答结束后把「所有成功且不是错误提示的回答」整串写回这条记录 */
-  async function saveGloss() {
-    if (!panelState?.contextId) return;
+  async function saveGloss(contextId) {
+    // 只写回发起这段回答的那条记录；面板已经换成别的记录就不写
+    if (!contextId || panelState?.contextId !== contextId) return;
     const turns = threadTurns
       .filter((t) => t.status === "done" && t.text.trim())
       .map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text }));
     if (!turns.length) return;
     try {
-      await send({ type: "rf:gloss", body: { contextId: panelState.contextId, turns } });
+      await send({ type: "rf:gloss", body: { contextId, turns } });
     } catch {
       // 存不进就算了：下次点这个词还能重新问，别打断阅读
     }

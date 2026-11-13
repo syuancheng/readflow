@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
+import { blockSimilarity,
   locateInParagraphs,
   normalizeBlockText,
   stripHash,
@@ -136,4 +136,40 @@ test("textFragmentUrl：前后文为空时省略对应分隔符", () => {
 
   const withSuffix = textFragmentUrl("https://e.com/a", "hello", "", "again");
   assert.equal(withSuffix, "https://e.com/a#:~:text=hello,-again");
+});
+
+/* ---------- P31 验收修复：标题不能被当成正文段落 ---------- */
+
+const withHeading = [
+  { id: "heading", content: "Skills" },
+  { id: "body", content: "Skills are prompts and contextual resources that activate on demand." },
+];
+
+test("locateInParagraphs：网页多了脚注标记，仍定位到正文段，不会落到同名标题上", () => {
+  const block = "Skills are prompts and contextual resources that activate on demand [1].";
+  const first = locateInParagraphs(withHeading, block, 0, 6);
+  assert.equal(first?.paragraphId, "body");
+  const at = block.indexOf("demand");
+  const last = locateInParagraphs(withHeading, block, at, at + 6);
+  assert.equal(last?.paragraphId, "body");
+  assert.equal(withHeading[1].content.slice(last!.start, last!.end), "demand");
+});
+
+test("locateInParagraphs：正文和网页差太多时宁可返回 null，也不把标题当成同一段", () => {
+  const block = "Skills turn a general model into a specialist with the right context, loaded on demand.";
+  assert.equal(locateInParagraphs(withHeading, block, 0, 6), null);
+});
+
+test("locateInParagraphs：网页把标题和正文合进一个元素，点正文里的词落到正文段", () => {
+  const block = `${withHeading[0].content} ${withHeading[1].content}`;
+  const at = block.indexOf("prompts");
+  const hit = locateInParagraphs(withHeading, block, at, at + 7);
+  assert.equal(hit?.paragraphId, "body");
+});
+
+test("blockSimilarity：短段落被长块包含时得分很低，几乎相同的两段得分高", () => {
+  assert.ok(blockSimilarity("Skills", withHeading[1].content) < 0.2);
+  assert.ok(
+    blockSimilarity(withHeading[1].content, "Skills are prompts and contextual resources that activate on demand [1].") >= 0.8,
+  );
 });

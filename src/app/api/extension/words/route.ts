@@ -6,6 +6,7 @@ import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { preflight, requireExtensionUser, withCors } from "@/lib/extension-http";
 import { shortGloss, inlineGloss } from "@/lib/gloss";
 import { lookup } from "@/lib/dict";
+import { stripHash } from "@/lib/web-anchor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -112,7 +113,10 @@ export async function POST(req: Request) {
     return withCors(NextResponse.json({ ok: false, error: "缺少要收藏的词" }, { status: 400 }));
   }
   const sentence = (body.sentence ?? word).trim().slice(0, 600) || word;
-  const url = (body.url ?? "").trim().slice(0, 500);
+  // 网址会被词库拿去生成「在原网页中打开」的链接：只收 http / https，
+  // 其它（javascript:、data: 等）一律当作没给网址，与 /api/extension/record 一致
+  const rawUrl = (body.url ?? "").trim().slice(0, 500);
+  const url = /^https?:\/\//i.test(rawUrl) ? stripHash(rawUrl) : "";
   const title = (body.title ?? url ?? "网页摘录").trim().slice(0, 200) || "网页摘录";
 
   let dictResult: ReturnType<typeof lookup> = { entry: null, originalForm: word, lemmaForm: word };
