@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProviderId } from "@/lib/config";
 import { PROVIDERS } from "@/lib/config";
 import { withRetry } from "@/lib/retry";
@@ -21,8 +21,9 @@ import {
   applyModelOption,
   CUSTOM_MODEL_OPTION,
   docsUrlFor,
-  filterNavGroups,
-  isPresetModel,
+    filterNavGroups,
+    LEARNER_CHANGED_EVENT,
+    isPresetModel,
   modelOptionsFor,
   normalizeEndpoint,
   presetFor,
@@ -304,16 +305,22 @@ export default function SettingsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 关闭时通知阅读页重读「反馈行」开关，不用刷新页面就生效 */
+  const handleClose = useCallback(() => {
+    window.dispatchEvent(new Event(LEARNER_CHANGED_EVENT));
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (modelMenuOpen) setModelMenuOpen(false);
       else if (editor) setEditor(null);
-      else onClose();
+      else handleClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [editor, modelMenuOpen, onClose]);
+  }, [editor, modelMenuOpen, handleClose]);
 
   /** 统一写配置：每次只提交本次操作涉及的字段，保存后立即生效 */
   async function put(body: Record<string, unknown>): Promise<SettingsPayload | null> {
@@ -590,7 +597,7 @@ export default function SettingsDialog({
   const options = editor ? modelOptionsFor(editor.id) : [];
 
   return (
-    <div className="st-overlay" onMouseDown={onClose}>
+    <div className="st-overlay" onMouseDown={handleClose}>
       <div
         className="st-modal"
         role="dialog"
@@ -599,7 +606,7 @@ export default function SettingsDialog({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="st-head">
-          <button className="st-close" onClick={onClose} aria-label="关闭设置">
+          <button className="st-close" onClick={handleClose} aria-label="关闭设置">
             <span className="st-close-x">×</span>
           </button>
         </div>

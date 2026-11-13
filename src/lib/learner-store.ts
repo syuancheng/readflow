@@ -14,6 +14,8 @@ import { normalizeSurvey, surveyPrior, type SurveyAnswers } from "./learner/surv
 import { buildLearnerBlock } from "./learner/profile-text";
 import { computeBehaviorStats, mergeProfile } from "./learner/model";
 import type { AskKind, BehaviorStats, Feedback, LearnerEvent, LearnerLevel } from "./learner/types";
+import { EMPTY_BEHAVIOR_STATS } from "./learner/types";
+import { validateNote, type NotePromptInput } from "./learner/note";
 
 export type LearnerRow = {
   user_id: string;
@@ -297,6 +299,99 @@ type EventRow = {
   created_at: number;
   context_id: string | null;
 };
+
+/* ------------------------------------------------------------------ *
+ * P32 阶段三：老师笔记（F3）与「清空 AI 记忆」（F6）的读写。
+ * 只新增列值写入，不删 explain_events、不动已有字段与接口结构。
+ * ------------------------------------------------------------------ */
+
+/**
+ * 用户手改笔记（F6「这不准确」）：按 §5.1 只校验长度和 Markdown，
+ * 置 note_user_edited=1。不动 note_updated_at / 游标，让下次 AI 更新时
+ * 把这段内容作为重要参考改写，而不是把它当成「刚更新过」跳过。
+ */
+export function editNote(userId: string, text: string): string {
+  const v = validateNote(text, "user");
+  if (!v.ok) throw new Error(v.reason);
+  getLearner(userId);
+  sqlite
+    .prepare(
+      `UPDATE learner_profiles SET note = ?, note_user_edited = 1, updated_at = ?
+       WHERE user_id = ?`,
+    )
+    .run(v.note, Date.now(), userId);
+  return v.note;
+}
+
+/** 生成成功后落库：游标前进、清掉错误、把「用户改过」标记归 0 */
+export function saveNote(userId: string, note: string, lookupsTotal: number): void {
+  const now = Date.now();
+  sqlite
+    .prepare(
+      `UPDATE learner_profiles
+         SET note = ?, note_updated_at = ?, note_lookup_cursor = ?,
+             note_user_edited = 0, note_last_error = NULL, updated_at = ?
+       WHERE user_id = ?`,
+    )
+    .run(note, now, lookupsTotal, now, userId);
+}
+
+/** 校验失败 / 模型出错：只记日志和 note_last_error，游标不动，下次自动重试 */
+export function recordNoteError(userId: string, reason: string): void {
+  getLearner(userId);
+  sqlite
+    .prepare("UPDATE learner_profiles SET note_last_error = ?, updated_at = ? WHERE user_id = ?")
+    .run(String(reason).slice(0, 300), Date.now(), userId);
+}
+
+/**
+ * F6「清空 AI 记忆」：清掉笔记和行为推断缓存，之后从问卷重新开始。
+ * 查词记录本身不删 —— 用 memory_reset_at 让画像只算这之后的事件。
+ */
+export function resetMemory(userId: string): void {
+  getLearner(userId);
+  const now = Date.now();
+  sqlite
+    .prepare(
+      `UPDATE learner_profiles
+         SET stats = NULL, stats_updated_at = NULL,
+             note = NULL, note_updated_at = NULL, note_user_edited = 0,
+             note_lookup_cursor = 0, note_last_error = NULL,
+             memory_reset_at = ?, updated_at = ?
+       WHERE user_id = ?`,
+    )
+    .run(now, now, userId);
+}
+
+/** 拼 buildNotePrompt 的输入：旧笔记 + 缓存的统计 + 最近问答摘要 */
+export function notePromptInputFor(userId: string): NotePromptInput {
+  const row = getLearner(userId);
+  const stats = getProfileForPrompt(userId).stats ?? EMPTY_BEHAVIOR_STATS;
+  const rows = sqlite
+    .prepare(
+      `SELECT word, ask_kind, feedback, repeat_count FROM explain_events
+       WHERE user_id = ? AND created_at > ?
+       ORDER BY created_at DESC LIMIT 30`,
+    )
+    .all(userId, row.memory_reset_at) as {
+    word: string | null;
+    ask_kind: string | null;
+    feedback: string | null;
+    repeat_count: number | null;
+  }[];
+  const recent = rows.map((r) => ({
+    word: String(r.word ?? ""),
+    ...(r.ask_kind ? { askKind: String(r.ask_kind) } : {}),
+    ...(r.feedback ? { feedback: String(r.feedback) } : {}),
+    ...(typeof r.repeat_count === "number" ? { repeatCount: r.repeat_count } : {}),
+  }));
+  return {
+    oldNote: row.note,
+    userEdited: row.note_user_edited === 1,
+    stats,
+    recent,
+  };
+}
 
 /** 最近 90 天、最多 500 条，且只在「清空记忆」之后 */
 export function loadEvents(userId: string, now: number = Date.now()): LearnerEvent[] {

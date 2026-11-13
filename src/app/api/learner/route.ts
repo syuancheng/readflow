@@ -10,6 +10,7 @@ import {
   saveSurvey,
   setShowFeedback,
   surveyOf,
+  editNote,
 } from "@/lib/learner-store";
 import { SURVEY_QUESTIONS, EXAM_SCORE_BANDS } from "@/lib/learner/survey";
 
@@ -63,7 +64,7 @@ export async function GET() {
 export async function PUT(req: Request) {
   const user = await currentUser();
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
-  let body: { survey?: unknown; showFeedback?: unknown };
+  let body: { survey?: unknown; showFeedback?: unknown; note?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -74,5 +75,16 @@ export async function PUT(req: Request) {
   }
   if (body.survey !== undefined) saveSurvey(user.id, body.survey);
   if (typeof body.showFeedback === "boolean") setShowFeedback(user.id, body.showFeedback);
+  // F6「这不准确」：用户直接编辑老师笔记，长度 / Markdown 由 editNote 校验
+  if (body.note !== undefined) {
+    try {
+      editNote(user.id, typeof body.note === "string" ? body.note : "");
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "笔记保存失败" },
+        { status: 400 },
+      );
+    }
+  }
   return GET();
 }

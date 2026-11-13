@@ -26,7 +26,8 @@ const P_DIFFICULTY = "- 常见难点：";
 const P_FEEDBACK = "- 以往反馈：";
 const P_NOTE = "- 老师笔记：";
 
-const DIFFICULTY_LABEL: Record<BehaviorStats["difficulties"][number], string> = {
+/** 「AI 眼中的你」也复用同一份中文标签，避免页面说一套、提示词用另一套 */
+export const DIFFICULTY_LABEL: Record<BehaviorStats["difficulties"][number], string> = {
   long_sentence: "长句结构",
   vocabulary: "词汇量偏小",
   phrases: "短语和搭配",

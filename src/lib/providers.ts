@@ -138,6 +138,57 @@ export function streamChat(
     : openaiStream(p, turns, opts);
 }
 
+/**
+ * P32 F3：非流式一次性调用，返回完整文本。
+ * 老师笔记在后台生成，需要一次拿到全文做校验，不适合边流边拼。
+ * 与 testProvider 的区别是可以传任意 turns / 参数，且两种协议都支持。
+ */
+export async function completeChat(
+  p: ResolvedProvider,
+  turns: ChatTurn[],
+  opts: ChatOptions = {},
+): Promise<string> {
+  const temperature = opts.temperature ?? 0.3;
+  const maxTokens = opts.maxTokens ?? 400;
+
+  if (p.protocol === "openai") {
+    const res = await openaiClient(p).chat.completions.create({
+      model: p.model,
+      messages: turns,
+      temperature,
+      max_tokens: maxTokens,
+    });
+    return res.choices[0]?.message?.content?.trim() ?? "";
+  }
+
+  const system = turns.filter((t) => t.role === "system").map((t) => t.content).join("\n\n");
+  const messages = turns
+    .filter((t) => t.role === "user")
+    .map((t) => ({ role: "user" as const, content: t.content }));
+  const res = await fetch(`${cleanBaseUrl(p.baseUrl)}/messages`, {
+    method: "POST",
+    headers: {
+      "x-api-key": p.apiKey,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: p.model,
+      max_tokens: maxTokens,
+      temperature,
+      ...(system ? { system } : {}),
+      messages,
+    }),
+    signal: opts.signal ?? AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ProviderError(`Claude 接口错误（HTTP ${res.status}）：${body.slice(0, 200)}`, res.status);
+  }
+  const data = (await res.json()) as { content?: { text?: string }[] };
+  return (data.content ?? []).map((c) => c.text ?? "").join("").trim();
+}
+
 /** 设置页「测试连接」：最小 token 的一次非流式调用 */
 export async function testProvider(p: ResolvedProvider): Promise<string> {
   const turns: ChatTurn[] = [

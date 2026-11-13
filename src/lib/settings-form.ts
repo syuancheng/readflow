@@ -9,6 +9,12 @@
  */
 import { PROVIDERS, type ProviderId } from "./config";
 
+/**
+ * 学习档案变更后广播。阅读页据此重新读取「反馈行」开关，
+ * 这样在设置里关掉反馈行后不用刷新页面就会立刻生效（P32 阶段三补漏）。
+ */
+export const LEARNER_CHANGED_EVENT = "readflow.learner";
+
 export type FormValues = {
   apiKey: string;
   endpoint: string;

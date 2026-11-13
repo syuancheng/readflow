@@ -9,6 +9,7 @@ import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
 import { learnerBlockFor, logExplain } from "@/lib/learner-store";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
+import { maybeUpdateNote } from "@/lib/note-generator";
 
 const clamp = (v: unknown, lo: number, hi: number): number | undefined => {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -94,6 +95,15 @@ export async function handleExplain(
     });
   } catch (err) {
     console.error("[learner] 记录讲解事件失败:", err);
+  }
+
+  // P32 F3：后台尝试更新老师笔记。绝不 await —— 25 次 + 24 小时的判断、模型调用
+  // 与校验都不占用本次讲解的响应时间；站点没配模型或失败时只记 note_last_error。
+  // 放在写事件之后，让这次请教也能进「最近的提问摘要」。
+  try {
+    void maybeUpdateNote(user.id);
+  } catch (err) {
+    console.error("[learner] 触发老师笔记更新失败:", err);
   }
 
   const enriched: ExplainParams = {

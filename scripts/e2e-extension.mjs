@@ -898,6 +898,59 @@ try {
         `侧栏=${panelNow.word} B 被改动=${after.ai_gloss !== before.ai_gloss} A 半截已存=${(engGloss ?? "").includes("不该出现")}`,
       );
     }
+    await p31.goto(`${SITE}/p31`, { waitUntil: "load" });
+    await p31.waitForTimeout(700);
+    await p31.goto(`${SITE}/p31`, { waitUntil: "load" });
+    await p31.waitForTimeout(700);
+    // P32 阶段三补漏：站点开关 off 时，插件侧栏也不显示反馈行（真实 DOM）。
+    // 用一个新的、词典查不到的短语触发一次全新的 AI 讲解，避免点到已存记录走「回看」路径
+    // （回看本来就没有 answerId，会让「不显示」变成假阴性）。
+    await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "off" } });
+    const OFF_PHRASE = "scrutinize the deployment pipeline";
+    const offRect = await p31.evaluate((phrase) => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const n = walker.currentNode;
+        if (n.parentElement?.closest("#rf-ext-host")) continue;
+        const i = (n.nodeValue || "").indexOf(phrase);
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + phrase.length);
+        const rects = [...r.getClientRects()].filter((b) => b.width > 0);
+        if (!rects.length) continue;
+        const first = rects[0], last = rects[rects.length - 1];
+        return { x1: first.left + 2, y1: first.top + first.height / 2, x2: last.right - 2, y2: last.top + last.height / 2 };
+      }
+      return null;
+    }, OFF_PHRASE);
+    check("D5e-0 能在测试网页里定位到新的短语选区", Boolean(offRect), JSON.stringify(offRect));
+    if (offRect) {
+      await p31.mouse.move(offRect.x1, offRect.y1);
+      await p31.mouse.down();
+      await p31.mouse.move(offRect.x2, offRect.y2, { steps: 15 });
+      await p31.mouse.up();
+      const offSelected = await p31.waitForFunction(
+        (phrase) => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on .rf-word")?.textContent?.trim() === phrase,
+        OFF_PHRASE, { timeout: 8000 },
+      ).then(() => true).catch(() => false);
+      if (!offSelected) {
+        await p31.evaluate((p) => {
+          document.querySelector("#p31b")?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: p.x2, clientY: p.y2 }));
+        }, offRect);
+      }
+      const offAiDone = await p31.waitForFunction(() => {
+        const t = [...(document.getElementById("rf-ext-host")?.shadowRoot?.querySelectorAll(".rf-turn-text") ?? [])]
+          .map((e) => e.textContent || "").join(" ");
+        return t.includes("假模型") && !t.includes("生成中");
+      }, null, { timeout: 25000 }).then(() => true).catch(() => false);
+      const offFb = await p31.evaluate(() =>
+        document.getElementById("rf-ext-host")?.shadowRoot?.querySelectorAll(".rf-feedback-row").length ?? 0);
+      check("D5e 站点开关 off 时插件侧栏不显示反馈行（先确认讲解已完成）",
+        offAiDone && offFb === 0, `回答完成=${offAiDone} 反馈行=${offFb}`);
+    }
+    await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "on" } });
+
     await p31.close();
 
     if (process.env.SHOT_DIR) {

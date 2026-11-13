@@ -16,6 +16,7 @@ import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 import type { AskKind, Feedback } from "@/lib/learner/types";
+import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
 
 /**
  * 一个 Block IR 落库后的一行。content 仍是「用户可见的纯文本」，
@@ -650,13 +651,22 @@ export default function Reader({
   const [feedbackEnabled, setFeedbackEnabled] = useState(false);
   useEffect(() => {
     let alive = true;
-    void fetch("/api/learner")
-      .then((r) => r.json())
-      .then((d: { showFeedback?: boolean; personalized?: boolean }) => {
-        if (alive) setFeedbackEnabled(d.showFeedback !== false && d.personalized !== false);
-      })
-      .catch(() => { /* 读不到就不显示反馈行，不影响阅读 */ });
-    return () => { alive = false; };
+    const refresh = () => {
+      void fetch("/api/learner")
+        .then((r) => r.json())
+        .then((d: { showFeedback?: boolean; personalized?: boolean }) => {
+          if (alive) setFeedbackEnabled(d.showFeedback !== false && d.personalized !== false);
+        })
+        .catch(() => { /* 读不到就不显示反馈行，不影响阅读 */ });
+    };
+    refresh();
+    // 设置弹窗关闭 / 「学习档案」里改动开关后立刻重读，不用刷新页面。
+    // 以前只在挂载时读一次，关掉反馈行要等到下次打开文章才生效。
+    window.addEventListener(LEARNER_CHANGED_EVENT, refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener(LEARNER_CHANGED_EVENT, refresh);
+    };
   }, []);
   /** 拖动中的预览范围（按下即整词）；松手清空 */
   const [dragSel, setDragSel] = useState<{ pid: string; start: number; end: number } | null>(null);

@@ -44,7 +44,12 @@ fs.mkdirSync(TMP, { recursive: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 
 // ---------- 假模型：记下每次请求的 messages，供断言使用 ----------
+// 流式 = 讲解（沿用原来的 lastCall 语义）；非流式 = 后台生成老师笔记。
+// 两类分开记，避免后台笔记调用把 lastCall 顶掉，让既有断言全部保持有效。
 const modelCalls = [];
+const noteCalls = [];
+const FAKE_NOTE =
+  "词汇量约六千，技术语境的理解强于日常词汇；常在带长定语从句的句子上卡住，偏好简短直接的解释，很少追问例句，对介词搭配不太敏感。";
 const fake = http.createServer((req, res) => {
   if (req.url.split("?")[0] === "/v1/chat/completions") {
     let buf = "";
@@ -52,7 +57,20 @@ const fake = http.createServer((req, res) => {
     req.on("end", () => {
       let body = {};
       try { body = JSON.parse(buf); } catch { /* 忽略畸形请求 */ }
-      modelCalls.push({ messages: body.messages ?? [], stream: body.stream !== false });
+      const streaming = body.stream === true;
+      if (!streaming) {
+        noteCalls.push({ messages: body.messages ?? [], stream: false });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          id: "fake-note",
+          object: "chat.completion",
+          created: 0,
+          model: "fake-model",
+          choices: [{ index: 0, message: { role: "assistant", content: FAKE_NOTE }, finish_reason: "stop" }],
+        }));
+        return;
+      }
+      modelCalls.push({ messages: body.messages ?? [], stream: true });
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
       for (const part of ["释义：测试", "\n假模型讲解"]) {
         res.write(`data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
@@ -439,6 +457,250 @@ try {
     }
     await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: true } });
   }
+
+  // ================= H. 场景 7：25 次查词 + 24 小时 → 后台生成老师笔记 =================
+  const ownerId = q("select id from users where username = 'p32_owner'")[0].id;
+  const profile = () => q("select * from learner_profiles where user_id = ?", ownerId)[0];
+  const update = (sql, ...args) => {
+    const d = new Database(DB);
+    try { d.prepare(sql).run(...args); } finally { d.close(); }
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitProfile = async (pred, timeout = 12000) => {
+    for (let i = 0; i < timeout / 200; i++) {
+      const r = profile();
+      if (pred(r)) return r;
+      await sleep(200);
+    }
+    return profile();
+  };
+
+  // 模拟「上次生成是 25 小时前、当时游标为 5」：G 段已灌 30 次查词 → 新增 ≥25 且满 24 小时
+  const OLD_NOTE = "旧的观察：常查长句，喜欢简短解释。";
+  update(
+    `UPDATE learner_profiles SET note = ?, note_updated_at = ?, note_lookup_cursor = 5,
+       note_user_edited = 0, note_last_error = NULL, stats = NULL, stats_updated_at = NULL
+     WHERE user_id = ?`,
+    OLD_NOTE, Date.now() - 25 * 3600 * 1000, ownerId,
+  );
+  const lookupsBefore = q(
+    "select count(*) n from explain_events where user_id = ? and kind = 'lookup'", ownerId,
+  )[0].n;
+  check("H0 场景 7 前置：新增查词 ≥25 且距上次更新 ≥24 小时",
+    lookupsBefore - 5 >= 25, `查词=${lookupsBefore} 上次游标=5 新增=${lookupsBefore - 5}`);
+
+  const usageBefore = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", ownerId)[0].n;
+  const noteCallsBefore = noteCalls.length;
+  await explain(owner);
+  const hRow = await waitProfile((r) => Boolean(r.note) && r.note !== OLD_NOTE);
+  check("H1 满足条件后后台生成新笔记（改写而非追加），长度 ≤300 字",
+    Boolean(hRow.note) && hRow.note !== OLD_NOTE && hRow.note.length <= 300 && !hRow.note.includes(OLD_NOTE),
+    `长度=${hRow.note?.length} 内容=${String(hRow.note).slice(0, 28)}`);
+  check("H2 游标前进到当前查词总数、错误清空、用户编辑标记归 0",
+    hRow.note_lookup_cursor === lookupsBefore && hRow.note_last_error === null && hRow.note_user_edited === 0,
+    `cursor=${hRow.note_lookup_cursor}/${lookupsBefore} err=${hRow.note_last_error} edited=${hRow.note_user_edited}`);
+  const noteSystem = noteCalls.at(-1)?.messages?.[0]?.content ?? "";
+  check("H3 笔记走非流式调用，提示词写明「不要列出具体单词」「以统计数据为准」",
+    noteCalls.length > noteCallsBefore && noteCalls.at(-1)?.stream === false &&
+    noteSystem.includes("不要列出具体单词") && noteSystem.includes("以统计数据为准"),
+    `笔记调用=${noteCalls.length - noteCallsBefore}`);
+  const usageAfter = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", ownerId)[0].n;
+  const noteGenSrc = fs.readFileSync(path.join(ROOT, "src/lib/note-generator.ts"), "utf8");
+  check("H4 生成笔记不扣每日免费 AI 次数（ai_usage 不增，且源码没有实际调用扣额度函数）",
+    usageAfter === usageBefore &&
+    !/consumeAiQuota\s*\(/.test(noteGenSrc) && !/from\s+["'][^"']*ai-quota/.test(noteGenSrc),
+    `ai_usage ${usageBefore} → ${usageAfter}`);
+  const hLearner = await api("/api/learner", { cookie: owner });
+  check("H5 GET /api/learner 返回笔记全文与更新时间",
+    hLearner.data?.note === hRow.note && typeof hLearner.data?.noteUpdatedAt === "number",
+    `updatedAt=${hLearner.data?.noteUpdatedAt}`);
+
+  // 普通账号（用站点 Key，讲解本身会计入免费额度）满足笔记条件：
+  // 一次「讲解 + 后台笔记」应该只扣 1 次额度；若笔记也去扣，这里会变成 2。
+  const friendId = q("select id from users where username = 'p32_friend'")[0].id;
+  {
+    const d = new Database(DB);
+    const ins = d.prepare(
+      "INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES (?, ?, 'lookup', 'reader', 'artifact', ?)",
+    );
+    d.transaction(() => {
+      for (let i = 0; i < 25; i++) ins.run(`h4b-lookup-${i}`, friendId, Date.now() - i * 1000);
+    })();
+    d.close();
+  }
+  const usageFBefore = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", friendId)[0].n;
+  const noteCallsFBefore = noteCalls.length;
+  await explain(friendCookie);
+  let friendNote = null;
+  for (let i = 0; i < 60 && !friendNote; i++) {
+    friendNote = q("select note from learner_profiles where user_id = ?", friendId)[0]?.note ?? null;
+    if (!friendNote) await sleep(200);
+  }
+  const usageFAfter = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", friendId)[0].n;
+  check("H4b 普通账号：一次讲解 + 一次后台笔记只扣 1 次免费额度（笔记不额外扣）",
+    Boolean(friendNote) && noteCalls.length > noteCallsFBefore && usageFAfter - usageFBefore === 1,
+    `笔记=${Boolean(friendNote)} 笔记调用=${noteCalls.length - noteCallsFBefore} 额度增量=${usageFAfter - usageFBefore}`);
+
+  // 站点没配模型：不生成、不写错误、返回 no_model
+  update("DELETE FROM settings WHERE key = 'ai.custom.apiKey'");
+  update(
+    `UPDATE learner_profiles SET note = NULL, note_updated_at = NULL,
+       note_lookup_cursor = 0, note_last_error = NULL WHERE user_id = ?`, ownerId,
+  );
+  const noModelLearner = await api("/api/learner", { cookie: owner });
+  check("H6 站点没配模型时 GET /api/learner 返回原因 no_model",
+    noModelLearner.data?.noteReason === "no_model", JSON.stringify(noModelLearner.data?.noteReason));
+  const callsBeforeNoModel = noteCalls.length;
+  await explain(owner);
+  await sleep(1200);
+  const afterNoModel = profile();
+  check("H7 站点没配模型时不生成笔记，也不写 note_last_error",
+    afterNoModel.note === null && afterNoModel.note_last_error === null &&
+    noteCalls.length === callsBeforeNoModel,
+    `note=${afterNoModel.note} err=${afterNoModel.note_last_error} 调用=${noteCalls.length - callsBeforeNoModel}`);
+  await api("/api/settings", {
+    cookie: owner, method: "PUT",
+    body: {
+      activeProvider: "custom",
+      providers: { custom: { apiKey: "fake-key-for-test", model: "fake-model", baseUrl: `${SITE}/v1` } },
+    },
+  });
+
+  // ================= I. 场景 8：编辑笔记 + 清空 AI 记忆 =================
+  const CUSTOM_NOTE = "我自己改的观察：偏好一句话讲完，别展开语法。";
+  const putNote = await api("/api/learner", { cookie: owner, method: "PUT", body: { note: CUSTOM_NOTE } });
+  check("I1 编辑笔记保存成功，note_user_edited = 1",
+    putNote.status === 200 && putNote.data?.note === CUSTOM_NOTE && profile().note_user_edited === 1,
+    `status=${putNote.status} edited=${profile().note_user_edited}`);
+  const badNote = await api("/api/learner", { cookie: owner, method: "PUT", body: { note: "**加粗笔记**" } });
+  check("I2 带 Markdown 的笔记被拒绝（400），原笔记不变",
+    badNote.status === 400 && profile().note === CUSTOM_NOTE, `status=${badNote.status}`);
+  await explain(owner);
+  const userWithNote = lastCall().messages[1]?.content ?? "";
+  check("I3 下一次讲解的学生档案里带着用户改过的笔记（作为参考保留）",
+    userWithNote.includes("- 老师笔记：") && userWithNote.includes(CUSTOM_NOTE),
+    userWithNote.split("\n").find((l) => l.includes("老师笔记")) ?? "无");
+
+  // 新界面截图（1440px / 390px）：带老师笔记的「AI 眼中的你」，shot() 会断言无横向溢出
+  await ownerPage.setViewportSize({ width: 1440, height: 900 });
+  await ownerPage.goto(BASE, { waitUntil: "networkidle" });
+  await ownerPage.click(".pm-trigger");
+  await ownerPage.getByRole("menuitem", { name: /设置/ }).click();
+  await ownerPage.getByRole("button", { name: "学习档案" }).click();
+  await ownerPage.waitForTimeout(700);
+  check("I3a 「AI 眼中的你」渲染出可编辑的笔记块与两个操作按钮",
+    (await ownerPage.locator("#st-learner-ai-view .rf-learner-note").count()) === 1 &&
+    (await ownerPage.getByRole("button", { name: "这不准确" }).count()) === 1 &&
+    (await ownerPage.getByRole("button", { name: "清空 AI 记忆" }).count()) === 1);
+  const noteBg = await ownerPage.locator("#st-learner-ai-view .rf-learner-note")
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  check("I3b 笔记块用紫色系底色 --rf-ai-soft（rgb 245,236,255）",
+    noteBg === "rgb(245, 236, 255)", noteBg);
+  await shot(ownerPage, "learner-ai-view", 1440);
+  await shot(ownerPage, "learner-ai-view", 390);
+  // 关掉设置弹窗，后面 J/K 段要用阅读页
+  await ownerPage.locator(".st-head .st-close").click();
+  await ownerPage.waitForTimeout(200);
+
+  const eventsBefore = q("select count(*) n from explain_events")[0].n;
+  const resetRes = await api("/api/learner/reset", { cookie: owner, method: "POST" });
+  const afterReset = profile();
+  check("I4 清空 AI 记忆：笔记与推断缓存清空、游标归零、重置时间前移",
+    resetRes.status === 200 && resetRes.data?.ok === true &&
+    afterReset.note === null && afterReset.stats === null && afterReset.note_lookup_cursor === 0 &&
+    afterReset.memory_reset_at > 0,
+    `note=${afterReset.note} stats=${afterReset.stats} cursor=${afterReset.note_lookup_cursor} resetAt=${afterReset.memory_reset_at}`);
+  check("I5 清空不删查词记录（explain_events 条数不变）",
+    q("select count(*) n from explain_events")[0].n === eventsBefore,
+    `${eventsBefore} → ${q("select count(*) n from explain_events")[0].n}`);
+  const learnerAfterReset = await api("/api/learner", { cookie: owner });
+  check("I6 清空后水平依据不再引用历史查词，从问卷重新开始",
+    !/最近 \d+ 次查词/.test(learnerAfterReset.data?.level?.basisText ?? "") &&
+    learnerAfterReset.data?.note === null,
+    `basis=${learnerAfterReset.data?.level?.basisText}`);
+  await explain(owner);
+  const userAfterReset = lastCall().messages[1]?.content ?? "";
+  check("I7 清空后下一次讲解的档案里不再有旧笔记内容",
+    !userAfterReset.includes(CUSTOM_NOTE) && !userAfterReset.includes(FAKE_NOTE) &&
+    !userAfterReset.includes("- 老师笔记："),
+    userAfterReset.slice(0, 80));
+
+  // ================= J. 补漏 1：站点开关 off → 两端反馈行都不显示 =================
+  await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "off" } });
+  const lOff = await api("/api/learner", { cookie: owner });
+  check("J1 站点开关 off 时 /api/learner 返回 personalized=false",
+    lOff.data?.personalized === false, `personalized=${lOff.data?.personalized}`);
+  // 插件侧栏：content.js 只在 payload.feedbackEnabled 为真时渲染反馈行
+  const jBlock = "A careful engineer will scrutinize the deployment pipeline twice.";
+  const jAt = jBlock.indexOf("scrutinize");
+  const extRec = await api("/api/extension/record", {
+    token, method: "POST",
+    body: { word: "scrutinize", block: jBlock, start: jAt, end: jAt + "scrutinize".length, url: "https://example.com/p31" },
+  });
+  const contentSrc = fs.readFileSync(path.join(ROOT, "extension/src/content.js"), "utf8");
+  check("J2 站点开关 off 时插件侧栏不显示反馈行（payload.feedbackEnabled=false + 渲染契约）",
+    extRec.status === 200 && extRec.data?.feedbackEnabled === false &&
+    /if \(!panelState\?\.feedbackEnabled[\s\S]{0,120}return ""/.test(contentSrc),
+    `status=${extRec.status} feedbackEnabled=${extRec.data?.feedbackEnabled}`);
+
+  await ownerPage.setViewportSize({ width: 1440, height: 900 });
+  await ownerPage.goto(`${BASE}/texts/${textId}`, { waitUntil: "load" });
+  await ownerPage.waitForTimeout(900);
+  const jRect = await ownerPage.evaluate(() => {
+    const el = [...document.querySelectorAll("[data-pid] .w")].find((e) => e.textContent.trim() === "artifact");
+    if (!el) return null;
+    el.scrollIntoView({ block: "center" });
+    return el.getBoundingClientRect().toJSON();
+  });
+  if (jRect) {
+    await ownerPage.mouse.click(jRect.x + jRect.width / 2, jRect.y + jRect.height / 2);
+    await ownerPage.waitForTimeout(1200);
+    await ownerPage.locator('.reader-note button:has-text("问 AI")').click();
+    await ownerPage.locator(".rf-ask-chip").first().click();
+    const jAnswerDone = await ownerPage.waitForFunction(
+      () => (document.querySelector(".reader-note .rf-md")?.textContent ?? "").includes("假模型讲解"),
+      null, { timeout: 12000 },
+    ).then(() => true).catch(() => false);
+    const jRows = await ownerPage.locator(".reader-note .rf-feedback-row").count();
+    // 必须先确认讲解真的完成了，否则「不显示」有可能是回答根本没渲染出来的假阴性
+    check("J3 站点开关 off 时阅读页不显示反馈行（先确认讲解已完成）",
+      jAnswerDone && jRows === 0, `回答完成=${jAnswerDone} 行数=${jRows}`);
+  }
+  await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "on" } });
+
+  // ================= K. 补漏 3：设置弹窗关闭后重读开关，关反馈行立刻生效 =================
+  const dialogSrc = fs.readFileSync(path.join(ROOT, "src/components/SettingsDialog.tsx"), "utf8");
+  const readerSrcK = fs.readFileSync(path.join(ROOT, "src/components/Reader.tsx"), "utf8");
+  check("K1 设置弹窗关闭时广播学习档案变更事件",
+    /handleClose[\s\S]{0,220}LEARNER_CHANGED_EVENT/.test(dialogSrc));
+  check("K2 阅读页监听该事件并重新读取开关，不再只在挂载时读一次",
+    /addEventListener\(LEARNER_CHANGED_EVENT, refresh\)/.test(readerSrcK) && /refresh\(\)/.test(readerSrcK));
+
+  await ownerPage.goto(`${BASE}/texts/${textId}`, { waitUntil: "load" });
+  await ownerPage.waitForTimeout(900);
+  const kRect = await ownerPage.evaluate(() => {
+    const el = [...document.querySelectorAll("[data-pid] .w")].find((e) => e.textContent.trim() === "artifact");
+    if (!el) return null;
+    el.scrollIntoView({ block: "center" });
+    return el.getBoundingClientRect().toJSON();
+  });
+  if (kRect) {
+    await ownerPage.mouse.click(kRect.x + kRect.width / 2, kRect.y + kRect.height / 2);
+    await ownerPage.waitForTimeout(1200);
+    await ownerPage.locator('.reader-note button:has-text("问 AI")').click();
+    await ownerPage.locator(".rf-ask-chip").first().click();
+    await ownerPage.waitForSelector(".reader-note .rf-feedback-row", { timeout: 12000 }).catch(() => {});
+    const rowsBefore = await ownerPage.locator(".reader-note .rf-feedback-row").count();
+    await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: false } });
+    // 模拟设置弹窗关闭：不刷新页面，只广播事件
+    await ownerPage.evaluate(() => window.dispatchEvent(new Event("readflow.learner")));
+    await ownerPage.waitForTimeout(700);
+    const rowsAfter = await ownerPage.locator(".reader-note .rf-feedback-row").count();
+    check("K3 关反馈行后不刷新页面、只关设置弹窗，反馈行立刻消失",
+      rowsBefore > 0 && rowsAfter === 0, `${rowsBefore} → ${rowsAfter}`);
+  }
+  await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: true } });
+
   await ctxOwner.close();
 } catch (err) {
   fail++;

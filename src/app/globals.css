@@ -3711,3 +3711,47 @@ a:focus-visible,
   color: var(--rf-ai-text);
   font-weight: 700;
 }
+
+/* P32 F6：「AI 眼中的你」。紫色只用于 AI 的判断与笔记（design-system §1.1）。 */
+.rf-learner-ai {
+  color: var(--rf-ai-text);
+}
+.rf-learner-note {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-ai-soft);
+  color: var(--rf-ai-text);
+  font-size: var(--rf-text-sm);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rf-learner-note-meta {
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}
+.rf-learner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.rf-learner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.rf-learner-input {
+  font-weight: 400;
+  line-height: 1.8;
+  resize: vertical;
+}
+.rf-learner-count {
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}
