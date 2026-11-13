@@ -36,15 +36,16 @@ const cards = {
   ],
 };
 const model = http.createServer((req, res) => {
-  let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => {
+  let b = ""; req.on("data", (d) => (b += d)); req.on("end", async () => {
     const body = JSON.parse(b || "{}");
     if (body.stream) {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      for (const p of ["释义：短暂的\n", "形容转瞬即逝。\n", "制卡建议：正好在你词汇量的边缘"])
+      for (const p of ["释义：短暂的\n", "形容转瞬即逝。\n", "制卡建议：技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了"])
         res.write(`data: ${JSON.stringify({ id: "f", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta: { content: p }, finish_reason: null }] })}\n\n`);
       res.write("data: [DONE]\n\n"); return res.end();
     }
     const sys = body.messages?.[0]?.content ?? "";
+    if (!sys.includes("检查一道选择题")) await new Promise((r) => setTimeout(r, 1200)); // 让「正在做卡…」能被看到
     const content = sys.includes("检查一道选择题") ? JSON.stringify({ possible: [1] }) : JSON.stringify(cards);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ id: "f", object: "chat.completion", created: 0, model: "m", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: {} }));
@@ -154,13 +155,22 @@ try {
   await p3.getByRole("button", { name: "这个词在这句里什么意思" }).click();
   await p3.locator(".rf-card-suggest").waitFor({ timeout: 20000 }).catch(async (e) => { await p3.screenshot({ path: shots("reader-fail.png") }); console.log("页面文本:", (await p3.locator("body").innerText()).slice(0, 400)); throw e; });
   const answerText = await p3.locator(".rf-md").first().innerText();
-  check("R1 讲解正文里没有「制卡建议」那一行；理由单独显示为「💡 建议做成卡片：…」", !answerText.includes("制卡建议") && (await p3.locator(".rf-card-suggest").innerText()).includes("💡 建议做成卡片：正好在你词汇量的边缘"), answerText.slice(0, 60));
+  check("R1 讲解正文里没有「制卡建议」那一行；理由超过 30 字也完整显示（不截断、没有省略号）", !answerText.includes("制卡建议") && (await p3.locator(".rf-card-suggest").innerText()).includes("💡 建议做成卡片：技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了"), answerText.slice(0, 60));
   const btn = p3.getByRole("button", { name: "＋ 做成卡片" });
-  check("R2 有建议时按钮是紫色强调样式（不是绿色）", (await btn.getAttribute("class")).includes("rf-card-btn-suggest"));
+  check("R2 有建议时「做成卡片」有紫色点缀（不是绿色），且是和「问 AI」同一套按钮底盘", (await btn.getAttribute("class")).includes("rf-card-btn-suggest") && (await btn.getAttribute("class")).includes("duo-btn-white"));
+  const hs = await Promise.all([p3.getByRole("button", { name: /问 AI/ }), btn].map((l) => l.evaluate((e) => Math.round(e.getBoundingClientRect().height))));
+  check("R2b 「问 AI」与「做成卡片」同高", hs[0] === hs[1], `高度=${hs}`);
+  const bar = await p3.locator(".rf-card-suggest").evaluate((e) => ({ order: getComputedStyle(e).order, bg: getComputedStyle(e).backgroundColor }));
+  check("R2c 建议条在按钮组上方（order:-1）且是浅紫底", bar.order === "-1" && bar.bg === "rgb(245, 236, 255)", JSON.stringify(bar));
   await p3.screenshot({ path: shots("reader-suggest-1440.png") });
-  await btn.click();
+  const box = await btn.boundingBox();
+  await p3.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p3.mouse.down();
+  const pressed = await btn.evaluate((e) => getComputedStyle(e).transform);
+  await p3.mouse.up({ button: "left" }).catch(() => {});
+  check("R2d 按下时有下沉反馈（:active 位移）", pressed !== "none", pressed);
   await p3.getByText("正在做卡…").waitFor({ timeout: 3000 });
-  check("R3 点击后马上变成「正在做卡…」", true);
+  check("R3 点击后马上变成「正在做卡…」，同一个位置、带转圈、禁用并标 aria-busy", (await p3.locator(".rf-card-btn .rf-spin").count()) === 1 && (await p3.locator(".rf-card-btn[aria-busy=true]").count()) === 1);
   await p3.getByText(/已做成 2 张卡/).waitFor({ timeout: 30000 });
   check("R4 生成完成：「✓ 已做成 2 张卡 · 查看」，查看指向待推送并带上词", (await p3.getByRole("link", { name: "查看" }).getAttribute("href")).startsWith("/words?status=pending&word="));
   await p3.screenshot({ path: shots("reader-done-1440.png") });
@@ -175,6 +185,28 @@ try {
   check("R5 390px：回到已生成的词，按钮状态保持「已做成 2 张卡」，无横向溢出", await p4.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   await p4.screenshot({ path: shots("reader-done-390.png") });
   await c4.close();
+
+  // 问卷：下拉 + 复选框（不是药丸）
+  for (const width of [1440, 390]) {
+    const cs = await browser.newContext({ viewport: { width, height: 900 } });
+    await cs.addCookies([{ name: "readflow_session", value: cookie, domain: "127.0.0.1", path: "/" }]);
+    const ps = await cs.newPage();
+    await ps.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
+    const nSel = await ps.locator("select.rf-survey-select").count();
+    await ps.locator("#survey-exam").selectOption({ label: "大学英语六级" });
+    const scoreShown = await ps.locator("#survey-examScore").count();
+    await ps.locator("#survey-exam").selectOption({ label: "高考" });
+    const scoreHidden = await ps.locator("#survey-examScore").count();
+    const boxes = ps.locator(".rf-survey-check input[type=checkbox]");
+    await boxes.nth(0).check();
+    await boxes.nth(2).check();
+    const checked = await ps.locator(".rf-survey-check-on").count();
+    check(`S1 ${width}px 问卷用下拉 + 复选框：单选题 4 个下拉（身份 / 考试 / 阅读感受 / 讲解风格），阅读目的是复选框`, nSel === 4 && (await boxes.count()) === 6 && (await ps.locator(".duo-filter-chip").count()) === 0, `下拉=${nSel} 复选框=${await boxes.count()}`);
+    check(`S2 ${width}px 选了六级才出现分数段，换成高考就收起；复选框可多选且选中有灰底`, scoreShown === 1 && scoreHidden === 0 && checked === 2);
+    check(`S3 ${width}px 只有一个绿色主按钮，无横向溢出`, (await ps.locator(".duo-btn-primary:visible").count()) === 1 && (await ps.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)));
+    await ps.screenshot({ path: shots(`survey-${width}.png`), fullPage: true });
+    await cs.close();
+  }
 
   // 设置：会员档位 + 做卡开关
   await p2.goto(`${BASE}/words`, { waitUntil: "networkidle" });

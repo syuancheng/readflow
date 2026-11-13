@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { splitCardSuggestion, SUGGESTION_REASON_CAP } from "../../src/lib/cards/suggestion";
+import { splitCardSuggestion, SUGGESTION_REASON_HINT } from "../../src/lib/cards/suggestion";
 
 test("末行是建议 → 拆出正文和理由", () => {
   const r = splitCardSuggestion("释义：短暂的\n解释。\n制卡建议：正好在你词汇量的边缘");
@@ -41,13 +41,16 @@ test("前缀后没有内容 → 不当建议，正文保留", () => {
   assert.deepEqual(splitCardSuggestion("正文\n制卡建议：  "), { body: "正文\n制卡建议：", suggestion: null });
 });
 
-test("理由超过 30 字截断并加省略号；刚好 30 字不截", () => {
-  assert.equal(SUGGESTION_REASON_CAP, 30, "PRD F1：理由 ≤30 字");
+test("理由超过 30 字也完整返回，不截断、不加省略号（截断会让人看不懂）", () => {
+  assert.equal(SUGGESTION_REASON_HINT, 30, "30 字只是写给模型的建议");
   const exact = "字".repeat(30);
   assert.equal(splitCardSuggestion(`x\n制卡建议：${exact}`).suggestion, exact);
-  assert.equal(splitCardSuggestion(`x\n制卡建议：${"字".repeat(31)}`).suggestion, `${exact}…`);
-  const long = "字".repeat(35);
-  assert.equal(splitCardSuggestion(`x\n制卡建议：${long}`).suggestion, `${exact}…`);
+  const long = "技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了";
+  assert.ok(Array.from(long).length > 30);
+  const r = splitCardSuggestion(`正文\n制卡建议：${long}`);
+  assert.equal(r.suggestion, long);
+  assert.ok(!r.suggestion?.includes("…"));
+  assert.equal(r.body, "正文");
 });
 
 test("CRLF 换行也能识别", () => {
