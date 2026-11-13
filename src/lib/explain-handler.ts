@@ -2,7 +2,7 @@
  * AI 释义的共用处理（/api/explain 与插件的 /api/extension/explain 共用）。
  * 路由文件只能导出 GET/POST 等固定名字，所以放在这里。
  */
-import { streamExplain, type ExplainParams } from "@/lib/ai";
+import { streamExplain, explainTurns, type ExplainParams } from "@/lib/ai";
 import type { AuthUser } from "@/lib/auth";
 import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
@@ -10,6 +10,11 @@ import type { SelectionSignals } from "@/lib/sentence";
 import { learnerBlockFor, logExplain } from "@/lib/learner-store";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
 import { maybeUpdateNote } from "@/lib/note-generator";
+import { cardsEnabled } from "@/lib/cards/flags";
+import { explainCache } from "@/lib/cards/explain-cache";
+import { siteCardsSettings } from "@/lib/cards/store";
+import { sqlite } from "@/db/sqlite";
+import { lemma as lemmaOf } from "@/lib/dict";
 
 const clamp = (v: unknown, lo: number, hi: number): number | undefined => {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -106,22 +111,66 @@ export async function handleExplain(
     console.error("[learner] 触发老师笔记更新失败:", err);
   }
 
+  // P33（spec §7.1）：观察信息——其他文章查词次数、是否已做过卡。
+  // 查询失败不影响讲解（拿不到就不给观察，模型照常工作）。
+  let otherTextLookups: number | undefined;
+  let cardedBefore: boolean | undefined;
+  try {
+    otherTextLookups = countOtherTextLookups(user.id, params.word, params.textId);
+    cardedBefore = hasPushedCards(user.id, params.word);
+  } catch (err) {
+    console.error("[cards] 观察信息查询失败:", err);
+  }
+
+  // P33：做卡开关是站级的（spec §0.5）。普通账号用自己的 Key 时 ai.settings 里没有站级行，
+  // 所以直接读站级 cards.* 行，不从 ai.settings 里取。
+  let cardsOn = true;
+  try {
+    cardsOn = cardsEnabled(siteCardsSettings());
+  } catch (err) {
+    console.error("[cards] 读取做卡开关失败，按开启处理:", err);
+  }
+
   const enriched: ExplainParams = {
     ...params,
     learnerBlock: profile.block || undefined,
     personalized: profile.personalized,
     detailed: profile.detailed,
+    otherTextLookups,
+    cardedBefore: cardedBefore === true,
+    cardsEnabled: cardsOn,
   };
   const encoder = new TextEncoder();
   const iter = streamExplain(enriched, ai)[Symbol.asyncIterator]();
   let cancelled = false;
+  let assistantText = ""; // P33：完整讲解全文（含建议行），缓存做卡用
+  let streamDone = false; // 只缓存「完整成功」的结果（spec §7.2）
   const stream = new ReadableStream({
     async start(controller) {
       try {
         while (!cancelled) {
           const { value, done } = await iter.next();
           if (done || cancelled) break;
+          assistantText += value;
           controller.enqueue(encoder.encode(value));
+        }
+        streamDone = !cancelled;
+        // P33（spec §7.2）：讲解流式输出正常结束 → 存进进程内缓存（10 分钟）。
+        // messages 与这次调用的逐字一致（含 system 提示词与学生档案），
+        // 做卡时前缀复用才能命中模型缓存（spec §13 第 2 条）。
+        if (streamDone && answerId && cardsOn && params.contextId) {
+          try {
+            explainCache().put(answerId, {
+              userId: user.id,
+              contextId: params.contextId,
+              messages: explainTurns(enriched),
+              assistantText,
+              provider: ai.settings?.activeProvider ?? "",
+              model: "",
+            });
+          } catch (err) {
+            console.error("[cards] 讲解缓存写入失败:", err);
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -150,6 +199,40 @@ export async function handleExplain(
   });
 }
 
+
+// ---------- P33 观察信息的两个查询（spec §7.1）----------
+
+/** 这个词在其他文章里查过几次（只统计别的 text_id；spec：N 从 contexts 里统计） */
+function countOtherTextLookups(userId: string, word: string, textId?: string): number {
+  if (!word) return 0;
+  const rows = sqlite
+    .prepare(
+      `SELECT DISTINCT c.text_id AS tid
+         FROM contexts c
+         JOIN user_words w ON w.id = c.user_word_id
+        WHERE w.user_id = ? AND w.lemma = ?`,
+    )
+    .all(userId, lemmaOf(word).toLowerCase()) as { tid: string }[];
+  const others = rows.filter((r) => r.tid !== textId);
+  // 每篇别的文章记一次
+  return others.length;
+}
+
+/** 这个词是否已有推送成功的卡片（carded_before 的取值来源，spec §7.1） */
+function hasPushedCards(userId: string, word: string): boolean {
+  if (!word) return false;
+  const row = sqlite
+    .prepare(
+      `SELECT 1
+         FROM cards k
+         JOIN card_sets s ON s.id = k.set_id
+         JOIN user_words w ON w.id = s.user_word_id
+        WHERE k.user_id = ? AND w.lemma = ? AND k.status = 'pushed'
+        LIMIT 1`,
+    )
+    .get(userId, lemmaOf(word).toLowerCase());
+  return row !== undefined;
+}
 
 /** POST body → ExplainParams；word 缺失返回 null */
 export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainParams | null {

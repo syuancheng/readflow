@@ -111,9 +111,83 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_explain_events_user_time ON explain_events(user_id, created_at);
+
+    -- P33：阅读时做卡。卡片草稿在推送前只属于 ReadFlow，推送/撤回才写墨墨。
+    -- 一次「做成卡片」= 一组（card_sets），组内 1~3 张卡（cards）。
+    CREATE TABLE IF NOT EXISTS card_sets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_word_id TEXT NOT NULL,
+      context_id TEXT NOT NULL,
+      text_id TEXT NOT NULL,
+      status TEXT NOT NULL,                 -- 'generating' | 'ready' | 'failed'
+      error TEXT,
+      merged_from TEXT,                     -- 一段多空卡：被合并的 card_set id 列表（JSON），普通组为 NULL
+      regen_count INTEGER NOT NULL DEFAULT 0,
+      cache_hit_tokens INTEGER,             -- 模型返回的缓存命中 token 数（统计 PRD F2 命中率）
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_card_sets_user ON card_sets(user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS cards (
+      id TEXT PRIMARY KEY,
+      set_id TEXT NOT NULL REFERENCES card_sets(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,                 -- 组内顺序 0,1,2
+      spec TEXT NOT NULL,                   -- CardSpec JSON，修改 / 换一道都改它
+      content TEXT NOT NULL,                -- 渲染后的墨墨语法（推送用的就是它）
+      status TEXT NOT NULL,                 -- 'draft' | 'pushing' | 'pushed' | 'withdrawn' | 'discarded'
+      needs_review TEXT,                    -- 需要人工检查的原因；NULL = 不需要
+      edited INTEGER NOT NULL DEFAULT 0,
+      markji_deck_id TEXT, markji_chapter_id TEXT, markji_card_id TEXT,
+      push_error TEXT,
+      pushed_at INTEGER, withdrawn_at INTEGER,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cards_user_status ON cards(user_id, status);
+
+    -- 语音合成结果：按内容复用，所有用户共享（PRD F4）。阶段二才使用。
+    CREATE TABLE IF NOT EXISTS tts_audio (
+      hash TEXT PRIMARY KEY,                -- sha256(text + voice + speed + format，以换行分隔)
+      text TEXT NOT NULL, voice TEXT NOT NULL, speed TEXT NOT NULL,
+      file_path TEXT NOT NULL,              -- data/tts/<hash>.mp3
+      bytes INTEGER NOT NULL, created_at INTEGER NOT NULL
+    );
+
+    -- 音频在墨墨里的 file.id 只属于上传它的墨墨账号，所以按用户分别记录
+    CREATE TABLE IF NOT EXISTS markji_media (
+      user_id TEXT NOT NULL, audio_hash TEXT NOT NULL, file_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, audio_hash)
+    );
+
+    -- 每天做卡次数（PRD Q1：单独计数，不占讲解次数）
+    CREATE TABLE IF NOT EXISTS card_usage (
+      user_id TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day)
+    );
+
+    -- 推送任务（断点续传）
+    CREATE TABLE IF NOT EXISTS push_jobs (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+      deck_id TEXT NOT NULL, chapter_mode TEXT NOT NULL,   -- 'fixed' | 'per_article'
+      chapter_id TEXT,
+      card_ids TEXT NOT NULL,                               -- 本次要推的卡（JSON，按顺序）
+      done INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,                                 -- 'running' | 'paused' | 'done' | 'error'
+      error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
   `);
   if (!userCols.some((c) => c.name === "invite_code")) {
     addColumnIfMissing(sqlite, "ALTER TABLE users ADD COLUMN invite_code TEXT", "users", "invite_code");
+  }
+
+  // P33 F7：查词事件里记录「这个词当时是否已有推送成功的卡片」
+  const evCols = sqlite.prepare("PRAGMA table_info(explain_events)").all() as { name: string }[];
+  if (!evCols.some((c) => c.name === "carded_before")) {
+    addColumnIfMissing(sqlite, "ALTER TABLE explain_events ADD COLUMN carded_before INTEGER", "explain_events", "carded_before");
   }
 
   const table = sqlite

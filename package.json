@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/check-tokens.mjs && tsc -p tsconfig.unit.json && node --test .unit/tests/unit/*.test.js",
-    "test:coverage": "tsc -p tsconfig.unit.json && node --test --experimental-test-coverage --test-coverage-include='.unit/src/lib/learner/**' --test-coverage-lines=90 --test-coverage-branches=85 --test-coverage-functions=90 .unit/tests/unit/*.test.js",
+    "test:coverage": "tsc -p tsconfig.unit.json && node --test --experimental-test-coverage --test-coverage-include='.unit/src/lib/learner/**' --test-coverage-include='.unit/src/lib/cards/**' --test-coverage-lines=90 --test-coverage-branches=85 --test-coverage-functions=90 .unit/tests/unit/*.test.js",
     "test:e2e": "node scripts/e2e-readlang.mjs",
     "test:account": "node scripts/e2e-account.mjs",
     "test:inline-gloss": "node scripts/e2e-inline-gloss.mjs",

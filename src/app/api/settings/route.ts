@@ -16,6 +16,7 @@ import {
 } from "@/lib/settings-store";
 import { GLOBAL_USER } from "@/db/ensure-auth";
 import { hasOwnModel } from "@/lib/user-secrets";
+import { userMembership } from "@/lib/cards/store";
 import { aiUsedToday, dailyAiQuota } from "@/lib/ai-quota";
 import { currentUser } from "@/lib/auth";
 import { extensionTokenStatus, issueExtensionToken, revokeExtensionToken } from "@/lib/extension-tokens";
@@ -48,6 +49,10 @@ export async function GET() {
   const settings = allSettings(user.id);
   // P32：站级开关，默认 on；环境变量强制关闭时由 flag 在服务端兜底，这里只回设置值
   const aiPersonalized = settings[SETTINGS_KEYS.aiPersonalized] === "off" ? "off" : "on";
+  // P33：站级做卡开关 + 本人的会员档位（只读自己的行，不回退站级）
+  const cardsEnabled = settings[SETTINGS_KEYS.cardsEnabled] === "off" ? "off" : "on";
+  const cardsListening = settings[SETTINGS_KEYS.cardsListening] === "on" ? "on" : "off";
+  const markjiMembership = userMembership(user.id) === "pro" ? "pro" : "basic";
 
   // P28：普通账号只看到、只改自己的模型 Key 和墨墨 Token（主账号的站级密钥一概不露），
   // 没填自己的 Key 时用站点模型、按天限次，这里一并返回额度情况
@@ -62,6 +67,9 @@ export async function GET() {
       extension: extensionTokenStatus(user.id),
       canEditSite: false,
       aiPersonalized,
+      cardsEnabled,
+      cardsListening,
+      markjiMembership,
       aiQuota: {
         ownKey: hasOwnModel(user.id),
         siteAvailable: resolveProvider(allSettings(), process.env) !== null,
@@ -86,6 +94,9 @@ export async function GET() {
     extension: extensionTokenStatus(user.id),
     canEditSite: user.isOwner,
     aiPersonalized,
+    cardsEnabled,
+    cardsListening,
+    markjiMembership,
     profile: profileFromSettings(settings),
   });
 }
@@ -106,6 +117,11 @@ type PutBody = {
   revokeExtensionToken?: boolean;
   /** P32：站级「个性化讲解」开关，只有主账号能改 */
   aiPersonalized?: "on" | "off";
+  /** P33：站级做卡 / 听力开关，只有主账号能改 */
+  cardsEnabled?: "on" | "off";
+  cardsListening?: "on" | "off";
+  /** P33：本人的墨墨会员档位 */
+  markjiMembership?: "basic" | "pro";
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
   profile?: Partial<Profile>;
   profileReset?: boolean;
@@ -146,6 +162,30 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "开关取值只能是 on 或 off" }, { status: 400 });
     }
     setSetting(SETTINGS_KEYS.aiPersonalized, body.aiPersonalized, GLOBAL_USER);
+  }
+
+  // P33：做卡开关同样是站级的，只有主账号能改
+  for (const [field, key] of [
+    ["cardsEnabled", SETTINGS_KEYS.cardsEnabled],
+    ["cardsListening", SETTINGS_KEYS.cardsListening],
+  ] as const) {
+    const v = body[field];
+    if (v === undefined) continue;
+    if (!user.isOwner) {
+      return NextResponse.json({ error: "只有主账号能修改做卡开关" }, { status: 403 });
+    }
+    if (v !== "on" && v !== "off") {
+      return NextResponse.json({ error: "开关取值只能是 on 或 off" }, { status: 400 });
+    }
+    setSetting(key, v, GLOBAL_USER);
+  }
+
+  // P33：会员档位是个人的（决定自己卡片的字数上限），写到本人行
+  if (body.markjiMembership !== undefined) {
+    if (body.markjiMembership !== "basic" && body.markjiMembership !== "pro") {
+      return NextResponse.json({ error: "会员档位只能是 basic 或 pro" }, { status: 400 });
+    }
+    setSetting(SETTINGS_KEYS.markjiMembership, body.markjiMembership, user.id);
   }
 
   if (body.activeProvider !== undefined) {

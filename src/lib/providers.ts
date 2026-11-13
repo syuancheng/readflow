@@ -13,7 +13,7 @@ export class ProviderError extends Error {
   }
 }
 
-export type ChatTurn = { role: "system" | "user"; content: string };
+export type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
 
 export type ChatOptions = {
   temperature?: number;
@@ -98,8 +98,8 @@ async function* anthropicStream(
 ): AsyncGenerator<string> {
   const system = turns.filter((t) => t.role === "system").map((t) => t.content).join("\n\n");
   const messages = turns
-    .filter((t) => t.role === "user")
-    .map((t) => ({ role: "user" as const, content: t.content }));
+    .filter((t) => t.role !== "system")
+    .map((t) => ({ role: t.role as "user" | "assistant", content: t.content }));
 
   const res = await fetch(`${cleanBaseUrl(p.baseUrl)}/messages`, {
     method: "POST",
@@ -207,8 +207,8 @@ export async function completeChat(
 
       const system = turns.filter((t) => t.role === "system").map((t) => t.content).join("\n\n");
       const messages = turns
-        .filter((t) => t.role === "user")
-        .map((t) => ({ role: "user" as const, content: t.content }));
+        .filter((t) => t.role !== "system")
+        .map((t) => ({ role: t.role as "user" | "assistant", content: t.content }));
       const res = await fetch(`${cleanBaseUrl(p.baseUrl)}/messages`, {
         method: "POST",
         headers: {
@@ -231,6 +231,108 @@ export async function completeChat(
       }
       const data = (await res.json()) as { content?: { text?: string }[] };
       return (data.content ?? []).map((c) => c.text ?? "").join("").trim();
+    },
+    opts.timeoutMs ?? COMPLETE_CHAT_TIMEOUT_MS,
+    opts.signal,
+  );
+}
+
+/**
+ * P33：要求 JSON 输出的非流式调用（出题用）。
+ * - response_format: { type: "json_object" }（DeepSeek / 千问的 OpenAI 兼容接口都支持）
+ * - 复用 P32-修复的 runWithChatTimeout（60 秒硬超时）：超时抛 ProviderError(504)，
+ *   由做卡流程按失败处理，**不扣每天的做卡额度**。
+ * - usage 带回缓存命中 token 数（DeepSeek 的 prompt_cache_hit_tokens，或
+ *   OpenAI 兼容的 prompt_tokens_details.cached_tokens），写入 card_sets。
+ * Anthropic 分支不支持 response_format，改为在 system 末尾追加 JSON 要求（该分支
+ * 目前没有站点配置使用，兜底实现）。
+ */
+export type JsonChatResult = {
+  text: string;
+  usage: {
+    promptTokens?: number;
+    completionTokens?: number;
+    cacheHitTokens?: number;
+  };
+};
+
+export async function completeJson(
+  p: ResolvedProvider,
+  turns: ChatTurn[],
+  opts: ChatOptions = {},
+): Promise<JsonChatResult> {
+  const temperature = opts.temperature ?? 0.4;
+  const maxTokens = opts.maxTokens ?? 1800;
+
+  return runWithChatTimeout(
+    async (signal): Promise<JsonChatResult> => {
+      if (p.protocol === "openai") {
+        const res = await openaiClient(p).chat.completions.create(
+          {
+            model: p.model,
+            messages: turns,
+            temperature,
+            max_tokens: maxTokens,
+            response_format: { type: "json_object" },
+          },
+          { signal },
+        );
+        const u = res.usage as
+          | ({
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              prompt_tokens_details?: { cached_tokens?: number };
+              prompt_cache_hit_tokens?: number;
+            })
+          | undefined;
+        return {
+          text: res.choices[0]?.message?.content?.trim() ?? "",
+          usage: {
+            promptTokens: u?.prompt_tokens,
+            completionTokens: u?.completion_tokens,
+            cacheHitTokens:
+              u?.prompt_tokens_details?.cached_tokens ?? u?.prompt_cache_hit_tokens,
+          },
+        };
+      }
+
+      // Anthropic 兜底：接口本身有 JSON 输出保证，这里显式要求
+      const system = turns.filter((t) => t.role === "system").map((t) => t.content).join("\n\n");
+      const messages = turns
+        .filter((t) => t.role !== "system")
+        .map((t) => ({ role: t.role as "user" | "assistant", content: t.content }));
+      const res = await fetch(`${cleanBaseUrl(p.baseUrl)}/messages`, {
+        method: "POST",
+        headers: {
+          "x-api-key": p.apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: p.model,
+          max_tokens: maxTokens,
+          temperature,
+          ...(system ? { system: `${system}\n\nOutput only valid JSON.` } : { system: "Output only valid JSON." }),
+          messages,
+        }),
+        signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new ProviderError(`Claude 接口错误（HTTP ${res.status}）：${body.slice(0, 200)}`, res.status);
+      }
+      const data = (await res.json()) as {
+        content?: { text?: string }[];
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
+      };
+      return {
+        text: (data.content ?? []).map((c) => c.text ?? "").join("").trim(),
+        usage: {
+          promptTokens: data.usage?.input_tokens,
+          completionTokens: data.usage?.output_tokens,
+          cacheHitTokens: data.usage?.cache_read_input_tokens,
+        },
+      };
     },
     opts.timeoutMs ?? COMPLETE_CHAT_TIMEOUT_MS,
     opts.signal,

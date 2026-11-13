@@ -1,5 +1,6 @@
 import { isNotAGloss } from "./explain-policy";
 import { defaultTurnText } from "./ai-thread";
+import { splitCardSuggestion } from "./cards/suggestion";
 
 /**
  * 词典释义开头的词性前缀：n. / vt. / adj. / abbr. 等。
@@ -72,7 +73,8 @@ function fits(s: string, cap: number): string {
  */
 export function aiInlineMeaning(rawThread: string | null | undefined, cap = INLINE_CAP): string {
   // 只看默认讲解那一段：后面追问（整句没看懂 / 例句）的第一行不是这个词的意思
-  const raw = defaultTurnText(rawThread);
+  // P33：先剥掉末尾的「制卡建议：」行，它不属于释义
+  const raw = splitCardSuggestion(defaultTurnText(rawThread)).body;
   if (!raw || !raw.trim() || isNotAGloss(raw)) return "";
   const lines = splitLines(raw);
   for (const line of lines.slice(0, 3)) {
@@ -141,7 +143,9 @@ export function inlineGloss(
 /** 词库释义可能是长段词典文本或 AI Markdown，插件小标签只留一行短释义 */
 export function shortGloss(raw: string | null | undefined, cap = 24): string {
   if (!raw) return "";
-  const lines = raw
+  // P33：先剥掉末尾的「制卡建议：」行，它不属于释义
+  const stripped = splitCardSuggestion(raw).body;
+  const lines = stripped
     .replace(/```[\s\S]*?```/g, " ")
     // ECDICT 导入时把真实换行存成了字面量 \n，两种都要当分隔
     .replace(/\\n/g, "\n")
@@ -197,8 +201,9 @@ function isLabelledSentence(line: string): boolean {
  * 纯函数、确定性、无副作用；提炼不出内容时返回 undefined，由调用方用占位符。
  */
 export function cardGloss(rawThread: string | null | undefined, cap = 100): string | undefined {
-  // 卡片背面只要这个词的意思：取默认讲解那一段，追问的内容不进卡片
-  const raw = defaultTurnText(rawThread);
+  // 卡片背面只要这个词的意思：取默认讲解那一段，追问的内容不进卡片。
+  // P33：先剥掉末尾的「制卡建议：」行，它不属于释义。
+  const raw = splitCardSuggestion(defaultTurnText(rawThread)).body;
   if (!raw || !raw.trim()) return undefined;
   // 无模型 / 出错时的提示文案不是释义，不能进词库（与前端写回批注共用同一判断）
   if (isNotAGloss(raw)) return undefined;
