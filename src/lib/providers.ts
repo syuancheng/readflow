@@ -19,7 +19,44 @@ export type ChatOptions = {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /** 仅 completeChat：覆盖默认的 60 秒超时（单测用来快速模拟超时，正常调用不要传） */
+  timeoutMs?: number;
 };
+
+/** 非流式调用的统一超时（P32-修复）：60 秒未返回即按失败处理 */
+export const COMPLETE_CHAT_TIMEOUT_MS = 60_000;
+
+/**
+ * 给一次非流式调用套上硬超时：到点 abort 掉底层请求，并按失败 reject。
+ * 单独导出是为了让单测不必真的等 60 秒，就能验证「超时 = 失败」这条规则。
+ * 抛出的 ProviderError 会被后台笔记任务记为失败，从而进入失败冷却。
+ */
+export async function runWithChatTimeout<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number = COMPLETE_CHAT_TIMEOUT_MS,
+  external?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener("abort", onExternalAbort, { once: true });
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new ProviderError(`模型调用超时（${Math.round(timeoutMs / 1000)} 秒）`, 504));
+    }, Math.max(1, timeoutMs));
+  });
+  try {
+    return await Promise.race([run(controller.signal), guard]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (external) external.removeEventListener("abort", onExternalAbort);
+  }
+}
 
 function cleanBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
@@ -136,6 +173,68 @@ export function streamChat(
   return p.protocol === "anthropic"
     ? anthropicStream(p, turns, opts)
     : openaiStream(p, turns, opts);
+}
+
+/**
+ * P32 F3：非流式一次性调用，返回完整文本。
+ * 老师笔记在后台生成，需要一次拿到全文做校验，不适合边流边拼。
+ * 与 testProvider 的区别是可以传任意 turns / 参数，且两种协议都支持。
+ */
+export async function completeChat(
+  p: ResolvedProvider,
+  turns: ChatTurn[],
+  opts: ChatOptions = {},
+): Promise<string> {
+  const temperature = opts.temperature ?? 0.3;
+  const maxTokens = opts.maxTokens ?? 400;
+
+  // OpenAI SDK 分支与 Anthropic fetch 分支共用同一个 60 秒硬超时；
+  // 超时抛 ProviderError，由 maybeUpdateNote 记为失败并进入冷却。
+  return runWithChatTimeout(
+    async (signal) => {
+      if (p.protocol === "openai") {
+        const res = await openaiClient(p).chat.completions.create(
+          {
+            model: p.model,
+            messages: turns,
+            temperature,
+            max_tokens: maxTokens,
+          },
+          { signal },
+        );
+        return res.choices[0]?.message?.content?.trim() ?? "";
+      }
+
+      const system = turns.filter((t) => t.role === "system").map((t) => t.content).join("\n\n");
+      const messages = turns
+        .filter((t) => t.role === "user")
+        .map((t) => ({ role: "user" as const, content: t.content }));
+      const res = await fetch(`${cleanBaseUrl(p.baseUrl)}/messages`, {
+        method: "POST",
+        headers: {
+          "x-api-key": p.apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: p.model,
+          max_tokens: maxTokens,
+          temperature,
+          ...(system ? { system } : {}),
+          messages,
+        }),
+        signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new ProviderError(`Claude 接口错误（HTTP ${res.status}）：${body.slice(0, 200)}`, res.status);
+      }
+      const data = (await res.json()) as { content?: { text?: string }[] };
+      return (data.content ?? []).map((c) => c.text ?? "").join("").trim();
+    },
+    opts.timeoutMs ?? COMPLETE_CHAT_TIMEOUT_MS,
+    opts.signal,
+  );
 }
 
 /** 设置页「测试连接」：最小 token 的一次非流式调用 */

@@ -251,8 +251,55 @@ export const sectionSummaries = sqliteTable(
   (t) => [uniqueIndex("uq_section_summaries_text_end").on(t.textId, t.endIdx)],
 );
 
+/**
+ * P32：学习档案（每人一行）与讲解/查词事件。
+ * 建表在 db/ensure-auth.ts，这里只给 drizzle 查询用的形状，两处字段一一对应。
+ */
+export const learnerProfiles = sqliteTable("learner_profiles", {
+  userId: text("user_id").primaryKey(),
+  survey: text("survey"),
+  surveyCompletedAt: integer("survey_completed_at"),
+  surveyDismissedAt: integer("survey_dismissed_at"),
+  showFeedback: integer("show_feedback").notNull().default(1),
+  stats: text("stats"),
+  statsUpdatedAt: integer("stats_updated_at"),
+  note: text("note"),
+  noteUpdatedAt: integer("note_updated_at"),
+  noteUserEdited: integer("note_user_edited").notNull().default(0),
+  noteLookupCursor: integer("note_lookup_cursor").notNull().default(0),
+  noteLastError: text("note_last_error"),
+  memoryResetAt: integer("memory_reset_at").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const explainEvents = sqliteTable(
+  "explain_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    askKind: text("ask_kind"),
+    via: text("via").notNull().default("reader"),
+    word: text("word"),
+    lemma: text("lemma"),
+    freqRank: integer("freq_rank"),
+    isPhrase: integer("is_phrase").notNull().default(0),
+    dictHit: integer("dict_hit"),
+    repeatCount: integer("repeat_count"),
+    textId: text("text_id"),
+    textCefr: text("text_cefr"),
+    contextId: text("context_id"),
+    feedback: text("feedback"),
+    feedbackAt: integer("feedback_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("idx_explain_events_user_time").on(t.userId, t.createdAt)],
+);
+
 export type Text = typeof texts.$inferSelect;
 export type Paragraph = typeof paragraphs.$inferSelect;
 export type UserWord = typeof userWords.$inferSelect;
 export type Context = typeof contexts.$inferSelect;
 export type ExportRow = typeof exports.$inferSelect;
+export type LearnerProfile = typeof learnerProfiles.$inferSelect;
+export type ExplainEvent = typeof explainEvents.$inferSelect;

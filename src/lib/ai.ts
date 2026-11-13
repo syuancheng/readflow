@@ -48,6 +48,17 @@ export type ExplainParams = {
   withPrevSentence?: boolean; // 前文已包含上一句（「没看懂整句」信号触发），给模型加衔接提示
   /** 阅读器采集的客观信号（不是结论）。旧调用不带时模型仍可正常工作。 */
   signals?: SelectionSignals;
+  /** P32：服务端合成的学生档案文本，插在 user 消息最前面；空串时不插入任何内容 */
+  learnerBlock?: string;
+  /** P32：个性化讲解开关。为假时系统提示词逐字保持旧规则 */
+  personalized?: boolean;
+  /** P32：偏好「讲细一点」时把 maxTokens 放到 600，其余保持 400 */
+  detailed?: boolean;
+  /** P32：这次讲解的种类，只用于服务端记事件，不发给模型 */
+  askKind?: string;
+  /** P32：服务端记事件用，不发给模型 */
+  contextId?: string;
+  textId?: string;
 };
 
 /**
@@ -57,8 +68,43 @@ export type ExplainParams = {
  * 保留第三个参数 word 只是为了兼容旧调用与单测；system 不随选区改变，
  * 这本身就是一条可单测的性质——同一个老师，不会因选区长度换人格。
  */
+/**
+ * P32：个性化讲解的深度指引（中文人设）。逐字取自实现说明 §5.3。
+ * 只替换「答案深度」那一段，其余提示词一个字都不动——开关关闭时就是回退保障。
+ */
+const DEPTH_GUIDANCE_ZH = `【答案深度由你判断，不要问我】
+根据「学生档案」和「观察」判断讲多深：L1 只给这句里的意思；L2 加上在这句里怎么理解或搭配；L3 再加「整句大意：」一句话概括；L4 再加句子地图，必要时给一个例句。同句连续请教、拖选长片段、档案显示长句是难点时往深处走；档案显示水平高、偏好简洁、以往反馈「太深」偏多时往浅处走。偏好简洁的学生即使同句连续请教，也只加「整句大意：」，不主动画句子地图。阅读目的会影响义项选择（例如技术文档读者优先给技术含义）。不论讲多深，第一行永远是「释义：」。
+判断句法角色、两次选区是否重叠是老师的本职；不要输出判断过程，直接用答案体现。`;
+
+/** monolingual 人设的等义英文指引（文档只给了中文段落，这里保持两套人设行为一致） */
+const DEPTH_GUIDANCE_EN = `Depth is yours to judge from the observations and the "student profile":
+L1 gives only the meaning in this sentence; L2 adds how to read or pair it here; L3 adds a one-sentence "整句大意：" whole-sentence meaning; L4 adds a sentence map and, if needed, one example. Go deeper when the student keeps asking about the same sentence, selected a long span, or the profile shows long sentences are a weak point. Go lighter when the profile shows a high level, a preference for brevity, or mostly "太深" feedback. A student who prefers brevity gets only the one-line whole-sentence meaning even on repeated asks — never volunteer a sentence map unless they ask for structure. The reading goal affects which sense you choose (a technical reader gets the technical meaning of "artifact"). Keep the prose short and answer exactly the selection. Do not output your reasoning.`;
+
+function personalizeDepth(prompt: string, monolingual: boolean): string {
+  const start = monolingual
+    ? "Depth is yours to judge from the observations,"
+    : "【答案深度由你判断，不要问我】";
+  const end = monolingual ? "Never: phonetic symbols" : "【硬性禁止】";
+  const i = prompt.indexOf(start);
+  const j = i < 0 ? -1 : prompt.indexOf(end, i);
+  if (i < 0 || j < 0) return prompt; // 找不到就原样返回，绝不破坏旧行为
+  const guidance = monolingual ? DEPTH_GUIDANCE_EN : DEPTH_GUIDANCE_ZH;
+  return prompt.slice(0, i) + guidance + "\n\n" + prompt.slice(j);
+}
+
 /** 导出供单测断言输出结构（不对外承诺稳定性） */
-export function buildSystemPrompt(language: string, monolingual: boolean, _word: string): string {
+export function buildSystemPrompt(
+  language: string,
+  monolingual: boolean,
+  _word: string,
+  opts?: { personalized?: boolean },
+): string {
+  const base = legacySystemPrompt(language, monolingual);
+  return opts?.personalized ? personalizeDepth(base, monolingual) : base;
+}
+
+/** 旧提示词原样保留：开关关闭时逐字返回，不做任何「顺手优化」 */
+function legacySystemPrompt(language: string, monolingual: boolean): string {
   if (monolingual) {
     return `You are a native ${language} teacher who also understands Chinese. Your student is a Chinese native speaker reading a real ${language} text and has selected a piece of it to ask about. Knowing Chinese means you can anticipate where Chinese speakers misread ${language}: tense, articles, prepositions, polysemy, clause structures Chinese lacks, tone and register.
 
@@ -153,7 +199,9 @@ export function buildUserMessage(params: ExplainParams): string {
   const question = params.prompt
     ? `学生的问题: ${params.prompt}`
     : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
-  return `${contextBlock(params)}
+  // P32：学生档案放在最前面；为空时不插入任何字符，旧调用的输出逐字不变
+  const learner = params.learnerBlock?.trim() ? `${params.learnerBlock.trim()}\n\n` : "";
+  return `${learner}${contextBlock(params)}
 ${question}`;
 }
 
@@ -219,7 +267,12 @@ export async function* streamExplain(
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
   const turns: ChatTurn[] = [
-    { role: "system", content: buildSystemPrompt(language, monolingual, params.word) },
+    {
+      role: "system",
+      content: buildSystemPrompt(language, monolingual, params.word, {
+        personalized: params.personalized === true,
+      }),
+    },
     { role: "user", content: buildUserMessage(params) },
   ];
 
@@ -227,7 +280,8 @@ export async function* streamExplain(
     turns,
     {
       temperature: 0.3, // 释义要准确，不要发散
-      maxTokens: 400,   // 短答案 + 2~3 行句子地图足够；也是防长篇大论的硬兜底
+      // P32：偏好「讲细一点」的学生允许长一点，其余保持原来的 400
+      maxTokens: params.detailed ? 600 : 400,
     },
     ai,
   );

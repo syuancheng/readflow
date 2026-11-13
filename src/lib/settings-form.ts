@@ -9,6 +9,12 @@
  */
 import { PROVIDERS, type ProviderId } from "./config";
 
+/**
+ * 学习档案变更后广播。阅读页据此重新读取「反馈行」开关，
+ * 这样在设置里关掉反馈行后不用刷新页面就会立刻生效（P32 阶段三补漏）。
+ */
+export const LEARNER_CHANGED_EVENT = "readflow.learner";
+
 export type FormValues = {
   apiKey: string;
   endpoint: string;
@@ -79,7 +85,7 @@ export function validateForm(values: FormValues, opts: { editing: boolean }): Fo
  * 设置页导航（WorkBuddy 风格：搜索框 + 分组）
  * ------------------------------------------------------------------ */
 
-export type NavId = "profile" | "invites" | "models" | "markji" | "reading" | "extension" | "storage";
+export type NavId = "profile" | "learner" | "invites" | "models" | "markji" | "reading" | "extension" | "storage";
 export type NavItem = { id: NavId; title: string; keywords: string[] };
 export type NavGroup = { title: string; items: NavItem[] };
 
@@ -91,6 +97,11 @@ export const NAV_GROUPS: NavGroup[] = [
         id: "profile",
         title: "个人资料",
         keywords: ["账户", "账号", "昵称", "名称", "头像", "签名", "资料", "profile", "个人信息"],
+      },
+      {
+        id: "learner",
+        title: "学习档案",
+        keywords: ["问卷", "水平", "AI 老师", "记忆", "学习"],
       },
       // 只有主账号看得到（SettingsDialog 按 canEditSite 过滤）
       { id: "invites", title: "邀请朋友", keywords: ["邀请", "邀请码", "注册", "朋友", "invite"] },

@@ -9,6 +9,7 @@
  * 插件不自己实现任何一份规则。
  */
 import { and, desc, eq } from "drizzle-orm";
+import { getProfileForPrompt } from "./learner-store";
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { contexts, paragraphs, texts, userWords } from "@/db/schema";
@@ -50,9 +51,21 @@ export type ExtensionPayload = {
   aiContext: { prefix: string; suffix: string; withPrevSentence: boolean };
   signals: Record<string, unknown>;
   imported: boolean;
+  /** P32 F5：这段讲解下方要不要显示「太浅 · 刚好 · 太深」 */
+  feedbackEnabled?: boolean;
 };
 
 type ParaRow = { id: string; content: string; idx: number };
+
+/** 反馈行受「本人开关 + 站点开关」双重控制；读档案失败不影响查词 */
+function feedbackEnabledFor(userId: string): boolean {
+  try {
+    const p = getProfileForPrompt(userId);
+    return p.showFeedback && p.personalized;
+  } catch {
+    return false;
+  }
+}
 
 function safeLookup(word: string) {
   try {
@@ -260,6 +273,7 @@ export function recordFromWeb(userId: string, input: RecordInput): ExtensionPayl
     },
     signals,
     imported,
+    feedbackEnabled: feedbackEnabledFor(userId),
   };
 }
 
@@ -336,6 +350,7 @@ export function recallWord(
       },
       signals: selectionSignals(content, ctx.start, ctx.end, "word"),
       imported: text?.sourceType === "url",
+      feedbackEnabled: false, // 回看历史时没有 answerId，不显示反馈行
     },
   };
 }

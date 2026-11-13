@@ -730,6 +730,42 @@ try {
       `流式=${aiDone} 落库=${Boolean(savedGloss)} 长度=${savedGloss?.length ?? 0}`,
     );
 
+    // P32 阶段二：插件侧栏里同样有「太浅 · 刚好 · 太深」反馈行，且计入画像
+    const fbRow = await p31.evaluate(() => {
+      const row = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-feedback-row");
+      return {
+        has: Boolean(row),
+        labels: [...(row?.querySelectorAll("button") ?? [])].map((b) => (b.textContent || "").trim()),
+      };
+    });
+    check(
+      "D5c 插件侧栏的 AI 回答下面也有反馈行，文案与网站一致",
+      fbRow.has && fbRow.labels.join(" · ") === "太浅 · 刚好 · 太深",
+      `has=${fbRow.has} labels=${fbRow.labels.join("/")}`,
+    );
+    {
+      const shots = path.join(ROOT, ".verify", "personas", "shots");
+      fs.mkdirSync(shots, { recursive: true });
+      for (const w of [1440, 390]) {
+        await p31.setViewportSize({ width: w, height: 900 });
+        await p31.screenshot({ path: path.join(shots, `feedback-extension-${w}.png`) });
+      }
+      await p31.setViewportSize({ width: 1100, height: 800 });
+    }
+    await p31.evaluate(() => {
+      const btn = document.getElementById("rf-ext-host")?.shadowRoot?.querySelector('.rf-feedback-btn[data-rating="deep"]');
+      btn?.click();
+    });
+    for (let i = 0; i < 20; i++) {
+      if (q("select count(*) n from explain_events where feedback = 'deep'")[0]?.n > 0) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    check(
+      "D5d 插件点「太深」写进 explain_events（与网站同一张表）",
+      q("select count(*) n from explain_events where feedback = 'deep'")[0]?.n > 0,
+      `deep=${q("select count(*) n from explain_events where feedback = 'deep'")[0]?.n}`,
+    );
+
     // D6 「问 AI」的选项文案与网站阅读页一字不差。
     // 这里同一句里已经问过两次（先 rehearse 再这个短语），所以会多出「只讲这个词」一项，
     // 最后三项与状态无关，顺序固定。
@@ -862,6 +898,64 @@ try {
         `侧栏=${panelNow.word} B 被改动=${after.ai_gloss !== before.ai_gloss} A 半截已存=${(engGloss ?? "").includes("不该出现")}`,
       );
     }
+    await p31.goto(`${SITE}/p31`, { waitUntil: "load" });
+    await p31.waitForTimeout(700);
+    await p31.goto(`${SITE}/p31`, { waitUntil: "load" });
+    await p31.waitForTimeout(700);
+    // P32 阶段三补漏：站点开关 off 时，插件侧栏也不显示反馈行（真实 DOM）。
+    // 用一个新的、词典查不到的短语触发一次全新的 AI 讲解，避免点到已存记录走「回看」路径
+    // （回看本来就没有 answerId，会让「不显示」变成假阴性）。
+    await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "off" } });
+    const OFF_PHRASE = "scrutinize the deployment pipeline";
+    // P32-修复 D5e：之前用鼠标物理拖选短语，但插件在页面变化后约 700ms 会用 MutationObserver
+    // 重建高亮（clearHighlights → applyHighlights），把选区所在的文本节点替换掉，导致正在进行的
+    // 拖选选区丢失，退化成「点击单个词、词典命中、不触发 AI 讲解」，于是等不到「回答完成」。
+    // 改为：等高亮彻底稳定后，用代码直接设置跨节点选区，再派发真实 click 复用插件既有的
+    // click→select 划词路径（不引入新逻辑）。断言语义（站点 off 时不显示反馈行）保持不变。
+    // 先等 resync + MutationObserver 的 700ms debounce 都 settle，保证设置选区后不会被立刻重建弄丢。
+    await p31.waitForTimeout(2500);
+    const selOk = await p31.evaluate((phrase) => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const n = walker.currentNode;
+        if (n.parentElement?.closest("#rf-ext-host")) continue;
+        const i = (n.nodeValue || "").indexOf(phrase);
+        if (i < 0) continue;
+        const range = document.createRange();
+        range.setStart(n, i);
+        range.setEnd(n, i + phrase.length);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        // 取选区中点做落点；派发到 body 让 click 冒泡到 document 的监听器
+        // （body 不在 #rf-ext-host 内、也不是 .rf-hl，会正常走划词路径）
+        const rects = [...range.getClientRects()].filter((b) => b.width > 0);
+        const mid = rects[Math.floor(rects.length / 2)];
+        const x = mid ? mid.left + mid.width / 2 : 0;
+        const y = mid ? mid.top + mid.height / 2 : 0;
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+        return true;
+      }
+      return false;
+    }, OFF_PHRASE);
+    check("D5e-0 能在测试网页里找到短语并用代码设置选区", selOk, `phrase=${OFF_PHRASE}`);
+    if (selOk) {
+      const offSelected = await p31.waitForFunction(
+        (phrase) => document.getElementById("rf-ext-host")?.shadowRoot?.querySelector(".rf-panel.on .rf-word")?.textContent?.trim() === phrase,
+        OFF_PHRASE, { timeout: 8000 },
+      ).then(() => true).catch(() => false);
+      const offAiDone = await p31.waitForFunction(() => {
+        const t = [...(document.getElementById("rf-ext-host")?.shadowRoot?.querySelectorAll(".rf-turn-text") ?? [])]
+          .map((e) => e.textContent || "").join(" ");
+        return t.includes("假模型") && !t.includes("生成中");
+      }, null, { timeout: 25000 }).then(() => true).catch(() => false);
+      const offFb = await p31.evaluate(() =>
+        document.getElementById("rf-ext-host")?.shadowRoot?.querySelectorAll(".rf-feedback-row").length ?? 0);
+      check("D5e 站点开关 off 时插件侧栏不显示反馈行（先确认讲解已完成）",
+        offAiDone && offFb === 0, `回答完成=${offAiDone} 反馈行=${offFb}`);
+    }
+    await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "on" } });
+
     await p31.close();
 
     if (process.env.SHOT_DIR) {

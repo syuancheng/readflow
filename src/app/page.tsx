@@ -7,6 +7,8 @@ import { currentUser } from "@/lib/auth";
 import { getStats } from "@/lib/stats";
 import ImportForm from "@/components/ImportForm";
 import TextList, { type TextCardRow } from "@/components/TextList";
+import SurveyPrompt from "@/components/SurveyPrompt";
+import { getLearner, needsSurvey } from "@/lib/learner-store";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +44,8 @@ export default async function Home() {
   }));
 
   const maxBar = Math.max(1, ...stats.recent.map((r) => r.count));
+  // P32：没填过问卷、也没点过「以后再说」的老用户，在首页看到一次提示卡片
+  const showSurvey = needsSurvey(getLearner(user.id));
 
   return (
     <div className="rf-container rf-page">
@@ -58,6 +62,8 @@ export default async function Home() {
           <span className="duo-streak">🔥 {stats.savedCount}</span>
         </div>
       </div>
+
+      {showSurvey && <SurveyPrompt />}
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-8 items-start">
         {/* ===== 左：文本列表（筛选 / 编辑 / 删除在 TextList 内）=====

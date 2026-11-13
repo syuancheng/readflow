@@ -4,6 +4,7 @@ import { sqlite, dbPath } from "./sqlite";
 import { ensureCefrColumns } from "./ensure-cefr";
 import { ensureBlockColumns } from "./ensure-blocks";
 import { ensureTextMetaColumns } from "./ensure-text-meta";
+import { addColumnIfMissing } from "./alter";
 
 /**
  * 建表语句直接内联：本地单机应用，启动即可用，不依赖 migration 流程。
@@ -159,26 +160,26 @@ function migrate(): void {
   // user_words：2026-11 Readlang 对齐改造新增的列（老库 ALTER 补齐）
   const wordCols = sqlite.prepare("PRAGMA table_info(user_words)").all() as { name: string }[];
   if (!wordCols.some((c) => c.name === "status")) {
-    sqlite.exec("ALTER TABLE user_words ADD COLUMN status TEXT NOT NULL DEFAULT 'learning'");
+    addColumnIfMissing(sqlite, "ALTER TABLE user_words ADD COLUMN status TEXT NOT NULL DEFAULT 'learning'", "user_words", "status");
   }
   if (!wordCols.some((c) => c.name === "starred")) {
-    sqlite.exec("ALTER TABLE user_words ADD COLUMN starred INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(sqlite, "ALTER TABLE user_words ADD COLUMN starred INTEGER NOT NULL DEFAULT 0", "user_words", "starred");
   }
   if (!wordCols.some((c) => c.name === "is_phrase")) {
-    sqlite.exec("ALTER TABLE user_words ADD COLUMN is_phrase INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(sqlite, "ALTER TABLE user_words ADD COLUMN is_phrase INTEGER NOT NULL DEFAULT 0", "user_words", "is_phrase");
   }
 
   // contexts.dict_entry（P25）：查词当时的词典结果快照，回看时直接用，不再查词典
   const ctxCols = sqlite.prepare("PRAGMA table_info(contexts)").all() as { name: string }[];
   if (!ctxCols.some((c) => c.name === "dict_entry")) {
-    sqlite.exec("ALTER TABLE contexts ADD COLUMN dict_entry TEXT");
+    addColumnIfMissing(sqlite, "ALTER TABLE contexts ADD COLUMN dict_entry TEXT", "contexts", "dict_entry");
   }
 
   // contexts.via（P31）：记录来源 reader / extension。
   // 加列后回填一次：P31 之前只有插件能往「网页摘录」（source_type='web'）里写记录，
   // 那些记录其实都是插件记的。语句可重复执行，只会改原本是 'reader' 的行。
   if (!ctxCols.some((c) => c.name === "via")) {
-    sqlite.exec("ALTER TABLE contexts ADD COLUMN via TEXT NOT NULL DEFAULT 'reader'");
+    addColumnIfMissing(sqlite, "ALTER TABLE contexts ADD COLUMN via TEXT NOT NULL DEFAULT 'reader'", "contexts", "via");
   }
   sqlite.exec(
     `UPDATE contexts SET via = 'extension'
@@ -194,11 +195,11 @@ function migrate(): void {
 
   const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "card_type")) {
-    sqlite.exec("ALTER TABLE exports ADD COLUMN card_type TEXT NOT NULL DEFAULT 'qa'");
+    addColumnIfMissing(sqlite, "ALTER TABLE exports ADD COLUMN card_type TEXT NOT NULL DEFAULT 'qa'", "exports", "card_type");
   }
   // exports.target（P27）：导出到哪个卡片应用，老记录都是墨墨
   if (!cols.some((c) => c.name === "target")) {
-    sqlite.exec("ALTER TABLE exports ADD COLUMN target TEXT NOT NULL DEFAULT 'markji'");
+    addColumnIfMissing(sqlite, "ALTER TABLE exports ADD COLUMN target TEXT NOT NULL DEFAULT 'markji'", "exports", "target");
   }
   sqlite.exec("DROP INDEX IF EXISTS uq_exports_word_deck");
   sqlite.exec("DROP INDEX IF EXISTS uq_exports_word_deck_type");

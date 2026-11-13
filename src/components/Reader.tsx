@@ -15,6 +15,8 @@ import { parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
 import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
+import type { AskKind, Feedback } from "@/lib/learner/types";
+import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
 
 /**
  * 一个 Block IR 落库后的一行。content 仍是「用户可见的纯文本」，
@@ -72,8 +74,17 @@ type AskReq = {
   wholeSentence?: boolean;
   /** 把同句加深清零，只讲这个词 */
   forceWord?: boolean;
+  /** P32：这次讲解的种类，随 /api/explain 送给服务端记事件 */
+  askKind?: AskKind;
 };
-type Turn = ThreadTurn & { status: "loading" | "streaming" | "done" | "error"; req?: AskReq };
+type Turn = ThreadTurn & {
+  status: "loading" | "streaming" | "done" | "error";
+  req?: AskReq;
+  /** P32：这段回答的 id（X-RF-Answer-Id），回看历史时没有 */
+  answerId?: string;
+  feedback?: Feedback;
+  feedbackError?: string;
+};
 
 function turnsFrom(raw: string | null | undefined): Turn[] {
   return parseThread(raw).map((t) => ({ ...t, status: "done" as const }));
@@ -636,6 +647,27 @@ export default function Reader({
   focusParaId?: string;
 }) {
   const [pick, setPick] = useState<Pick | null>(null);
+  /** P32 F5：反馈行受「本人开关 + 站点开关」双重控制 */
+  const [feedbackEnabled, setFeedbackEnabled] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      void fetch("/api/learner")
+        .then((r) => r.json())
+        .then((d: { showFeedback?: boolean; personalized?: boolean }) => {
+          if (alive) setFeedbackEnabled(d.showFeedback !== false && d.personalized !== false);
+        })
+        .catch(() => { /* 读不到就不显示反馈行，不影响阅读 */ });
+    };
+    refresh();
+    // 设置弹窗关闭 / 「学习档案」里改动开关后立刻重读，不用刷新页面。
+    // 以前只在挂载时读一次，关掉反馈行要等到下次打开文章才生效。
+    window.addEventListener(LEARNER_CHANGED_EVENT, refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener(LEARNER_CHANGED_EVENT, refresh);
+    };
+  }, []);
   /** 拖动中的预览范围（按下即整词）；松手清空 */
   const [dragSel, setDragSel] = useState<{ pid: string; start: number; end: number } | null>(null);
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
@@ -1458,6 +1490,7 @@ export default function Reader({
             onClose={close}
             initialGloss={pick.initialGloss}
             initialDict={pick.initialDict}
+            feedbackEnabled={feedbackEnabled}
             /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境；
                「没看懂整句」信号（覆盖 ≥75% 词汇或句内生词密度 ≥75%）→ 前文额外带上一句 */
             aiContext={(() => {
@@ -1512,6 +1545,7 @@ function PickCard({
   initialDict,
   onAIGloss,
   aiContext,
+  feedbackEnabled,
 }: {
   pick: Pick;
   onClose: () => void;
@@ -1525,6 +1559,7 @@ function PickCard({
   onAIGloss?: (text: string) => void;
   /** AI 用的上下文（句子边界 + 按需带上一句；锚点的 40 字符窗口只够定位，会切碎句子） */
   aiContext: { prefix: string; suffix: string; withPrevSentence?: boolean };
+  feedbackEnabled: boolean;
 }) {
   const { anchor, paragraphIdx } = pick;
   // 标题字号随内容长度收缩：单词大字，短语中字，整句小字并限行
@@ -1601,7 +1636,7 @@ function PickCard({
         ) {
           // 词典给不出答案：用户已经停下来请教了，别再让他多点一次按钮。
           // 此时 dict state 还是 null，triggerAI() 里算出的 dictHit=false 正是实情。
-          void triggerAI();
+          void triggerAI({ askKind: "auto" as const });
         }
       })
       .catch(() => {
@@ -1622,9 +1657,9 @@ function PickCard({
   /** 「问 AI」里的选项：只列这一刻有意义的 */
   const askOptions: { label: string; req: AskReq }[] = [
     ...(!hasDefault
-      ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: {} }]
+      ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: { askKind: "default" as const } }]
       : (pick.signals?.repeatCount ?? 1) >= 2
-        ? [{ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true } }]
+        ? [{ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true, askKind: "word_only" as const } }]
         : []),
     ...(!isWholeSentence
       ? [
@@ -1632,6 +1667,7 @@ function PickCard({
             label: "整句没看懂",
             req: {
               ask: "整句没看懂",
+              askKind: "whole_sentence" as const,
               word: sentence,
               wholeSentence: true,
               prompt:
@@ -1645,6 +1681,7 @@ function PickCard({
       label: "讲讲句子结构",
       req: {
         ask: "讲讲句子结构",
+        askKind: "structure" as const,
         prompt: `讲讲这句话的结构：主干（主语、谓语、宾语或表语）是什么，「${quote}」在其中充当什么、修饰谁。`,
       },
     },
@@ -1652,6 +1689,7 @@ function PickCard({
       label: "再给个例句",
       req: {
         ask: "再给个例句",
+        askKind: "example" as const,
         prompt: `用「${quote}」在这句里的这个意思，再给一个简单的英文例句，并附中文翻译。`,
       },
     },
@@ -1680,7 +1718,7 @@ function PickCard({
         : undefined;
 
     const body = req.wholeSentence
-      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt }
+      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default" }
       : {
           word: anchor.quote,
           prefix: aiContext.prefix,
@@ -1690,6 +1728,8 @@ function PickCard({
           monolingual: false,
           ...(req.prompt ? { prompt: req.prompt } : {}),
           ...(signals ? { signals } : {}),
+          askKind: req.askKind ?? "default",
+          ...(pick.contextId ? { contextId: pick.contextId } : {}),
         };
 
     try {
@@ -1707,7 +1747,8 @@ function PickCard({
       const reader = res.body?.getReader();
       if (!reader) throw new Error("无法读取流");
 
-      patch({ status: "streaming" });
+      // P32：这段回答的 id 用于「太浅 / 刚好 / 太深」反馈
+      patch({ answerId: res.headers.get("X-RF-Answer-Id") ?? undefined, status: "streaming" });
       const decoder = new TextDecoder();
       let text = "";
       while (true) {
@@ -1729,6 +1770,29 @@ function PickCard({
     }
   }
 
+  /** P32 F5：乐观更新，失败恢复原状并把原因放进 title */
+  async function rate(index: number, rating: Feedback) {
+    const prev = turnsRef.current[index]?.feedback;
+    const answerId = turnsRef.current[index]?.answerId;
+    if (!answerId) return;
+    const patchTurn = (p: Partial<Turn>) =>
+      updateTurns((list) => list.map((t, i) => (i === index ? { ...t, ...p } : t)));
+    patchTurn({ feedback: rating, feedbackError: undefined });
+    try {
+      const res = await fetch("/api/explain/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answerId, rating }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.error ?? "反馈没保存上");
+      }
+    } catch (err) {
+      patchTurn({ feedback: prev, feedbackError: err instanceof Error ? err.message : "反馈没保存上" });
+    }
+  }
+
   /** 失败或「没配模型」的那一段：去掉它，用同一个问题再问一次 */
   function retry(index: number) {
     const req = turnsRef.current[index]?.req ?? {};
@@ -1741,7 +1805,7 @@ function PickCard({
     if (!q || busy) return;
     setAskPrompt("");
     setMenuOpen(false);
-    void triggerAI({ ask: q, prompt: q });
+    void triggerAI({ ask: q, prompt: q, askKind: "custom" as const });
   }
 
   return (
@@ -1861,6 +1925,25 @@ function PickCard({
                 />
               )}
             </div>
+            {feedbackEnabled && t.status === "done" && !isNotAGloss(t.text) && t.answerId && (
+              <div className="rf-feedback-row" title={t.feedbackError}>
+                <span>这次讲得：</span>
+                {(["shallow", "right", "deep"] as const).map((r, j) => (
+                  <span key={r}>
+                    {j > 0 && <span aria-hidden> · </span>}
+                    <button
+                      type="button"
+                      className={`rf-feedback-btn ${t.feedback === r ? "rf-feedback-on" : ""}`}
+                      aria-pressed={t.feedback === r}
+                      title={t.feedbackError || undefined}
+                      onClick={() => void rate(i, r)}
+                    >
+                      {["太浅", "刚好", "太深"][j]}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}

@@ -4,6 +4,7 @@ import { recordFromWeb, type RecordInput } from "@/lib/extension-record";
 import { deleteWordContexts } from "@/lib/word-store";
 import { pruneEmptyExcerpt, textIdOfContext } from "@/lib/extension-record";
 import { stripHash } from "@/lib/web-anchor";
+import { logLookup } from "@/lib/learner-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,6 +98,21 @@ export async function POST(req: Request) {
       source,
       repeatCount,
     });
+    try {
+      logLookup({
+        userId: auth.user.id,
+        word: payload.quote,
+        lemma: payload.dict?.lemmaForm ?? payload.quote,
+        via: "extension",
+        contextId: payload.contextId,
+        textId: payload.textId,
+        repeatCount,
+        dictHit: Boolean(payload.dict?.entry),
+        isPhrase: /\s/.test(payload.quote.trim()),
+      });
+    } catch (err) {
+      console.error("[learner] 记录插件查词事件失败:", err);
+    }
     return withCors(NextResponse.json(payload));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "记录失败";

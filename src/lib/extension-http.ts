@@ -12,6 +12,8 @@ export const EXTENSION_CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, x-readflow-token, Authorization",
+  // P32：插件的反馈 / 做卡要用这段回答的 id；不暴露的话 content script 读不到
+  "Access-Control-Expose-Headers": "X-RF-Answer-Id",
   "Access-Control-Allow-Private-Network": "true",
   "Access-Control-Max-Age": "86400",
 };

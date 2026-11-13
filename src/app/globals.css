@@ -3640,3 +3640,118 @@ a:focus-visible,
   margin-right: 4px;
   padding: 0 4px;
 }
+
+/* P32：学习档案问卷（/welcome 与设置共用）和首页提示卡片 */
+.rf-survey {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.rf-survey-q {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.rf-survey-q-title {
+  font-size: var(--rf-text-sm);
+  font-weight: 600;
+  color: var(--rf-text-primary);
+  padding: 0;
+  margin-bottom: 12px;
+}
+.rf-survey-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.rf-survey-close {
+  width: 32px;
+  height: 32px;
+  border: var(--rf-border-width) solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+.rf-survey-close:hover {
+  background: var(--rf-bg-hover);
+}
+
+/* P32 F5：每段 AI 讲解下方的「太浅 · 刚好 · 太深」反馈行 */
+.rf-feedback-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}
+.rf-feedback-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.rf-feedback-btn:hover {
+  color: var(--rf-ai-text);
+}
+.rf-feedback-btn.rf-feedback-on {
+  color: var(--rf-ai-text);
+  font-weight: 700;
+}
+
+/* P32 F6：「AI 眼中的你」。紫色只用于 AI 的判断与笔记（design-system §1.1）。 */
+.rf-learner-ai {
+  color: var(--rf-ai-text);
+}
+.rf-learner-note {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-ai-soft);
+  color: var(--rf-ai-text);
+  font-size: var(--rf-text-sm);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rf-learner-note-meta {
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}
+.rf-learner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.rf-learner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.rf-learner-input {
+  font-weight: 400;
+  line-height: 1.8;
+  resize: vertical;
+}
+.rf-learner-count {
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}

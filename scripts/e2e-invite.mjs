@@ -123,6 +123,13 @@ try {
   await page.locator('input[type="password"]').nth(0).fill("friend-pass-2026");
   await page.locator('input[type="password"]').nth(1).fill("friend-pass-2026");
   await page.locator('button[type="submit"]').click();
+  // P32 Q-A：注册成功后先显示学习档案问卷，点「以后再说」再进首页。
+  // 下面第 5 条断言一字未改（仍然检查账号、邀请码、最终进首页），这里只是补走新流程。
+  await page.waitForURL(/\/welcome/, { timeout: 15000 }).catch(() => {});
+  check("5a 注册成功后先看到「让 AI 老师更懂你」问卷", /\/welcome/.test(page.url()), page.url());
+  if (/\/welcome/.test(page.url())) {
+    await page.getByRole("button", { name: "以后再说" }).click();
+  }
   await page.waitForURL(`${BASE}/`, { timeout: 15000 }).catch(() => {});
   const friendRow = q("select id, is_owner, invite_code from users where username = 'friend_p28'");
   check("5 注册成功：建了普通账号、记下邀请码、直接进首页", !!friendRow && friendRow.is_owner === 0 && friendRow.invite_code === code && page.url() === `${BASE}/`, page.url());

@@ -78,7 +78,9 @@ export default function AuthForm({ mode }: { mode: "login" | "setup" | "register
         return;
       }
       const next = params.get("next");
-      router.replace(next && next.startsWith("/") ? next : "/");
+      const target = next && next.startsWith("/") ? next : "/";
+      // P32：注册 / 建号成功后先做学习档案问卷，登录成功的行为不变
+      router.replace(isNew ? `/welcome?next=${encodeURIComponent(target)}` : target);
       router.refresh();
     } catch {
       setError("网络异常，请稍后重试");

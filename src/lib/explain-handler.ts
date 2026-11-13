@@ -7,6 +7,9 @@ import type { AuthUser } from "@/lib/auth";
 import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
+import { learnerBlockFor, logExplain } from "@/lib/learner-store";
+import { narrowAskKind } from "@/lib/learner/ask-kind";
+import { maybeUpdateNote } from "@/lib/note-generator";
 
 const clamp = (v: unknown, lo: number, hi: number): number | undefined => {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -56,15 +59,61 @@ export function narrowSignals(v: unknown): SelectionSignals | undefined {
   };
 }
 
-export async function handleExplain(params: ExplainParams, user: AuthUser) {
+export async function handleExplain(
+  params: ExplainParams,
+  user: AuthUser,
+  opts?: { via?: "reader" | "extension" },
+) {
   // P28：按账号选模型配置；普通账号用站点 Key 时扣每日免费次数
   const ai = aiContextFor(user);
   if (ai.metered) {
     const q = consumeAiQuota(user.id);
     if (!q.ok) return Response.json({ error: quotaExceededMessage(q.limit), quota: q }, { status: 429 });
   }
+
+  // P32 F4：画像只在这一处接入，网站与插件自动一致。开关关闭时 block 为空串、
+  // personalized 为 false，提示词逐字回到旧规则。
+  let profile = { block: "", detailed: false, personalized: false };
+  try {
+    profile = learnerBlockFor(user.id);
+  } catch (err) {
+    console.error("[learner] 读取档案失败，本次按旧规则讲解:", err);
+  }
+
+  // 事件 id 同时是「这段回答」的 id；记事件失败绝不能打断讲解
+  let answerId = "";
+  try {
+    answerId = logExplain({
+      userId: user.id,
+      askKind: narrowAskKind(params.askKind),
+      via: opts?.via ?? "reader",
+      word: params.word,
+      contextId: params.contextId,
+      textId: params.textId,
+      dictHit: params.signals?.dictHit,
+      repeatCount: params.signals?.repeatCount,
+    });
+  } catch (err) {
+    console.error("[learner] 记录讲解事件失败:", err);
+  }
+
+  // P32 F3：后台尝试更新老师笔记。绝不 await —— 25 次 + 24 小时的判断、模型调用
+  // 与校验都不占用本次讲解的响应时间；站点没配模型或失败时只记 note_last_error。
+  // 放在写事件之后，让这次请教也能进「最近的提问摘要」。
+  try {
+    void maybeUpdateNote(user.id);
+  } catch (err) {
+    console.error("[learner] 触发老师笔记更新失败:", err);
+  }
+
+  const enriched: ExplainParams = {
+    ...params,
+    learnerBlock: profile.block || undefined,
+    personalized: profile.personalized,
+    detailed: profile.detailed,
+  };
   const encoder = new TextEncoder();
-  const iter = streamExplain(params, ai)[Symbol.asyncIterator]();
+  const iter = streamExplain(enriched, ai)[Symbol.asyncIterator]();
   let cancelled = false;
   const stream = new ReadableStream({
     async start(controller) {
@@ -95,6 +144,8 @@ export async function handleExplain(params: ExplainParams, user: AuthUser) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // P32 / P33：前端与插件靠这个 id 定位这段回答（反馈、回看、做卡）
+      ...(answerId ? { "X-RF-Answer-Id": answerId } : {}),
     },
   });
 }
@@ -115,5 +166,9 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     prompt: str(body.prompt)?.trim() || undefined,
     withPrevSentence: body.withPrevSentence === true,
     signals: narrowSignals((body as { signals?: unknown }).signals),
+    // P32：白名单收 askKind；非法值一律按 default，前端说什么都不直接信
+    askKind: narrowAskKind((body as { askKind?: unknown }).askKind),
+    contextId: str((body as { contextId?: unknown }).contextId)?.slice(0, 120),
+    textId: str((body as { textId?: unknown }).textId)?.slice(0, 120),
   };
 }

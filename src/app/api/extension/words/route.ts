@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { preflight, requireExtensionUser, withCors } from "@/lib/extension-http";
 import { shortGloss, inlineGloss } from "@/lib/gloss";
+import { logLookup } from "@/lib/learner-store";
 import { lookup } from "@/lib/dict";
 import { stripHash } from "@/lib/web-anchor";
 
@@ -215,13 +216,15 @@ export async function POST(req: Request) {
       .from(contexts)
       .where(and(eq(contexts.userWordId, wordId), eq(contexts.quote, word), eq(contexts.textId, text!.id)))
       .get();
+    let contextId: string | null = null;
     if (!dup) {
+      contextId = randomUUID();
       const start = sentence.toLowerCase().indexOf(word.toLowerCase());
       const s = start >= 0 ? start : 0;
       const e = start >= 0 ? start + word.length : sentence.length;
       tx.insert(contexts)
         .values({
-          id: randomUUID(),
+          id: contextId,
           userWordId: wordId,
           textId: text!.id,
           paragraphId,
@@ -237,8 +240,23 @@ export async function POST(req: Request) {
         .run();
     }
 
-    return { wordId, translation, phonetic, pos, duplicate: Boolean(dup) };
+    return { wordId, translation, phonetic, pos, duplicate: Boolean(dup), contextId, textId: text!.id };
   });
+
+  try {
+    logLookup({
+      userId: owner,
+      word,
+      lemma: lemmaForm,
+      via: "extension",
+      contextId: result.contextId,
+      textId: result.textId,
+      dictHit: Boolean(dictResult.entry),
+      isPhrase: isPhrase === 1,
+    });
+  } catch (err) {
+    console.error("[learner] 记录插件收词事件失败:", err);
+  }
 
   return withCors(
     NextResponse.json({
