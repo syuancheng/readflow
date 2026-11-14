@@ -39,7 +39,7 @@
   --heat-4: var(--rf-heat-4);
 
   --reader-bg: var(--rf-bg-page);
-  --reader-ink: var(--rf-text-reading);
+  --reader-ink: var(--rf-reading-ink);
 }
 
 @theme inline {

@@ -298,5 +298,6 @@ E-01 ~ E-06 沿用 `docs/design/P34-DESIGN.md` §4。其中 **E-04（既有 `glo
 
 ---
 
-## 5. 发现的其它问题（未改，供后续处理）
-- `src/styles/tokens.css` 里 `--rf-text-reading` 定义了两次：64 行是颜色 `#1a1a1a`，139 行是字号 `19px`。后者覆盖前者，所以 `--reader-ink: var(--rf-text-reading)` 实际得到 `19px`，是无效颜色，阅读正文只能继承外层文字色。
+## 5. 顺带修复与遗留问题
+- **已修复：阅读正文颜色。** P29 迁移令牌时把阅读正文颜色 `#1a1a1a` 命名成 `--rf-text-reading`，和阅读器字号令牌 `--rf-text-reading: 19px` 重名，后定义的字号覆盖了颜色。结果 `--reader-ink` 得到 `19px`，是无效颜色，正文只能继承外层的 `#3c3c3c`。现在把颜色令牌改名为 `--rf-reading-ink`，正文实测计算值恢复为 `rgb(26, 26, 26)`（P29 之前的设计值，白底对比度约 17:1）。`docs/design-system.html` 的预览同步改了。
+- **遗留（既有，未改）：** 390px 下首页 CEFR 难度浮层从徽章向右展开，超出视口 7px，造成横向滚动（397 > 390）。换回改动前的 CSS 也一样，与本次整改无关。截图见 `.verify/sitewide/ink-after/home-cefr-pop-390.png`。

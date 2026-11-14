@@ -61,7 +61,7 @@
   --rf-text-secondary: var(--rf-gray-600); /* 说明、元信息、未选中导航 */
   --rf-text-disabled:  var(--rf-gray-400); /* 只用于禁用态，不用于可读信息 */
   --rf-text-inverse:   #ffffff;
-  --rf-text-reading:   #1a1a1a;            /* 阅读器正文 */
+  --rf-reading-ink:    #1a1a1a;            /* 阅读器正文颜色（不能叫 --rf-text-reading：那个名字是阅读器字号，同名会被覆盖） */
 
   /* 背景 */
   --rf-bg-page:    var(--rf-gray-0);
