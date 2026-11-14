@@ -204,7 +204,40 @@ try {
     check(`S1 ${width}px 问卷用下拉 + 复选框：单选题 4 个下拉（身份 / 考试 / 阅读感受 / 讲解风格），阅读目的是复选框`, nSel === 4 && (await boxes.count()) === 6 && (await ps.locator(".duo-filter-chip").count()) === 0, `下拉=${nSel} 复选框=${await boxes.count()}`);
     check(`S2 ${width}px 选了六级才出现分数段，换成高考就收起；复选框可多选且选中有灰底`, scoreShown === 1 && scoreHidden === 0 && checked === 2);
     check(`S3 ${width}px 只有一个绿色主按钮，无横向溢出`, (await ps.locator(".duo-btn-primary:visible").count()) === 1 && (await ps.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)));
+    const look = await ps.evaluate(() => {
+      const title = document.querySelector(".rf-survey-q-title");
+      const sel = document.querySelector("select.rf-survey-select");
+      const checks = [...document.querySelectorAll(".rf-survey-check")];
+      const lefts = [...new Set(checks.map((c) => Math.round(c.getBoundingClientRect().left)))];
+      return {
+        titleW: getComputedStyle(title).fontWeight,
+        selW: getComputedStyle(sel).fontWeight,
+        selWidth: Math.round(sel.getBoundingClientRect().width),
+        checkBorder: getComputedStyle(checks[0]).borderTopWidth,
+        cols: lefts.length,
+        sameLeft: Math.round(sel.getBoundingClientRect().left) === Math.min(...lefts),
+      };
+    });
+    check(`S4 ${width}px 四项原则：题目粗（700）答案常规（400）；下拉限宽 ≤400；复选项无边框、排成 ${width >= 640 ? 2 : 1} 列并与下拉左对齐`,
+      look.titleW === "700" && look.selW === "400" && look.selWidth <= 400 && look.checkBorder === "0px" && look.cols === (width >= 640 ? 2 : 1) && look.sameLeft,
+      JSON.stringify(look));
     await ps.screenshot({ path: shots(`survey-${width}.png`), fullPage: true });
+
+    // 设置 →「学习档案」：同一个组件；保存按钮在表单最下面、与表单左对齐
+    await ps.goto(BASE, { waitUntil: "networkidle" });
+    await ps.click(".pm-trigger");
+    await ps.getByRole("menuitem", { name: /设置/ }).click();
+    await ps.getByRole("button", { name: "学习档案" }).click();
+    await ps.locator(".st-main .rf-survey").waitFor(); // 档案读完才渲染表单
+    const pos = await ps.evaluate(() => {
+      const form = document.querySelector(".st-main .rf-survey");
+      const save = document.querySelector(".st-main .rf-survey-actions button");
+      const f = form.getBoundingClientRect(), b = save.getBoundingClientRect();
+      return { below: b.top >= f.bottom, sameLeft: Math.round(b.left) === Math.round(f.left), text: save.textContent };
+    });
+    check(`S5 ${width}px 设置里的「保存」在表单下面、与表单左对齐`, pos.below && pos.sameLeft && pos.text === "保存", JSON.stringify(pos));
+    await ps.locator(".st-main .rf-survey").scrollIntoViewIfNeeded();
+    await ps.screenshot({ path: shots(`settings-survey-${width}.png`) });
     await cs.close();
   }
 

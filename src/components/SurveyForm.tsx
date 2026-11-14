@@ -111,7 +111,7 @@ function SelectQuestion({
       </label>
       <select
         id={id}
-        className="duo-input rf-survey-select"
+        className="rf-survey-select"
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || undefined)}
       >
