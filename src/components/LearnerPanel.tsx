@@ -168,17 +168,23 @@ export default function LearnerPanel() {
   return (
     <section className="st-section">
       <div className="st-panel">
-        <div className="st-panel-row">
-          <div>
-            <h3 className="st-panel-title">我的情况</h3>
-          </div>
-          <button type="button" className="duo-btn-sm duo-btn-white" disabled={busy || loading} onClick={() => void save()}>
-            保存
-          </button>
+        <div className="rf-survey-head">
+          <h3 className="st-panel-title">我的情况</h3>
+          <p className="st-panel-desc">AI 老师据此判断讲多深、讲什么。每题都可以跳过。</p>
         </div>
         {loading ? <p className="st-loading">读取中…</p> : <SurveyForm value={answers} onChange={setAnswers} />}
-        {saved && <p className="text-sm mt-4">已保存</p>}
-        {error && <p className="text-sm mt-4" style={{ color: "var(--rf-danger-text)" }}>{error}</p>}
+        {/* 亲密性：保存按钮放在它要提交的表单最下面，结果提示紧挨着按钮 */}
+        <div className="rf-survey-actions">
+          <button type="button" className="duo-btn duo-btn-sm duo-btn-white" disabled={busy || loading} onClick={() => void save()}>
+            {busy ? "保存中…" : "保存"}
+          </button>
+          {saved && <span className="rf-survey-status" role="status">已保存</span>}
+          {error && (
+            <span className="rf-survey-status rf-survey-status-err" role="alert">
+              {error}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="st-panel">

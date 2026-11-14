@@ -3605,10 +3605,13 @@ a:focus-visible,
 }
 
 /* P32：学习档案问卷（/welcome 与设置共用）和首页提示卡片 */
+/* 问卷表单：沿用设置弹窗的表单语言（.st-label / .st-input：细边框、sm 字号、题目粗、答案常规），
+   四项原则——对比：题目 700、答案 400；重复：与设置里其它表单同一套样式；
+   对齐：控件统一左对齐、限宽 400；亲密性：题目到控件 8，题与题 20。 */
 .rf-survey {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
   min-width: 0;
 }
 .rf-survey-q {
@@ -3619,38 +3622,56 @@ a:focus-visible,
 }
 .rf-survey-q-title {
   display: block;
-  font-size: var(--rf-text-sm);
-  font-weight: 600;
-  color: var(--rf-text-primary);
   padding: 0;
   margin-bottom: 8px;
+  font-size: var(--rf-text-sm);
+  font-weight: 700;
+  color: var(--rf-text-primary);
 }
-.rf-survey-hint { margin-left: 4px; font-size: var(--rf-text-xs); font-weight: 400; color: var(--rf-text-secondary); }
-/* 下拉：沿用全站输入框，高度与按钮对齐 */
-.rf-survey-select { min-height: 44px; padding-top: 8px; padding-bottom: 8px; cursor: pointer; }
-/* 多选：一项一行的复选框，选中用中性灰（规范 §1.3，不用绿） */
-.rf-survey-checks { display: flex; flex-direction: column; gap: 8px; }
+.rf-survey-hint { margin-left: 4px; font-size: var(--rf-text-xs); font-weight: 600; color: var(--rf-text-secondary); }
+.rf-survey-select {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--rf-gray-200);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-gray-0);
+  color: var(--rf-text-primary);
+  font-size: var(--rf-text-sm);
+  font-weight: 400;
+  cursor: pointer;
+}
+.rf-survey-select:hover { border-color: var(--rf-border-strong); }
+.rf-survey-select:focus { border-color: var(--rf-border-focus); box-shadow: var(--rf-focus-ring); outline: none; }
+/* 多选：普通复选框排成网格（手机一列、桌面两列），左边一条线对齐；选中只靠勾表示 */
+.rf-survey-checks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px 24px;
+  max-width: 400px;
+}
+@media (min-width: 640px) {
+  .rf-survey-checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .rf-survey-check {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 44px;
-  padding: 8px 12px;
-  border: var(--rf-border-width) solid var(--rf-border);
-  border-radius: var(--rf-radius-md);
-  background: var(--rf-bg-surface);
-  font-size: var(--rf-text-md);
-  font-weight: 600;
+  gap: 8px;
+  min-height: 36px;
+  font-size: var(--rf-text-sm);
+  font-weight: 400;
   color: var(--rf-text-primary);
   cursor: pointer;
 }
-.rf-survey-check:hover { border-color: var(--rf-border-strong); }
-.rf-survey-check-on { background: var(--rf-bg-selected); }
-.rf-survey-check input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--rf-text-primary); }
-@media (min-width: 640px) {
-  .rf-survey-checks { flex-direction: row; flex-wrap: wrap; }
-  .rf-survey-check { min-width: 0; }
-}
+.rf-survey-check input { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--rf-text-primary); }
+/* 面板标题 + 说明，与设置里其它面板同一个结构；和第一题之间留出组间距 */
+.rf-survey-head { margin-bottom: 20px; }
+/* 保存行：按钮在表单最下面、与表单左边对齐，「已保存」紧挨着按钮 */
+.rf-survey-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 24px; }
+.rf-survey-status { font-size: var(--rf-text-sm); color: var(--rf-text-secondary); }
+.rf-survey-status-err { color: var(--rf-danger-text); }
 .rf-survey-prompt {
   display: flex;
   align-items: center;
