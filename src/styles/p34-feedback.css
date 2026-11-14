@@ -1,0 +1,85 @@
+/*
+ * P34：讲解下方的「这次讲得：太浅 · 刚好 · 太深」反馈行，以及「AI 眼中的你」笔记下方的更新说明。
+ * 设计简报：docs/specs/P34-feedback-teacher-note.md §8（《写给大家看的设计书》前端规范）。
+ *
+ * - 亲密性：反馈行紧贴所属讲解（8px，组内）；更新说明紧贴紫色笔记块（8px，组内）。
+ * - 对齐：全部左对齐，落在右栏 / 设置面板内容区的左边缘；不用居中、不用绝对定位。
+ * - 重复：圆角只用已有的 --rf-radius-xs；颜色只用 tokens.css 的令牌。
+ * - 对比：同组元素同字号，选中与未选中靠「颜色 + 字重 400 对 700 + ✓ 与浅绿底」三维区分（C-01 / C-03）。
+ */
+
+/* 反馈行：小而不显眼（产品要求，见例外 E-06），与讲解正文之间 8px */
+.rf-feedback-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+}
+
+/* 未选中：常规字重 400（原来是 600，与选中的 700 构成「相近字重」假对比，C-03 / TX-02） */
+.rf-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--rf-radius-xs);
+  background: transparent;
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-xs);
+  font-weight: 400; /* --rf-weight-regular（check-tokens 要求字面值） */
+  cursor: pointer;
+  transition:
+    background var(--rf-duration-fast) var(--rf-ease),
+    color var(--rf-duration-fast) var(--rf-ease),
+    transform var(--rf-duration-fast) var(--rf-ease);
+}
+
+/* 悬停：主文字色压浅灰底（10.30 : 1） */
+.rf-feedback-btn:hover {
+  background: var(--rf-bg-hover);
+  color: var(--rf-text-primary);
+}
+
+/* 按下有手感 */
+.rf-feedback-btn:active {
+  transform: scale(0.92);
+}
+
+/* 选中：成功绿文字压浅绿底（4.64 : 1）+ 粗体 700 + 前面的 ✓ */
+.rf-feedback-btn.rf-feedback-on,
+.rf-feedback-btn.rf-feedback-on:hover {
+  background: var(--rf-success-soft);
+  color: var(--rf-success-text);
+  font-weight: 700; /* --rf-weight-bold */
+}
+
+.rf-feedback-check {
+  animation: rf-check-pop 220ms var(--rf-ease);
+}
+
+@keyframes rf-check-pop {
+  0% { transform: scale(0.2); opacity: 0; }
+  70% { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-feedback-check { animation: none; }
+  .rf-feedback-btn { transition: none; }
+}
+
+/* 「AI 眼中的你」笔记下方的更新说明：块外一行次要文字，与笔记正文同字号（14px），
+   靠「块内 / 块外」结构 + 「AI 紫 / 次要灰」颜色区分（C-01、C-04） */
+.rf-note-meta {
+  margin: 8px 0 0;
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-secondary);
+  text-wrap: pretty;
+}

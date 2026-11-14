@@ -1,6 +1,6 @@
 # ReadFlow 数据存储总览
 
-> 整理时间：2026-11-14。字段以本机真实数据库 `data/readflow.db` 的实际表结构为准（`PRAGMA table_info`），不是照抄代码。
+> 整理时间：2026-11-14（P34 起新增 `explain_answers` 表、`learner_profiles.note_update_kind` 列、站级设置 `learner.nightlyRunDay`，以及讲解 / 查词记录的过期删除，见各节标注）。字段以本机真实数据库 `data/readflow.db` 的实际表结构为准（`PRAGMA table_info`），不是照抄代码。
 > 示例行取自本机真实数据，**密钥、密码哈希、手机号、Token 已脱敏**；很长的文字截断后用 `…` 表示。
 > 时间字段都是**毫秒时间戳**（例如 `1794619336977` = 2026-11-14 09:22）。
 > 布尔值用整数 `0 / 1` 存。
@@ -9,7 +9,7 @@
 
 | 存储 | 类型 | 位置 | 说明 |
 |---|---|---|---|
-| 主库 `readflow.db` | 关系型（SQLite） | `data/readflow.db` | 17 张表，见第 1 部分（2026-11-14 从 20 张整理而来） |
+| 主库 `readflow.db` | 关系型（SQLite） | `data/readflow.db` | 18 张表，见第 1 部分（2026-11-14 从 20 张整理为 17 张；P34 新增 `explain_answers`） |
 | 词典库 `ecdict.db` | 关系型（SQLite），只读 | `data/dict/ecdict.db` | 1 张表，见第 2 部分 |
 | `settings` 表 | 关系型表，但用法是 KV | 主库内 | 见第 3.1 节 |
 | 服务端进程内存 | KV（JavaScript `Map`），重启即清空 | Node 进程 | 见第 3.2 节 |
@@ -226,11 +226,12 @@
 | survey_dismissed_at | INTEGER | | | 点「以后再说」的时间 |
 | show_feedback | INTEGER | 是 | 1 | 讲解下方是否显示「太浅 / 刚好 / 太深」 |
 | stats | TEXT | | | 行为推断结果缓存（JSON：查词数、词汇量、难点、追问率、反馈次数） |
-| stats_updated_at | INTEGER | | | 推断缓存时间；超过 6 小时重算 |
+| stats_updated_at | INTEGER | | | 推断缓存时间；超过 6 小时重算。P34：每次点反馈都置为空，下次读档案立即重算 |
 | note | TEXT | | | 老师笔记全文（≤300 字） |
-| note_updated_at | INTEGER | | | 笔记更新时间 |
+| note_updated_at | INTEGER | | | 笔记更新时间。P34：也是「已整理过」的分界——早于它的讲解记录视为已被笔记吸收（见下文过期删除） |
 | note_user_edited | INTEGER | 是 | 0 | 1 = 用户手动改过笔记 |
-| note_lookup_cursor | INTEGER | 是 | 0 | 上次更新笔记时的查词总数（「再查 25 次」从这里数） |
+| note_lookup_cursor | INTEGER | 是 | 0 | **P34 起不再使用**（原「再查 25 次」的游标）；列保留，清空记忆时仍归零 |
+| note_update_kind | TEXT | | | P34：笔记来源。`nightly` 每晚整理 / `user` 用户手动改过；空 = 老数据。设置页据此显示「每晚整理 · 今天 03:00」/「你修改过 …」/「更新于 …」 |
 | note_last_error | TEXT | | | 上次生成笔记失败的原因 |
 | memory_reset_at | INTEGER | 是 | 0 | 「清空 AI 记忆」的时间；之前的事件不再计入 |
 | updated_at | INTEGER | 是 | | |
@@ -243,7 +244,7 @@
 
 #### `explain_events` 查词 / 讲解事件（42 行）
 
-每次**查词**记一条 `lookup`，每次**请 AI 讲解**记一条 `explain`。`explain` 这条的 id 就是「这段回答」的 id（前端叫 answerId），反馈写在这一行上。**这张表不存 AI 回答的原文**。
+每次**查词**记一条 `lookup`，每次**请 AI 讲解**记一条 `explain`。`explain` 这条的 id 就是「这段回答」的 id（前端叫 answerId），反馈写在这一行上。这张表不存 AI 回答的原文，原文在 P34 新增的 `explain_answers`。
 
 | 列 | 类型 | 必填 | 默认 | 说明 |
 |---|---|---|---|---|
@@ -253,14 +254,14 @@
 | ask_kind | TEXT | | | 讲解的种类（仅 explain）：`auto` 词典查不到时自动讲 / `default` 这个词在这句里什么意思 / `word_only` 只讲这个词 / `whole_sentence` 整句没看懂 / `structure` 句子结构 / `example` 再给个例句 / `custom` 自己写的问题 |
 | via | TEXT | 是 | 'reader' | `reader` / `extension` |
 | word | TEXT | | | 选中的文字 |
-| lemma | TEXT | | | 原形（目前只有 lookup 会填；本机 16 条 explain 全为空） |
+| lemma | TEXT | | | 原形。P34 起 explain 也填（之前的老 explain 为空） |
 | freq_rank | INTEGER | | | 词频排名（lookup 填，用于推断词汇量） |
 | is_phrase | INTEGER | 是 | 0 | 是否短语 |
 | dict_hit | INTEGER | | | 词典是否收录 |
 | repeat_count | INTEGER | | | 同一句里第几次请教 |
-| text_id | TEXT | | | 哪篇文章（lookup 填；本机 16 条 explain 全为空） |
+| text_id | TEXT | | | 哪篇文章。P34 起阅读页的 explain 也带上（之前的老 explain 为空） |
 | text_cefr | TEXT | | | 那篇文章的难度 |
-| context_id | TEXT | | | 对应哪条批注（`contexts.id`）。lookup 都有；**本机 16 条 explain 里只有 2 条有** |
+| context_id | TEXT | | | 对应哪条批注（`contexts.id`）。P34 起 explain 三条路补上：请求自带 → 讲解结束时按文章 + 段落 + 位置查 → 保存批注时按「同一篇文章、同一个词、10 分钟内」回填 |
 | feedback | TEXT | | | 「太浅 / 刚好 / 太深」：`shallow` / `right` / `deep`，改选会覆盖 |
 | feedback_at | INTEGER | | | 点反馈的时间 |
 | created_at | INTEGER | 是 | | 事件时间（explain 在**请求开始**时就写，讲解失败或被打断也会有这一条） |
@@ -277,6 +278,28 @@
 | id | kind | word | lemma | freq_rank | dict_hit | text_id | text_cefr | context_id | created_at |
 |---|---|---|---|---|---|---|---|---|---|
 | 7da4a5a2-… | lookup | functionality | functionality | 16436 | 1 | d40bb21d-… | B2 | 19581895-… | 1794619272121 |
+
+**过期删除（P34）**：每晚整理时先删一次。
+- `explain`：超过 30 天**且**早于本人 `note_updated_at`（已被笔记吸收）的删除；无论是否吸收，超过 90 天都删除。
+- `lookup`：超过 90 天删除。
+- 对应的 `explain_answers` 一并删除。删除只影响行为推断与笔记整理的原料，不影响词库、批注和回看（回看的内容在 `contexts.ai_gloss`）。
+
+#### `explain_answers` 每段 AI 回答的原文（P34 新增）
+
+讲解**完整结束**时写入一行（中途打断、出错不写）。用来回看时把反馈对上具体那段回答、每晚整理时把「问题 + 回答 + 反馈」交给 AI。
+
+| 列 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| event_id | TEXT 主键 | | | = `explain_events.id`（answerId）；外键，讲解记录删除时级联删除 |
+| user_id | TEXT | 是 | | 账号 id |
+| context_id | TEXT | | | 对应哪条批注；与讲解记录同时补上 |
+| ask_label | TEXT | | | 「你问：…」的标题（如「再给个例句」），≤60 字；自动讲解为空 |
+| answer_text | TEXT | 是 | | 回答全文 |
+| created_at | INTEGER | 是 | | |
+
+索引：`(user_id, created_at)`、`(context_id)`。
+
+示例：`2b56a814-… | f6905e4a-… | 605fc430-… | 再给个例句 | 释义：通用的…（全文） | 1794650000000`
 
 ### 1.5 做卡与推送（P33）
 
@@ -413,6 +436,7 @@
 | `markji.cardsChapter` | 个人 | `mkjch_…` | 上次推送选的章节 |
 | `markji.cardsChapterMode` | 个人 | `fixed` / `per_article` | 上次推送的章节方式 |
 | `profile.displayName` / `profile.fullName` / `profile.bio` / `profile.avatar` | 个人 | `syuan` / … / 头像图片数据 | 个人资料 |
+| `learner.nightlyRunDay` | 站级 | `2026-11-14` | P34：每晚整理今天（北京时间）已经跑过；同一天不再跑，错过 03:00（比如电脑睡眠）醒来后补跑一次 |
 | `extension.token` | 站级 | | 旧版的插件 Token。P30 起改用 `extension_tokens` 表；读到旧值会自动迁到主账号名下并删除这一行 |
 | `markji.deck` / `markji.chapter` | 站级 | `mkjd_…` / `mkjch_…` | **旧导出功能留下的**，代码里已不再读写 |
 
@@ -426,6 +450,7 @@
 | 墨墨限速器 `limiters`（`src/lib/cards/pusher.ts`） | 账号 id | 最近一分钟内的请求时间戳列表 | 保证 10 秒 20 次、60 秒 40 次、间隔 ≥0.5 秒 |
 | 推送执行器 `runners`（同上） | 推送任务 id | 正在执行的任务 | 每个任务只跑一个执行器；重启后查询状态时接着跑 |
 | 老师笔记尝试状态 `attempts`（`src/lib/note-generator.ts`） | 账号 id | `{ dayKey: "2026-11-14", attempts: 1, lastFailureAt: null }` | 失败后冷却 1 小时、每天最多尝试 3 次 |
+| 每晚整理调度器（`src/lib/nightly-note.ts`，由 `src/instrumentation.ts` 启动） | — | 一个 10 分钟的定时器 | 北京时间 03:00 后、今天还没跑过时：先过期删除，再给「上次整理后新查词 + 新讲解 + 新反馈 ≥ 10 次」的账号重写笔记 |
 | 登录失败计数 `failures`（`src/lib/auth.ts`） | 用户名（或可信反代下的 IP） | `{ count: 3, until: 1794620000000 }` | 连续失败 5 次锁 60 秒 |
 
 ### 3.3 图片缓存 `data/img-cache/`（文件）
@@ -456,8 +481,8 @@
 
 ## 4. 检查时值得注意的几点
 
-1. **AI 回答原文只存在 `contexts.ai_gloss`**，是一条批注的整段对话；`explain_events` 不存原文，也不知道自己对应 `ai_gloss` 里的哪一段（之前讨论的「回看时反馈按钮消失」「把问题 + 回答 + 反馈一起给 AI」都卡在这里）。
-2. **`explain` 事件大多连批注 id 都没有**：本机 16 条 explain 事件里，只有 2 条带 `context_id`，`lemma` 和 `text_id` 则全部为空（26 条 lookup 都齐全）。多半是因为讲解请求在批注落库、拿到 id 之前就发出了（还没逐一核实）。这意味着现在连「按批注把讲解和回答联合起来」都做不到，要先解决。
+1. **AI 回答原文**：批注里的整段对话仍在 `contexts.ai_gloss`；P34 起每段回答另存一行 `explain_answers`，回看时按文字一一对上，所以回看也能评价和改反馈。P34 之前的老讲解没有原文行，回看时不显示反馈行。
+2. **`explain` 事件缺批注 id（P34 已修）**：原因是讲解请求在批注落库、拿到 id 之前就发出了。P34 起讲解请求带上文章 id 与位置，讲解结束或保存批注时补上；P34 之前的老记录保持原样。
 3. `explain` 事件在请求**开始**时就写入，讲解失败或被打断也会留一条，所以它的条数可能多于 `ai_gloss` 里实际保存的回答段数。本机 16 条 explain 里 5 条有反馈。
 4. `settings` 里的 `markji.deck`、`markji.chapter` 是旧导出功能的遗留，代码已不再读写。
-5. **数据库层声明了外键、并且都是级联删除**（删父行，子行跟着删）：`paragraphs → texts`、`section_summaries → texts`、`contexts → user_words`、`exports → user_words`、`sessions → users`、`cards → card_sets`。其余归属关系（大多数表的 `user_id`、`explain_events`、`card_sets` 等）**没有外键**，靠代码按 `user_id` 校验；删掉一个词或一篇文章时，这些表里的相关行不会自动删除。
+5. **数据库层声明了外键、并且都是级联删除**（删父行，子行跟着删）：`paragraphs → texts`、`section_summaries → texts`、`contexts → user_words`、`exports → user_words`、`sessions → users`、`cards → card_sets`、`explain_answers → explain_events`（P34）。其余归属关系（大多数表的 `user_id`、`explain_events`、`card_sets` 等）**没有外键**，靠代码按 `user_id` 校验；删掉一个词或一篇文章时，这些表里的相关行不会自动删除。

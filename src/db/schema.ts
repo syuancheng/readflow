@@ -267,6 +267,8 @@ export const learnerProfiles = sqliteTable("learner_profiles", {
   noteUpdatedAt: integer("note_updated_at"),
   noteUserEdited: integer("note_user_edited").notNull().default(0),
   noteLookupCursor: integer("note_lookup_cursor").notNull().default(0),
+  /** P34：最近一次笔记的来源 nightly / user */
+  noteUpdateKind: text("note_update_kind"),
   noteLastError: text("note_last_error"),
   memoryResetAt: integer("memory_reset_at").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
@@ -354,6 +356,16 @@ export const cards = sqliteTable(
   },
   (t) => [index("idx_cards_user_status").on(t.userId, t.status)],
 );
+
+/** P34：每段回答原文，event_id = explain_events.id（answerId） */
+export const explainAnswers = sqliteTable("explain_answers", {
+  eventId: text("event_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  contextId: text("context_id"),
+  askLabel: text("ask_label"),
+  answerText: text("answer_text").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
 
 /** 每日次数：kind = 'ai'（免费讲解）| 'card'（做卡）。由 db/ensure-usage.ts 建表与迁移 */
 export const dailyUsage = sqliteTable("daily_usage", {

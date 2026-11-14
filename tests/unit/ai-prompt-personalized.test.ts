@@ -130,3 +130,11 @@ test("个性化模式下观察块不再告诉模型「同句第几次」；关�
   assert.ok(off.includes("同句连续请教: 第 2 次"));
   assert.equal(buildUserMessage({ ...BASE, signals }), off, "不传 personalized 等同关闭，保持旧行为");
 });
+
+test("P34：个性化深度指引写明怎么用「最近的反馈」；关闭时提示词不变", () => {
+  const zh = buildSystemPrompt("en", false, "steer", { personalized: true });
+  assert.ok(zh.includes("「最近的反馈」") && zh.includes("向被评「刚好」的那次讲法靠拢") && zh.includes("以最近的为准"));
+  const en = buildSystemPrompt("en", true, "steer", { personalized: true });
+  assert.ok(en.includes("最近的反馈") && en.includes("follow the recent feedback"));
+  assert.ok(!buildSystemPrompt("en", false, "steer", { personalized: false }).includes("最近的反馈"));
+});

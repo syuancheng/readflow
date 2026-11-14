@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { addColumnIfMissing } from "./alter";
 import { ensureDailyUsage } from "./ensure-usage";
+import { ensureAnswers } from "./ensure-answers";
 
 /**
  * 账户体系的表结构与老库迁移（P20）。
@@ -161,6 +162,8 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
 
   // 每日次数合并成 daily_usage，并删掉阶段二才用的空表（见 ensure-usage.ts）
   ensureDailyUsage(sqlite);
+  // P34：每段回答原文 + 老师笔记来源（explain_events / learner_profiles 已在上面建好）
+  ensureAnswers(sqlite);
 
   // P33 F7：查词事件里记录「这个词当时是否已有推送成功的卡片」
   const evCols = sqlite.prepare("PRAGMA table_info(explain_events)").all() as { name: string }[];

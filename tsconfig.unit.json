@@ -38,6 +38,7 @@
     "src/lib/cards/edit.ts",
     "src/db/alter.ts",
     "src/db/ensure-usage.ts",
+    "src/db/ensure-answers.ts",
     "src/lib/cefr.ts",
     "src/lib/split.ts",
     "src/lib/tokenize.ts",

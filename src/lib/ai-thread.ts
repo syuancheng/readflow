@@ -54,3 +54,22 @@ export function defaultTurnText(raw: string | null | undefined): string {
   const first = parseThread(raw)[0];
   return first && !first.ask ? first.text : "";
 }
+
+/**
+ * P34 F4：回看时给对话串的每一段对上它保存过的回答（answerId + 反馈）。
+ * 对话串仍以批注里的整串为准渲染，不改变回看内容；对每一段按顺序找「去掉首尾空白后文字完全相同」
+ * 且还没被占用的回答。对不上的段（改动前的老讲解、或讲解记录已过期删除）不带 answerId。
+ */
+export function attachAnswers<T extends ThreadTurn>(
+  turns: readonly T[],
+  answers: readonly { answerId: string; text: string; feedback: string | null }[],
+): (T & { answerId?: string; feedback?: string | null })[] {
+  const used = new Set<number>();
+  return turns.map((t) => {
+    const want = t.text.trim();
+    const i = answers.findIndex((a, j) => !used.has(j) && a.text.trim() === want);
+    if (i < 0) return { ...t };
+    used.add(i);
+    return { ...t, answerId: answers[i].answerId, feedback: answers[i].feedback };
+  });
+}

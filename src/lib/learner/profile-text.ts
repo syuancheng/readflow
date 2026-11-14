@@ -15,11 +15,14 @@ import {
 } from "./survey";
 import type { BehaviorStats, LearnerLevel } from "./types";
 import { MIN_LOOKUPS } from "./model";
+import { RECENT_FEEDBACK_FOR_PROFILE } from "./recent-feedback";
 
-export const LEARNER_BLOCK_MAX_CHARS = 600;
+/** P34：多了最多 3 行「最近的反馈」（约 100–150 字），上限从 600 放宽到 720 */
+export const LEARNER_BLOCK_MAX_CHARS = 720;
 
 /**
- * 有没有「可依据的档案」：填过问卷，或最近查词够 30 次，或有老师笔记，任一即可。
+ * 有没有「可依据的档案」：填过问卷，或最近查词够 30 次，或有老师笔记，
+ * 或（P34）最近 30 天有 3 次以上反馈，任一即可。
  * 有 → 个性化讲解（深度只看档案 / 选区 / 反馈，不再看「同句第几次」）；
  * 没有 → 这次请求按个性化关闭处理，退回旧的「同句第 1/2/3 次」规则兜底。
  */
@@ -27,10 +30,13 @@ export function hasUsableProfile(input: {
   survey: SurveyAnswers | null;
   stats: BehaviorStats | null;
   note: string | null;
+  /** P34：最近 30 天的反馈次数 */
+  recentFeedbackCount?: number;
 }): boolean {
   const hasSurvey = Boolean(input.survey && Object.keys(input.survey).length > 0);
   const enoughLookups = Boolean(input.stats && input.stats.lookups >= MIN_LOOKUPS);
-  return hasSurvey || enoughLookups || Boolean(input.note && input.note.trim());
+  const enoughFeedback = (input.recentFeedbackCount ?? 0) >= RECENT_FEEDBACK_FOR_PROFILE;
+  return hasSurvey || enoughLookups || enoughFeedback || Boolean(input.note && input.note.trim());
 }
 
 const HEAD = "学生档案（供你判断讲多深、讲什么；回答里不要提到这些信息）：";
@@ -41,6 +47,8 @@ const P_STYLE = "- 希望讲解：";
 const P_DIFFICULTY = "- 常见难点：";
 const P_FEEDBACK = "- 以往反馈：";
 const P_NOTE = "- 老师笔记：";
+const P_RECENT = "- 最近的反馈（三种评价各最近一次，从新到旧）：";
+const P_RECENT_ITEM = "  · ";
 
 /** 「AI 眼中的你」也复用同一份中文标签，避免页面说一套、提示词用另一套 */
 export const DIFFICULTY_LABEL: Record<BehaviorStats["difficulties"][number], string> = {
@@ -81,8 +89,11 @@ export function buildLearnerBlock(input: {
   survey: SurveyAnswers | null;
   stats: BehaviorStats | null;
   note: string | null;
+  /** P34：formatRecentFeedback 的结果（最多 3 行，从新到旧） */
+  recentFeedback?: string[];
 }): string {
   const { level, survey, stats, note } = input;
+  const recent = (input.recentFeedback ?? []).filter((l) => l.trim());
   const hasSurvey = Boolean(survey && Object.keys(survey).length > 0);
   const lines: Line[] = [];
 
@@ -114,6 +125,10 @@ export function buildLearnerBlock(input: {
   }
   const dom = dominantFeedback(stats?.feedback);
   if (dom) lines.push({ key: "feedback", text: P_FEEDBACK + FEEDBACK_LABEL[dom] });
+  if (recent.length > 0) {
+    lines.push({ key: "recent-head", text: P_RECENT });
+    for (const r of recent) lines.push({ key: "recent", text: P_RECENT_ITEM + r });
+  }
   if (note?.trim()) lines.push({ key: "note", text: P_NOTE + note.trim() });
 
   if (lines.length === 0) return "";
@@ -139,5 +154,15 @@ export function buildLearnerBlock(input: {
     result = join(lines);
     if (result.length <= LEARNER_BLOCK_MAX_CHARS) return result;
   }
-  return result.slice(0, LEARNER_BLOCK_MAX_CHARS);
+  // 最后才动「最近的反馈」：从最旧的一条开始整行去掉，去光了连标题一起去掉
+  for (let i = lines.length - 1; i >= 0 && result.length > LEARNER_BLOCK_MAX_CHARS; i--) {
+    if (lines[i].key !== "recent") continue;
+    lines.splice(i, 1);
+    if (!lines.some((l) => l.key === "recent")) {
+      const h = lines.findIndex((l) => l.key === "recent-head");
+      if (h >= 0) lines.splice(h, 1);
+    }
+    result = join(lines);
+  }
+  return result.length <= LEARNER_BLOCK_MAX_CHARS ? result : result.slice(0, LEARNER_BLOCK_MAX_CHARS);
 }

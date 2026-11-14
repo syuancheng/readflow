@@ -42,6 +42,20 @@ const q = (sql, ...args) => {
   const d = new Database(DB, { readonly: true });
   try { return d.prepare(sql).all(...args); } finally { d.close(); }
 };
+const dbRun = (sql, ...args) => {
+  const d = new Database(DB);
+  try { return d.prepare(sql).run(...args); } finally { d.close(); }
+};
+const nap = (ms) => new Promise((r) => setTimeout(r, ms));
+/** P34：触发一次每晚整理（删掉「今天已跑过」的标记，等调度器跑完再写回） */
+async function runNightly(timeout = 20000) {
+  dbRun("DELETE FROM settings WHERE user_id = 'local' AND key = 'learner.nightlyRunDay'");
+  for (let i = 0; i < timeout / 200; i++) {
+    await nap(200);
+    if (q("select 1 from settings where user_id = 'local' and key = 'learner.nightlyRunDay'").length) return true;
+  }
+  return false;
+}
 
 fs.mkdirSync(TMP, { recursive: true });
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -56,11 +70,14 @@ const FAKE_NOTE =
 // L 段用来复现「模型一直返回不合格笔记」：Markdown 会被 validateNote 拒绝
 const BAD_NOTE = "**不合格的笔记**";
 let badNoteMode = false;
+// P34：讲解流的内容与延迟可调（测句子地图特征、测中途中止）
+let explainParts = ["释义：测试", "\n假模型讲解"];
+let streamDelayMs = 0;
 const fake = http.createServer((req, res) => {
   if (req.url.split("?")[0] === "/v1/chat/completions") {
     let buf = "";
     req.on("data", (d) => (buf += d));
-    req.on("end", () => {
+    req.on("end", async () => {
       let body = {};
       try { body = JSON.parse(buf); } catch { /* 忽略畸形请求 */ }
       const streaming = body.stream === true;
@@ -78,7 +95,9 @@ const fake = http.createServer((req, res) => {
       }
       modelCalls.push({ messages: body.messages ?? [], stream: true });
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
-      for (const part of ["释义：测试", "\n假模型讲解"]) {
+      for (const part of explainParts) {
+        if (streamDelayMs) await new Promise((r) => setTimeout(r, streamDelayMs));
+        if (res.destroyed) return;
         res.write(`data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
       }
       res.write("data: [DONE]\n\n");
@@ -96,6 +115,9 @@ const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "star
     ...process.env,
     DB_PATH: DB,
     NODE_ENV: "production",
+    // P34：每晚整理在测试里「随时到点」，每秒检查一次；测试删掉 learner.nightlyRunDay 就会再跑一次
+    READFLOW_NIGHTLY_HOUR: "0",
+    READFLOW_NIGHTLY_INTERVAL_MS: "1000",
     NO_PROXY: "localhost,127.0.0.1",
     no_proxy: "localhost,127.0.0.1",
   },
@@ -486,8 +508,8 @@ try {
     check("G5 完成的讲解下面显示「这次讲得：太浅 · 刚好 · 太深」",
       feedbackVisible && (await ownerPage.locator(".reader-note .rf-feedback-btn").count()) === 3,
       `可见=${feedbackVisible}`);
-    await shot(ownerPage, "feedback-reader", 1440);
-    await shot(ownerPage, "feedback-reader", 390);
+    await shot(ownerPage, "feedback-unrated", 1440);
+    await shot(ownerPage, "feedback-unrated", 390);
 
     await ownerPage.setViewportSize({ width: 1440, height: 900 });
     await ownerPage.locator('.reader-note .rf-feedback-btn:has-text("太深")').click();
@@ -514,12 +536,42 @@ try {
     });
     check("G7b 选中的反馈变绿（#3f7f00）并在前面出现「✓」，其它两个没有勾",
       fbState.on.join() === "✓刚好" && fbState.check === "✓" && fbState.color === "rgb(63, 127, 0)" && fbState.checks === 1, JSON.stringify(fbState));
+    await shot(ownerPage, "feedback-rated", 1440);
+    await shot(ownerPage, "feedback-rated", 390);
+    await ownerPage.setViewportSize({ width: 1440, height: 900 });
     const feedbackId = rightRows.at(-1)?.id;
     const forbiddenFeedback = await api("/api/explain/feedback", {
       cookie: friendCookie, method: "POST", body: { answerId: feedbackId, rating: "shallow" },
     });
     check("G8 别人的 answerId 反馈返回 404", forbiddenFeedback.status === 404,
       `status=${forbiddenFeedback.status}`);
+
+    // P34 F4：回看时反馈行照常显示，保留当时的选择（刚好），而且可以改
+    const answerRow = q("select context_id, answer_text from explain_answers where event_id = ?", feedbackId ?? "")[0];
+    check("G7c 讲解结束后存下了回答原文，并对上了批注",
+      Boolean(answerRow?.context_id) && String(answerRow?.answer_text).includes("假模型讲解"), JSON.stringify(answerRow));
+    await ownerPage.reload({ waitUntil: "load" });
+    await ownerPage.waitForTimeout(900);
+    const rectR = await ownerPage.evaluate(() => {
+      const el = [...document.querySelectorAll("[data-pid] .w")].find((e) => e.textContent.trim() === "artifact");
+      if (!el) return null;
+      el.scrollIntoView({ block: "center" });
+      return el.getBoundingClientRect().toJSON();
+    });
+    if (rectR) {
+      await ownerPage.mouse.click(rectR.x + rectR.width / 2, rectR.y + rectR.height / 2);
+      const recallRow = await ownerPage.waitForSelector(".reader-note .rf-feedback-row", { timeout: 8000 }).then(() => true).catch(() => false);
+      const pressed = await ownerPage.evaluate(() =>
+        [...document.querySelectorAll(".reader-note .rf-feedback-btn[aria-pressed=true]")].map((b) => b.textContent.trim()));
+      check("G7d 回看：反馈行照常显示，保留当时选的「✓刚好」", recallRow && pressed.join() === "✓刚好", `可见=${recallRow} 选中=${pressed}`);
+      await shot(ownerPage, "feedback-recall", 1440);
+      await shot(ownerPage, "feedback-recall", 390);
+      await ownerPage.setViewportSize({ width: 1440, height: 900 });
+      await ownerPage.locator('.reader-note .rf-feedback-btn:has-text("太浅")').click();
+      await ownerPage.waitForTimeout(600);
+      check("G7e 回看时可以改选：改成「太浅」后库里被覆盖",
+        q("select feedback from explain_events where id = ?", feedbackId ?? "")[0]?.feedback === "shallow");
+    }
 
     // 关掉本人开关后，重新问一次也不再显示反馈行
     await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: false } });
@@ -545,65 +597,78 @@ try {
     await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: true } });
   }
 
-  // ================= H. 场景 7：25 次查词 + 24 小时 → 后台生成老师笔记 =================
+  // ================= H. P34：每晚整理老师笔记（新动静攒够 10 次） =================
   const ownerId = q("select id from users where username = 'p32_owner'")[0].id;
   const profile = () => q("select * from learner_profiles where user_id = ?", ownerId)[0];
-  const update = (sql, ...args) => {
-    const d = new Database(DB);
-    try { d.prepare(sql).run(...args); } finally { d.close(); }
+  const update = dbRun;
+  const sleep = nap;
+  /** 让每晚整理只可能选中这一个用户：其他人的「上次整理」挪到 10 年后，新动静就是 0 */
+  const onlyEligible = (userId) => {
+    update("INSERT OR IGNORE INTO learner_profiles (user_id, updated_at) SELECT id, ? FROM users", Date.now());
+    update("UPDATE learner_profiles SET note_updated_at = ? WHERE user_id != ?", Date.now() + 10 * 365 * 86400_000, userId);
   };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const waitProfile = async (pred, timeout = 12000) => {
-    for (let i = 0; i < timeout / 200; i++) {
-      const r = profile();
-      if (pred(r)) return r;
-      await sleep(200);
-    }
-    return profile();
-  };
+  onlyEligible(ownerId);
 
-  // 模拟「上次生成是 25 小时前、当时游标为 5」：G 段已灌 30 次查词 → 新增 ≥25 且满 24 小时
+  // 上一份笔记是 25 小时前写的；G 段之后又有 30 次查词 → 新动静 ≥ 10
   const OLD_NOTE = "旧的观察：常查长句，喜欢简短解释。";
   update(
-    `UPDATE learner_profiles SET note = ?, note_updated_at = ?, note_lookup_cursor = 5,
+    `UPDATE learner_profiles SET note = ?, note_updated_at = ?, note_update_kind = 'nightly',
        note_user_edited = 0, note_last_error = NULL, stats = NULL, stats_updated_at = NULL
      WHERE user_id = ?`,
     OLD_NOTE, Date.now() - 25 * 3600 * 1000, ownerId,
   );
-  const lookupsBefore = q(
-    "select count(*) n from explain_events where user_id = ? and kind = 'lookup'", ownerId,
+  const newEventsBefore = q(
+    "select count(*) n from explain_events where user_id = ? and created_at > ?", ownerId, profile().note_updated_at,
   )[0].n;
-  check("H0 场景 7 前置：新增查词 ≥25 且距上次更新 ≥24 小时",
-    lookupsBefore - 5 >= 25, `查词=${lookupsBefore} 上次游标=5 新增=${lookupsBefore - 5}`);
+  check("H0 前置：自上次整理以来新动静 ≥ 10", newEventsBefore >= 10, `新动静=${newEventsBefore}`);
 
   const usageBefore = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", ownerId)[0].n;
   const noteCallsBefore = noteCalls.length;
-  await explain(owner);
-  const hRow = await waitProfile((r) => Boolean(r.note) && r.note !== OLD_NOTE);
-  check("H1 满足条件后后台生成新笔记（改写而非追加），长度 ≤300 字",
-    Boolean(hRow.note) && hRow.note !== OLD_NOTE && hRow.note.length <= 300 && !hRow.note.includes(OLD_NOTE),
-    `长度=${hRow.note?.length} 内容=${String(hRow.note).slice(0, 28)}`);
-  check("H2 游标前进到当前查词总数、错误清空、用户编辑标记归 0",
-    hRow.note_lookup_cursor === lookupsBefore && hRow.note_last_error === null && hRow.note_user_edited === 0,
-    `cursor=${hRow.note_lookup_cursor}/${lookupsBefore} err=${hRow.note_last_error} edited=${hRow.note_user_edited}`);
+  const explainCallsBefore = modelCalls.length;
+  const ranH = await runNightly();
+  const hRow = profile();
+  check("H1 每晚整理改写了老师笔记（改写而非追加），长度 ≤300 字",
+    ranH && Boolean(hRow.note) && hRow.note !== OLD_NOTE && hRow.note.length <= 300 && !hRow.note.includes(OLD_NOTE),
+    `跑完=${ranH} 长度=${hRow.note?.length} 内容=${String(hRow.note).slice(0, 28)}`);
+  check("H2 来源记为 nightly、错误清空、用户编辑标记归 0",
+    hRow.note_update_kind === "nightly" && hRow.note_last_error === null && hRow.note_user_edited === 0 && hRow.note_updated_at > Date.now() - 60_000,
+    `kind=${hRow.note_update_kind} err=${hRow.note_last_error} edited=${hRow.note_user_edited}`);
   const noteSystem = noteCalls.at(-1)?.messages?.[0]?.content ?? "";
-  check("H3 笔记走非流式调用，提示词写明「不要列出具体单词」「以统计数据为准」",
+  const noteUser = noteCalls.at(-1)?.messages?.[1]?.content ?? "";
+  check("H3 整理走非流式调用；提示词写明不列单词、以统计为准、每晚整理、来自所有文章，并带「带回答的反馈」一节",
     noteCalls.length > noteCallsBefore && noteCalls.at(-1)?.stream === false &&
-    noteSystem.includes("不要列出具体单词") && noteSystem.includes("以统计数据为准"),
+    noteSystem.includes("不要列出具体单词") && noteSystem.includes("以统计数据为准") &&
+    noteSystem.includes("每晚整理") && noteSystem.includes("所有文章") && noteUser.includes("【带回答的反馈"),
     `笔记调用=${noteCalls.length - noteCallsBefore}`);
   const usageAfter = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", ownerId)[0].n;
   const noteGenSrc = fs.readFileSync(path.join(ROOT, "src/lib/note-generator.ts"), "utf8");
-  check("H4 生成笔记不扣每日免费 AI 次数（daily_usage 里 ai 次数不增，且源码没有实际调用扣额度函数）",
-    usageAfter === usageBefore &&
+  check("H4 整理笔记不扣每日免费 AI 次数，也不走讲解（无流式调用），源码没有调用扣额度函数",
+    usageAfter === usageBefore && modelCalls.length === explainCallsBefore &&
     !/consumeAiQuota\s*\(/.test(noteGenSrc) && !/from\s+["'][^"']*ai-quota/.test(noteGenSrc),
     `ai 次数 ${usageBefore} → ${usageAfter}`);
   const hLearner = await api("/api/learner", { cookie: owner });
-  check("H5 GET /api/learner 返回笔记全文与更新时间",
-    hLearner.data?.note === hRow.note && typeof hLearner.data?.noteUpdatedAt === "number",
-    `updatedAt=${hLearner.data?.noteUpdatedAt}`);
+  check("H5 GET /api/learner 返回笔记全文、更新时间与来源 nightly",
+    hLearner.data?.note === hRow.note && typeof hLearner.data?.noteUpdatedAt === "number" && hLearner.data?.noteUpdateKind === "nightly",
+    `kind=${hLearner.data?.noteUpdateKind}`);
 
-  // 普通账号（用站点 Key，讲解本身会计入免费额度）满足笔记条件：
-  // 一次「讲解 + 后台笔记」应该只扣 1 次额度；若笔记也去扣，这里会变成 2。
+  // 门槛：刚整理完再加 9 次查词 → 不整理；第 10 次后才整理
+  {
+    const d = new Database(DB);
+    const ins = d.prepare("INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES (?, ?, 'lookup', 'reader', 'artifact', ?)");
+    d.transaction(() => { for (let i = 0; i < 9; i++) ins.run(`h8-lookup-${i}`, ownerId, Date.now() + 1000 + i); })();
+    d.close();
+  }
+  const callsBefore9 = noteCalls.length;
+  const at9 = profile().note_updated_at;
+  await runNightly();
+  check("H8 新动静只有 9 次：当晚不整理（不调用模型，笔记时间不变）",
+    noteCalls.length === callsBefore9 && profile().note_updated_at === at9, `调用=${noteCalls.length - callsBefore9}`);
+  update("INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES ('h8-lookup-9', ?, 'lookup', 'reader', 'artifact', ?)", ownerId, Date.now() + 2000);
+  const waiting = (await api("/api/learner", { cookie: owner })).data?.noteReason;
+  await runNightly();
+  check("H9 攒够第 10 次后整理", noteCalls.length === callsBefore9 + 1 && profile().note_updated_at > at9, `调用=${noteCalls.length - callsBefore9} reason=${JSON.stringify(waiting)}`);
+
+  // 普通账号（用站点 Key）：整理笔记不扣他的免费额度
   const friendId = q("select id from users where username = 'p32_friend'")[0].id;
   {
     const d = new Database(DB);
@@ -615,31 +680,31 @@ try {
     })();
     d.close();
   }
+  update("UPDATE learner_profiles SET note_updated_at = NULL WHERE user_id = ?", friendId);
+  onlyEligible(friendId);
   const usageFBefore = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", friendId)[0].n;
   const noteCallsFBefore = noteCalls.length;
-  await explain(friendCookie);
-  let friendNote = null;
-  for (let i = 0; i < 60 && !friendNote; i++) {
-    friendNote = q("select note from learner_profiles where user_id = ?", friendId)[0]?.note ?? null;
-    if (!friendNote) await sleep(200);
-  }
+  await runNightly();
+  const friendNote = q("select note from learner_profiles where user_id = ?", friendId)[0]?.note ?? null;
   const usageFAfter = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", friendId)[0].n;
-  check("H4b 普通账号：一次讲解 + 一次后台笔记只扣 1 次免费额度（笔记不额外扣）",
-    Boolean(friendNote) && noteCalls.length > noteCallsFBefore && usageFAfter - usageFBefore === 1,
+  check("H4b 普通账号的笔记由每晚整理生成，不扣他的免费额度",
+    Boolean(friendNote) && noteCalls.length > noteCallsFBefore && usageFAfter === usageFBefore,
     `笔记=${Boolean(friendNote)} 笔记调用=${noteCalls.length - noteCallsFBefore} 额度增量=${usageFAfter - usageFBefore}`);
 
   // 站点没配模型：不生成、不写错误、返回 no_model
   update("DELETE FROM settings WHERE key = 'ai.custom.apiKey'");
   update(
-    `UPDATE learner_profiles SET note = NULL, note_updated_at = NULL,
-       note_lookup_cursor = 0, note_last_error = NULL WHERE user_id = ?`, ownerId,
+    `UPDATE learner_profiles SET note = NULL, note_updated_at = NULL, note_update_kind = NULL,
+       note_last_error = NULL WHERE user_id = ?`, ownerId,
   );
   const noModelLearner = await api("/api/learner", { cookie: owner });
   check("H6 站点没配模型时 GET /api/learner 返回原因 no_model",
     noModelLearner.data?.noteReason === "no_model", JSON.stringify(noModelLearner.data?.noteReason));
   const callsBeforeNoModel = noteCalls.length;
-  await explain(owner);
-  await sleep(1200);
+  update("UPDATE learner_profiles SET note_updated_at = NULL WHERE user_id = ?", ownerId);
+  onlyEligible(ownerId);
+  update("UPDATE learner_profiles SET note_updated_at = NULL WHERE user_id = ?", ownerId);
+  await runNightly();
   const afterNoModel = profile();
   check("H7 站点没配模型时不生成笔记，也不写 note_last_error",
     afterNoModel.note === null && afterNoModel.note_last_error === null &&
@@ -685,6 +750,23 @@ try {
     noteBg === "rgb(245, 236, 255)", noteBg);
   await shot(ownerPage, "learner-ai-view", 1440, "#st-learner-ai-view");
   await shot(ownerPage, "learner-ai-view", 390, "#st-learner-ai-view");
+  const metaText = () => ownerPage.locator("#st-learner-ai-view .rf-note-meta").innerText().catch(() => "");
+  check("I3c 用户改过的笔记下方写「你修改过 · AI 老师整理时会参考这段内容」",
+    (await metaText()) === "你修改过 · AI 老师整理时会参考这段内容", await metaText());
+  // 把来源换成「每晚整理」、时间设成今天上海时间 03:00，重新打开面板
+  {
+    const shDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date());
+    const at3 = Date.parse(`${shDay}T03:00:00+08:00`);
+    update("UPDATE learner_profiles SET note_update_kind = 'nightly', note_updated_at = ? WHERE user_id = ?", at3, ownerId);
+  }
+  await ownerPage.locator(".st-head .st-close").click();
+  await ownerPage.click(".pm-trigger");
+  await ownerPage.getByRole("menuitem", { name: /设置/ }).click();
+  await ownerPage.getByRole("button", { name: "学习档案" }).click();
+  await ownerPage.waitForTimeout(700);
+  check("I3d 每晚整理的笔记下方写「每晚整理 · 今天 03:00」", (await metaText()) === "每晚整理 · 今天 03:00", await metaText());
+  await shot(ownerPage, "learner-note-meta", 1440, "#st-learner-ai-view");
+  await shot(ownerPage, "learner-note-meta", 390, "#st-learner-ai-view");
   // 关掉设置弹窗，后面 J/K 段要用阅读页
   await ownerPage.locator(".st-head .st-close").click();
   await ownerPage.waitForTimeout(200);
@@ -812,22 +894,155 @@ try {
     })();
     d.close();
   }
+  onlyEligible(retryId);
+  update("UPDATE learner_profiles SET note_updated_at = NULL WHERE user_id = ?", retryId);
   badNoteMode = true;
   const noteCallsLBefore = noteCalls.length;
-  for (let i = 0; i < 8; i++) {
-    await explain(retryCookie);
-    await sleep(250); // running Set 同时只允许一个任务，等它结束再发下一个
-  }
+  for (let i = 0; i < 8; i++) await runNightly(); // 每次整理都会再试一次 p32_retry
   const noteCallsL = noteCalls.length - noteCallsLBefore;
   const retryRow = q("select * from learner_profiles where user_id = ?", retryId)[0];
-  check("L1 假模型持续返回不合格笔记：连续 8 次满足条件的讲解只调用模型 1 次（失败冷却）",
+  check("L1 假模型持续返回不合格笔记：连续 8 次满足条件的整理只调用模型 1 次（失败冷却）",
     noteCallsL === 1, `模型调用=${noteCallsL}（去掉冷却应为 8）`);
-  check("L2 失败写 note_last_error，游标不动、笔记仍为空",
-    retryRow.note === null && retryRow.note_lookup_cursor === 0 && Boolean(retryRow.note_last_error),
-    `note=${retryRow.note} cursor=${retryRow.note_lookup_cursor} err=${retryRow.note_last_error}`);
+  check("L2 失败写 note_last_error，笔记仍为空",
+    retryRow.note === null && Boolean(retryRow.note_last_error),
+    `note=${retryRow.note} err=${retryRow.note_last_error}`);
   check("L3 后台笔记入口确实有失败冷却闸门（源码契约）",
     /if \(noteBlockReason\(/.test(noteGenSrc) && /settleNoteAttempt\s*\(/.test(noteGenSrc));
   badNoteMode = false;
+
+
+  // ============ P. P34：回答原文 / 对上批注 / 最近反馈进讲解 / 统计刷新 / 过期删除 ============
+  badNoteMode = false;
+  const pDoc = await api("/api/texts", {
+    cookie: owner, method: "POST",
+    body: { title: "P34 text A", text: "The design should be deliberately simple and generic to enable generalization.", format: "plain" },
+  });
+  const pText = pDoc.data?.id;
+  const pPara = q("select id, content from paragraphs where text_id = ? order by idx", pText)[0];
+  const pAt = pPara.content.indexOf("generic");
+  const pAnchor = { paragraphId: pPara.id, start: pAt, end: pAt + 7 };
+
+  // P1：讲解比批注先发出 → 讲解结束时还对不上；保存批注后补上
+  const early = await explain(owner, { word: "generic", textId: pText, anchor: pAnchor });
+  const earlyId = early.headers.get("x-rf-answer-id");
+  const earlyBefore = q("select context_id, text_id, lemma from explain_events where id = ?", earlyId)[0];
+  const earlyAns = q("select context_id, answer_text from explain_answers where event_id = ?", earlyId)[0];
+  const ens = await api("/api/contexts/ensure", {
+    cookie: owner, method: "POST",
+    body: { word: "generic", textId: pText, paragraphId: pPara.id, quote: "generic", start: pAt, end: pAt + 7,
+      prefix: pPara.content.slice(0, pAt), suffix: pPara.content.slice(pAt + 7) },
+  });
+  const pCtx = ens.data?.contextId;
+  const earlyAfter = q("select context_id from explain_events where id = ?", earlyId)[0];
+  const earlyAnsAfter = q("select context_id from explain_answers where event_id = ?", earlyId)[0];
+  check("P1 讲解先于批注：讲解记录带上了文章 id 与原形；保存批注后讲解记录与回答都补上批注 id",
+    earlyBefore?.context_id === null && earlyBefore?.text_id === pText && earlyBefore?.lemma === "generic" &&
+    Boolean(earlyAns?.answer_text) && earlyAfter?.context_id === pCtx && earlyAnsAfter?.context_id === pCtx,
+    JSON.stringify({ earlyBefore, earlyAfter, earlyAnsAfter, pCtx }));
+
+  // P2：批注已存在、请求没带 contextId 但带了锚点 → 讲解结束时按锚点对上；追问三次各存一行，带「你问」标题
+  const asks = [];
+  for (const label of ["只讲这个词", "再给个例句", "讲讲句子结构"]) {
+    const r = await explain(owner, { word: "generic", textId: pText, anchor: pAnchor, askLabel: label, prompt: label });
+    asks.push(r.headers.get("x-rf-answer-id"));
+  }
+  const askRows = q(`select event_id, context_id, ask_label from explain_answers where event_id in (${asks.map(() => "?").join(",")}) order by created_at`, ...asks);
+  check("P2 按锚点对上批注；追问三次存三行，顺序与「你问」标题正确",
+    askRows.length === 3 && askRows.every((r) => r.context_id === pCtx) && askRows.map((r) => r.ask_label).join("|") === "只讲这个词|再给个例句|讲讲句子结构",
+    JSON.stringify(askRows));
+
+  // P3：讲解中途中止 → 不存回答
+  streamDelayMs = 400;
+  const ctl = new AbortController();
+  const abortedP = fetch(`${BASE}/api/explain`, {
+    method: "POST", signal: ctl.signal,
+    headers: { "content-type": "application/json", cookie: `readflow_session=${owner}` },
+    body: JSON.stringify({ word: "generic", context: "x", language: "en", askKind: "auto", textId: pText, anchor: pAnchor }),
+  }).then(async (r) => { const id = r.headers.get("x-rf-answer-id"); await r.body?.getReader().read().catch(() => {}); return id; }).catch(() => null);
+  await nap(300);
+  ctl.abort();
+  const abortedId = await abortedP;
+  streamDelayMs = 0;
+  await nap(1500);
+  const abortedEvent = q("select id from explain_events where user_id = ? and kind = 'explain' order by created_at desc limit 1", ownerId)[0]?.id;
+  check("P3 讲解中途中止：讲解记录有，回答原文不存",
+    Boolean(abortedEvent) && q("select count(*) n from explain_answers where event_id = ?", abortedEvent)[0].n === 0,
+    `event=${abortedEvent} header=${abortedId}`);
+
+  // P4：在文章 A 点「太深」（那次讲解带句子地图）→ 在别的文章查词时，讲解档案里带这一条（不限文章，不写英文原词）
+  update("UPDATE explain_events SET feedback = NULL, feedback_at = NULL WHERE user_id = ?", ownerId);
+  explainParts = ["释义：通用的\n", "这里 generic 和 simple 并列，都是 design 的表语，讲得比较长的一段说明。\n", "==主语：The design== ==系动词：should be== ==表语：simple and generic==\n", "制卡建议：技术文档高频词"];
+  const mapAns = await explain(owner, { word: "generic", textId: pText, anchor: pAnchor });
+  const mapId = mapAns.headers.get("x-rf-answer-id");
+  explainParts = ["释义：测试", "\n假模型讲解"];
+  await api("/api/explain/feedback", { cookie: owner, method: "POST", body: { answerId: mapId, rating: "deep" } });
+  await explain(owner); // 默认 word=artifact，不带文章 → 「别的文章」
+  const blockOf = (msg) => {
+    const i = msg.indexOf("- 最近的反馈");
+    if (i < 0) return "";
+    return msg.slice(i, msg.indexOf("用户选中:") > i ? msg.indexOf("用户选中:") : undefined);
+  };
+  const b1 = blockOf(lastCall().messages[1]?.content ?? "");
+  check("P4 在别的文章查词：讲解档案带「画了句子地图 → 太深」，不含英文原词",
+    /单词，自动讲解：约 \d+ 字，画了句子地图 → 太深/.test(b1) && !/generic|design/i.test(b1), b1.replace(/\n/g, " | "));
+
+  // 再点一次「太深」（另一次讲解）→ 只留较新的那条；三种都点过 → 正好 3 行
+  const r2 = (await explain(owner, { word: "generic", textId: pText, anchor: pAnchor, askLabel: "再给个例句", askKind: "example" })).headers.get("x-rf-answer-id");
+  await nap(20);
+  await api("/api/explain/feedback", { cookie: owner, method: "POST", body: { answerId: r2, rating: "deep" } });
+  const r3 = (await explain(owner, { word: "generic", textId: pText, anchor: pAnchor })).headers.get("x-rf-answer-id");
+  await api("/api/explain/feedback", { cookie: owner, method: "POST", body: { answerId: r3, rating: "right" } });
+  const r4 = (await explain(owner, { word: "generic", textId: pText, anchor: pAnchor })).headers.get("x-rf-answer-id");
+  await api("/api/explain/feedback", { cookie: owner, method: "POST", body: { answerId: r4, rating: "shallow" } });
+  await explain(owner);
+  const b3 = blockOf(lastCall().messages[1]?.content ?? "");
+  const items = b3.split("\n").filter((l) => l.startsWith("  · "));
+  check("P5 三种评价各最近一次：正好 3 行；两次「太深」只留较新的（再给个例句那次）",
+    items.length === 3 && items.filter((l) => l.endsWith("太深")).length === 1 && items.some((l) => l.includes("再给个例句") && l.endsWith("太深")),
+    items.join(" | "));
+
+  // 31 天前的反馈不再进讲解
+  update("UPDATE explain_events SET feedback_at = ? WHERE user_id = ? AND feedback IS NOT NULL", Date.now() - 31 * 86400_000, ownerId);
+  await explain(owner);
+  check("P6 31 天前的反馈不进讲解", blockOf(lastCall().messages[1]?.content ?? "") === "");
+  update("UPDATE explain_events SET feedback = NULL, feedback_at = NULL WHERE user_id = ?", ownerId);
+
+  // P7（F5）：统计缓存立即刷新——第 5 个「太深」（过半）后下一次讲解出现「以往反馈：「太深」偏多」
+  update("UPDATE learner_profiles SET stats = NULL, stats_updated_at = NULL WHERE user_id = ?", ownerId);
+  await api("/api/learner", { cookie: owner }); // 先算一次并缓存（此时没有反馈）
+  for (let i = 0; i < 5; i++) {
+    const id = (await explain(owner)).headers.get("x-rf-answer-id");
+    await api("/api/explain/feedback", { cookie: owner, method: "POST", body: { answerId: id, rating: "deep" } });
+  }
+  await explain(owner);
+  check("P7 点完反馈统计立即刷新：下一次讲解档案含「以往反馈：「太深」偏多」",
+    (lastCall().messages[1]?.content ?? "").includes("以往反馈：「太深」偏多"));
+
+  // P8（F6）：过期删除——已整理过的讲解 31 天前删除、29 天前保留；未整理的 31 天保留、91 天删除；查词 89 天保留、91 天删除
+  const day = 86400_000;
+  const mk = (id, kind, ageDays) => update(
+    "INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES (?, ?, ?, 'reader', 'old', ?)", id, ownerId, kind, Date.now() - ageDays * day);
+  onlyEligible("nobody"); // 先把所有人的整理时间推到未来，再单独设置本组用到的两个账号
+  // 主账号：上次整理在 20 天前 → 早于它的讲解都算「已整理过」
+  update("UPDATE learner_profiles SET note = 'x', note_updated_at = ? WHERE user_id = ?", Date.now() - 20 * day, ownerId);
+  mk("old-e31-done", "explain", 31);
+  mk("old-e29-done", "explain", 29);
+  update("INSERT INTO explain_answers (event_id, user_id, context_id, ask_label, answer_text, created_at) VALUES ('old-e31-done', ?, NULL, NULL, 'x', ?)", ownerId, Date.now() - 31 * day);
+  mk("old-l89", "lookup", 89);
+  mk("old-l91", "lookup", 91);
+  mk("old-e91", "explain", 91);
+  // 朋友账号：从没整理过 → 31 天前的讲解还没被吸收，保留
+  update("INSERT OR IGNORE INTO learner_profiles (user_id, updated_at) VALUES (?, ?)", friendId, Date.now());
+  update("UPDATE learner_profiles SET note_updated_at = NULL WHERE user_id = ?", friendId);
+  update("INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES ('f-e31', ?, 'explain', 'reader', 'old', ?)", friendId, Date.now() - 31 * day);
+  await runNightly();
+  const exists = (id) => q("select 1 from explain_events where id = ?", id).length === 1;
+  check("P8 过期删除：已整理的讲解 31 天删 / 29 天留；从没整理的 31 天留、91 天删；查词 89 天留 / 91 天删；回答原文随之删除",
+    !exists("old-e31-done") && exists("old-e29-done") && exists("f-e31") && !exists("old-e91") &&
+    exists("old-l89") && !exists("old-l91") && q("select count(*) n from explain_answers where event_id = 'old-e31-done'")[0].n === 0,
+    JSON.stringify({ e31: exists("old-e31-done"), e29: exists("old-e29-done"), f31: exists("f-e31"), e91: exists("old-e91"), l89: exists("old-l89"), l91: exists("old-l91") }));
+  const lAfter = await api("/api/learner", { cookie: owner });
+  check("P9 删除后学习档案与讲解正常", lAfter.status === 200 && (await explain(owner)).status === 200);
 
   await ctxOwner.close();
 } catch (err) {

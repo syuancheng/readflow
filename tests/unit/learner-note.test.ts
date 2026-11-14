@@ -2,9 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   NOTE_MAX_CHARS,
-  NOTE_MIN_NEW_LOOKUPS,
-  NOTE_MIN_INTERVAL_MS,
-  shouldUpdateNote,
   buildNotePrompt,
   validateNote,
 } from "../../src/lib/learner/note";
@@ -14,67 +11,8 @@ const NOW = Date.UTC(2026, 10, 13, 12, 0, 0);
 const DAY = 24 * 3600 * 1000;
 const stats = (over: Partial<BehaviorStats> = {}): BehaviorStats => ({ ...EMPTY_BEHAVIOR_STATS, ...over });
 
-test("阈值常量：25 次查词 + 24 小时 + 300 字（PRD F3）", () => {
-  assert.equal(NOTE_MIN_NEW_LOOKUPS, 25);
-  assert.equal(NOTE_MIN_INTERVAL_MS, 24 * 3600 * 1000);
+test("阈值常量：笔记最多 300 字（PRD F3）；触发规则改为每晚整理（P34，见 learner-note-nightly）", () => {
   assert.equal(NOTE_MAX_CHARS, 300);
-});
-
-test("shouldUpdateNote：新增查词够 25 且满 24 小时才更新", () => {
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 100, cursor: 75, updatedAt: NOW - DAY, now: NOW }),
-    true,
-  );
-});
-
-test("shouldUpdateNote：新增查词够 25 但不满 24 小时不更新", () => {
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 100, cursor: 75, updatedAt: NOW - DAY + 1, now: NOW }),
-    false,
-  );
-});
-
-test("shouldUpdateNote：满 24 小时但新增查词只有 24 次不更新", () => {
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 99, cursor: 75, updatedAt: NOW - DAY, now: NOW }),
-    false,
-  );
-});
-
-test("shouldUpdateNote：两个条件都不满足不更新", () => {
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 80, cursor: 75, updatedAt: NOW - 1000, now: NOW }),
-    false,
-  );
-});
-
-test("shouldUpdateNote：从来没有笔记时只看 25 次，不看 24 小时", () => {
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 25, cursor: 0, updatedAt: null, now: NOW }),
-    true,
-  );
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 24, cursor: 0, updatedAt: null, now: NOW }),
-    false,
-  );
-});
-
-test("shouldUpdateNote：25 次与 24 小时都是包含边界的", () => {
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 25, cursor: 0, updatedAt: NOW - DAY, now: NOW }),
-    true,
-    "正好 25 次、正好 24 小时应通过",
-  );
-  assert.equal(
-    shouldUpdateNote({ lookupsTotal: 26, cursor: 1, updatedAt: NOW - DAY - 1, now: NOW }),
-    true,
-  );
-});
-
-test("shouldUpdateNote：清空记忆后游标归零，重新累计", () => {
-  // 清空后 cursor=0、updatedAt=null，旧的 40 次事件不能算进来
-  assert.equal(shouldUpdateNote({ lookupsTotal: 0, cursor: 0, updatedAt: null, now: NOW }), false);
-  assert.equal(shouldUpdateNote({ lookupsTotal: 25, cursor: 0, updatedAt: null, now: NOW }), true);
 });
 
 test("validateNote：合法的纯中文笔记原样通过", () => {

@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { sqlite } from "../db/sqlite";
 import { allSettings } from "./settings-store";
-import { frequencyRank } from "./dict";
+import { frequencyRank, lemma as lemmaOf } from "./dict";
 import { isPersonalizedOn } from "./learner/flag";
 import { narrowAskKind } from "./learner/ask-kind";
 import { normalizeSurvey, surveyPrior, type SurveyAnswers } from "./learner/survey";
@@ -16,6 +16,7 @@ import { computeBehaviorStats, mergeProfile } from "./learner/model";
 import type { AskKind, BehaviorStats, Feedback, LearnerEvent, LearnerLevel } from "./learner/types";
 import { EMPTY_BEHAVIOR_STATS } from "./learner/types";
 import { validateNote, type NotePromptInput } from "./learner/note";
+import { formatRecentFeedback, RECENT_FEEDBACK_DAYS } from "./learner/recent-feedback";
 
 export type LearnerRow = {
   user_id: string;
@@ -32,6 +33,7 @@ export type LearnerRow = {
   note_last_error: string | null;
   memory_reset_at: number;
   updated_at: number;
+  note_update_kind: string | null;
 };
 
 const SELECT_ONE = "SELECT * FROM learner_profiles WHERE user_id = ?";
@@ -169,15 +171,89 @@ export function getProfileForPrompt(userId: string): PromptProfile {
 export function learnerBlockFor(userId: string): { block: string; detailed: boolean; personalized: boolean } {
   const p = getProfileForPrompt(userId);
   if (!p.personalized) return { block: "", detailed: false, personalized: false };
+  const recent = recentFeedbackFor(userId);
   // 没有可依据的档案：按个性化关闭处理，用旧的「同句第几次」规则兜底
-  if (!hasUsableProfile({ survey: p.survey, stats: p.stats, note: p.note })) {
+  if (!hasUsableProfile({ survey: p.survey, stats: p.stats, note: p.note, recentFeedbackCount: recent.count })) {
     return { block: "", detailed: false, personalized: false };
   }
   return {
-    block: buildLearnerBlock({ level: p.level, survey: p.survey, stats: p.stats, note: p.note }),
+    block: buildLearnerBlock({
+      level: p.level,
+      survey: p.survey,
+      stats: p.stats,
+      note: p.note,
+      recentFeedback: recent.lines,
+    }),
     detailed: p.survey?.stylePref === "detailed",
     personalized: true,
   };
+}
+
+/**
+ * P34 F2：最近 30 天的反馈，不限文章。lines 是「三种评价各最近一次」整理出的几行，
+ * count 是这 30 天的反馈次数（判断「有没有可依据的档案」用）。
+ */
+export function recentFeedbackFor(userId: string, now: number = Date.now()): { lines: string[]; count: number } {
+  const row = getLearner(userId);
+  const since = now - RECENT_FEEDBACK_DAYS * 24 * 3600 * 1000;
+  const rows = sqlite
+    .prepare(
+      `SELECT e.feedback, e.feedback_at, e.ask_kind, e.is_phrase, a.ask_label, a.answer_text
+         FROM explain_events e LEFT JOIN explain_answers a ON a.event_id = e.id
+        WHERE e.user_id = ? AND e.kind = 'explain' AND e.feedback IS NOT NULL
+          AND e.created_at > ? AND e.feedback_at > ?
+        ORDER BY e.feedback_at DESC LIMIT 50`,
+    )
+    .all(userId, row.memory_reset_at, since) as {
+    feedback: string;
+    feedback_at: number;
+    ask_kind: string | null;
+    is_phrase: number;
+    ask_label: string | null;
+    answer_text: string | null;
+  }[];
+  const lines = formatRecentFeedback(
+    rows.map((r) => ({
+      feedback: r.feedback,
+      feedbackAt: r.feedback_at,
+      askKind: r.ask_kind,
+      askLabel: r.ask_label,
+      isPhrase: r.is_phrase === 1,
+      answerText: r.answer_text,
+    })),
+  );
+  return { lines, count: rows.length };
+}
+
+/** P34 F4：一条批注下所有保存过的回答（回看时对上反馈用），按时间先后 */
+export function answersForContext(userId: string, contextId: string): {
+  answerId: string;
+  askLabel: string | null;
+  text: string;
+  feedback: string | null;
+  createdAt: number;
+}[] {
+  const rows = sqlite
+    .prepare(
+      `SELECT a.event_id, a.ask_label, a.answer_text, e.feedback, a.created_at
+         FROM explain_answers a JOIN explain_events e ON e.id = a.event_id
+        WHERE a.user_id = ? AND a.context_id = ?
+        ORDER BY a.created_at ASC`,
+    )
+    .all(userId, contextId) as {
+    event_id: string;
+    ask_label: string | null;
+    answer_text: string;
+    feedback: string | null;
+    created_at: number;
+  }[];
+  return rows.map((r) => ({
+    answerId: r.event_id,
+    askLabel: r.ask_label,
+    text: r.answer_text,
+    feedback: r.feedback,
+    createdAt: r.created_at,
+  }));
 }
 
 export type ExplainEventInput = {
@@ -199,9 +275,9 @@ export function logExplain(input: ExplainEventInput): string {
   sqlite
     .prepare(
       `INSERT INTO explain_events
-         (id, user_id, kind, ask_kind, via, word, is_phrase, dict_hit, repeat_count,
+         (id, user_id, kind, ask_kind, via, word, lemma, is_phrase, dict_hit, repeat_count,
           text_id, text_cefr, context_id, created_at)
-       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -209,6 +285,7 @@ export function logExplain(input: ExplainEventInput): string {
       narrowAskKind(input.askKind),
       input.via,
       word,
+      safeLemma(word),
       /\s/.test(word.trim()) ? 1 : 0,
       typeof input.dictHit === "boolean" ? (input.dictHit ? 1 : 0) : null,
       typeof input.repeatCount === "number" ? input.repeatCount : null,
@@ -270,15 +347,101 @@ export function logLookup(input: LookupEventInput): string {
   return id;
 }
 
+/** P34：讲解事件也记原形（词典库没导入时退回小写原词） */
+function safeLemma(word: string): string {
+  try {
+    return lemmaOf(word).toLowerCase().slice(0, 120);
+  } catch {
+    return word.toLowerCase().slice(0, 120);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * P34 F1：每段回答原文，以及讲解记录对上批注。
+ * ------------------------------------------------------------------ */
+
+/** 讲解完整结束后存一行；同一个 answerId 只存一次 */
+export function saveAnswer(input: {
+  eventId: string;
+  userId: string;
+  contextId: string | null;
+  askLabel?: string;
+  text: string;
+}): void {
+  if (!input.text.trim()) return;
+  sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO explain_answers (event_id, user_id, context_id, ask_label, answer_text, created_at)
+       SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM explain_events WHERE id = ? AND user_id = ?)`,
+    )
+    .run(input.eventId, input.userId, input.contextId, input.askLabel ?? null, input.text, Date.now(), input.eventId, input.userId);
+}
+
+/**
+ * 讲解结束时确定它属于哪条批注，并补写到讲解事件上。返回最终的批注 id（可能为 null）。
+ * 已有 context_id（请求里带了且属于本人）就用它；否则按锚点在本人的批注里找。
+ */
+export function linkExplainContext(
+  userId: string,
+  eventId: string,
+  textId: string | undefined,
+  anchor: { paragraphId: string; start: number; end: number } | undefined,
+): string | null {
+  const ev = sqlite
+    .prepare("SELECT context_id FROM explain_events WHERE id = ? AND user_id = ?")
+    .get(eventId, userId) as { context_id: string | null } | undefined;
+  if (!ev) return null;
+  if (ev.context_id) return ev.context_id;
+  if (!textId || !anchor) return null;
+  const hit = sqlite
+    .prepare(
+      `SELECT c.id FROM contexts c JOIN user_words w ON w.id = c.user_word_id
+        WHERE w.user_id = ? AND c.text_id = ? AND c.paragraph_id = ? AND c.start = ? AND c.end = ?
+        ORDER BY c.created_at DESC LIMIT 1`,
+    )
+    .get(userId, textId, anchor.paragraphId, anchor.start, anchor.end) as { id: string } | undefined;
+  if (!hit) return null;
+  sqlite.prepare("UPDATE explain_events SET context_id = ? WHERE id = ? AND context_id IS NULL").run(hit.id, eventId);
+  return hit.id;
+}
+
+/**
+ * 保存批注时兜底：同一用户、同一篇文章、选中同一段文字、10 分钟内还没对上批注的讲解，补上批注 id。
+ * （讲解比批注先发出、讲解结束时批注还没保存好的情况）
+ */
+export function backfillExplainContext(userId: string, contextId: string, textId: string, quote: string): void {
+  const since = Date.now() - 10 * 60 * 1000;
+  sqlite.transaction(() => {
+    sqlite
+      .prepare(
+        `UPDATE explain_events SET context_id = ?
+          WHERE user_id = ? AND kind = 'explain' AND context_id IS NULL AND text_id = ?
+            AND lower(word) = lower(?) AND created_at > ?`,
+      )
+      .run(contextId, userId, textId, quote.slice(0, 120), since);
+    sqlite
+      .prepare(
+        `UPDATE explain_answers SET context_id = ?
+          WHERE user_id = ? AND context_id IS NULL
+            AND event_id IN (SELECT id FROM explain_events WHERE user_id = ? AND context_id = ?)`,
+      )
+      .run(contextId, userId, userId, contextId);
+  })();
+}
+
 /** 反馈可改选，以最后一次为准；事件不存在 / 不属于本人 / 不是讲解都返回 false */
 export function setFeedback(userId: string, eventId: string, feedback: Feedback): boolean {
   const row = sqlite
     .prepare("SELECT kind FROM explain_events WHERE id = ? AND user_id = ?")
     .get(eventId, userId) as { kind: string } | undefined;
   if (!row || row.kind !== "explain") return false;
-  sqlite
-    .prepare("UPDATE explain_events SET feedback = ?, feedback_at = ? WHERE id = ?")
-    .run(feedback, Date.now(), eventId);
+  sqlite.transaction(() => {
+    sqlite
+      .prepare("UPDATE explain_events SET feedback = ?, feedback_at = ? WHERE id = ?")
+      .run(feedback, Date.now(), eventId);
+    // P34 F5：统计缓存立即失效，下一次讲解的「以往反馈」按最新数据计算
+    sqlite.prepare("UPDATE learner_profiles SET stats_updated_at = NULL WHERE user_id = ?").run(userId);
+  })();
   return true;
 }
 
@@ -320,24 +483,104 @@ export function editNote(userId: string, text: string): string {
   getLearner(userId);
   sqlite
     .prepare(
-      `UPDATE learner_profiles SET note = ?, note_user_edited = 1, updated_at = ?
+      `UPDATE learner_profiles SET note = ?, note_user_edited = 1, note_update_kind = 'user', updated_at = ?
        WHERE user_id = ?`,
     )
     .run(v.note, Date.now(), userId);
   return v.note;
 }
 
-/** 生成成功后落库：游标前进、清掉错误、把「用户改过」标记归 0 */
-export function saveNote(userId: string, note: string, lookupsTotal: number): void {
+/**
+ * 生成成功后落库：记下来源、清掉错误、把「用户改过」标记归 0。
+ * P34：新动静按 note_updated_at 之后的时间计算，note_lookup_cursor 不再写入（保留列）。
+ */
+export function saveNote(userId: string, note: string, kind: "nightly" = "nightly"): void {
   const now = Date.now();
   sqlite
     .prepare(
       `UPDATE learner_profiles
-         SET note = ?, note_updated_at = ?, note_lookup_cursor = ?,
+         SET note = ?, note_updated_at = ?, note_update_kind = ?,
              note_user_edited = 0, note_last_error = NULL, updated_at = ?
        WHERE user_id = ?`,
     )
-    .run(note, now, lookupsTotal, now, userId);
+    .run(note, now, kind, now, userId);
+}
+
+/**
+ * P34 F3：自上次整理以来的新动静（不限文章）：新的查词、新的讲解，
+ * 以及上次整理之后才点的（或改选的）反馈。从没整理过时从「清空记忆」算起。
+ */
+export function newEventsSinceNote(userId: string): number {
+  const row = getLearner(userId);
+  const base = Math.max(row.note_updated_at ?? 0, row.memory_reset_at);
+  const r = sqlite
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM explain_events WHERE user_id = ? AND created_at > ?) +
+         (SELECT COUNT(*) FROM explain_events WHERE user_id = ? AND created_at <= ? AND feedback_at > ?) AS n`,
+    )
+    .get(userId, base, userId, base, base) as { n: number };
+  return Number(r.n);
+}
+
+/** P34 F3：每晚整理用的「带回答的反馈」：所有文章里最近 30 组，从新到旧 */
+export function answeredFeedbackFor(userId: string, limit = 30): {
+  feedback: string;
+  askKind: string | null;
+  askLabel: string | null;
+  isPhrase: boolean;
+  answerText: string | null;
+}[] {
+  const row = getLearner(userId);
+  const rows = sqlite
+    .prepare(
+      `SELECT e.feedback, e.ask_kind, e.is_phrase, a.ask_label, a.answer_text
+         FROM explain_events e LEFT JOIN explain_answers a ON a.event_id = e.id
+        WHERE e.user_id = ? AND e.kind = 'explain' AND e.feedback IS NOT NULL AND e.created_at > ?
+        ORDER BY e.feedback_at DESC LIMIT ?`,
+    )
+    .all(userId, row.memory_reset_at, limit) as {
+    feedback: string;
+    ask_kind: string | null;
+    is_phrase: number;
+    ask_label: string | null;
+    answer_text: string | null;
+  }[];
+  return rows.map((r) => ({
+    feedback: r.feedback,
+    askKind: r.ask_kind,
+    askLabel: r.ask_label,
+    isPhrase: r.is_phrase === 1,
+    answerText: r.answer_text,
+  }));
+}
+
+/**
+ * P34 F6：按用途删除过期记录（一个事务）。返回各删了多少行。
+ * - 讲解记录：超过 30 天且已被整理进老师笔记的；无论如何超过 90 天的
+ * - 查词记录：超过 90 天的
+ * 回答原文随外键一起删除；再按「讲解记录已不存在」兜底删一次。
+ */
+export function purgeExpiredEvents(cutoffs: { explain: number; explainMax: number; lookup: number }): {
+  explain: number;
+  lookup: number;
+  answers: number;
+} {
+  return sqlite.transaction(() => {
+    const e1 = sqlite
+      .prepare(
+        `DELETE FROM explain_events
+          WHERE kind = 'explain' AND created_at < ?
+            AND created_at < (SELECT COALESCE(p.note_updated_at, 0) FROM learner_profiles p WHERE p.user_id = explain_events.user_id)`,
+      )
+      .run(cutoffs.explain).changes;
+    const e2 = sqlite.prepare("DELETE FROM explain_events WHERE kind = 'explain' AND created_at < ?").run(cutoffs.explainMax).changes;
+    const l = sqlite.prepare("DELETE FROM explain_events WHERE kind = 'lookup' AND created_at < ?").run(cutoffs.lookup).changes;
+    const a = sqlite
+      .prepare("DELETE FROM explain_answers WHERE event_id NOT IN (SELECT id FROM explain_events)")
+      .run().changes;
+    return { explain: e1 + e2, lookup: l, answers: a };
+  })();
 }
 
 /** 校验失败 / 模型出错：只记日志和 note_last_error，游标不动，下次自动重试 */
@@ -359,7 +602,7 @@ export function resetMemory(userId: string): void {
     .prepare(
       `UPDATE learner_profiles
          SET stats = NULL, stats_updated_at = NULL,
-             note = NULL, note_updated_at = NULL, note_user_edited = 0,
+             note = NULL, note_updated_at = NULL, note_user_edited = 0, note_update_kind = NULL,
              note_lookup_cursor = 0, note_last_error = NULL,
              memory_reset_at = ?, updated_at = ?
        WHERE user_id = ?`,

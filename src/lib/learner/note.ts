@@ -8,14 +8,10 @@ import type { BehaviorStats } from "./types";
 
 /** 笔记最多 300 个汉字（PRD F3 / 实现说明 §4.4） */
 export const NOTE_MAX_CHARS = 300;
-/** 距上次更新累计新增 25 次查词才允许再生成 */
-export const NOTE_MIN_NEW_LOOKUPS = 25;
-/**
- * 距上次「成功」更新至少 24 小时。
- * 它只约束成功路径：失败时游标与时间都不动，不能靠它保证失败后的重试节奏，
- * 失败冷却与每日尝试上限在 note-throttle.ts 里单独实现。
+/*
+ * P34：老师笔记改为「新动静攒够 10 次后的每晚整理」（learner/nightly.ts），
+ * 原来的「新增查词 25 次 + 24 小时」规则（shouldUpdateNote）已删除。
  */
-export const NOTE_MIN_INTERVAL_MS = 24 * 3600 * 1000;
 
 /** 评价人格的用词：笔记只写对讲解有用的观察，不评价人 */
 const PERSONALITY_WORDS = ["懒", "笨", "差劲", "愚蠢", "迟钝", "愚笨", "脑子不好"];
@@ -23,28 +19,6 @@ const PERSONALITY_WORDS = ["懒", "笨", "差劲", "愚蠢", "迟钝", "愚笨",
 /** Markdown 记号：笔记是纯中文段落，不分点、不加粗、不列清单 */
 const MARKDOWN_RE =
   /(?:^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|>\s|```)|[*_`~]|\[[^\]]*\]\([^)]*\)|==[^=]+==/;
-
-export type ShouldUpdateNoteInput = {
-  /** 清空 AI 记忆之后累计的查词事件总数 */
-  lookupsTotal: number;
-  /** 上次成功生成笔记时的查词事件总数 */
-  cursor: number;
-  /** 上次成功生成笔记的时间；从未生成过为 null */
-  updatedAt: number | null;
-  now: number;
-};
-
-/**
- * 新增查词数 ≥ 25，并且距上次「成功」更新 ≥ 24 小时。
- * 从来没有生成过笔记时，只需满足新增查词数 ≥ 25（PRD F3）。
- * 失败后这个判断仍然为真（游标不动），调用方必须再加失败冷却，见 note-throttle.ts。
- */
-export function shouldUpdateNote(p: ShouldUpdateNoteInput): boolean {
-  const newLookups = p.lookupsTotal - p.cursor;
-  if (newLookups < NOTE_MIN_NEW_LOOKUPS) return false;
-  if (p.updatedAt === null) return true;
-  return p.now - p.updatedAt >= NOTE_MIN_INTERVAL_MS;
-}
 
 export type NotePromptInput = {
   oldNote: string | null;
@@ -61,7 +35,7 @@ const DIFFICULTY_LABEL: Record<string, string> = {
   phrases: "短语搭配",
 };
 
-const ASK_LABEL: Record<string, string> = {
+export const ASK_LABEL: Record<string, string> = {
   auto: "自动讲解",
   default: "这个词在句里的意思",
   word_only: "只讲这个词",
@@ -71,7 +45,7 @@ const ASK_LABEL: Record<string, string> = {
   custom: "自己写的问题",
 };
 
-const FEEDBACK_LABEL: Record<string, string> = {
+export const FEEDBACK_LABEL: Record<string, string> = {
   shallow: "太浅",
   right: "刚好",
   deep: "太深",
