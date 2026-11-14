@@ -91,7 +91,7 @@
 body {
   background: var(--duo-bg);
   color: var(--duo-ink);
-  font-family: var(--font-sans);
+  font-family: var(--rf-font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -273,7 +273,7 @@ body {
 /* ====== 阅读器（P19 用户裁决：正文也用 DM Sans，不再保留衬线） ====== */
 
 .reading-body {
-  font-family: var(--font-sans);
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-reading);
   line-height: 1.85;
   letter-spacing: 0.006em;
@@ -289,17 +289,20 @@ body {
    否则 Range.toString() 会把它算进段落偏移，点词锚点就会错位。 */
 
 .rf-h {
-  font-family: var(--font-sans, system-ui, sans-serif);
+  font-family: var(--rf-font-sans);
   font-weight: 800;
-  letter-spacing: -0.01em;
   color: var(--duo-ink);
   margin: 1.6em 0 0.6em;
   line-height: 1.35;
   scroll-margin-top: 64px;
 }
-.rf-h2 { font-size: 1.42em; padding-bottom: 0.35em; border-bottom: 2px solid var(--duo-border); }
-.rf-h3 { font-size: 1.22em; }
-.rf-h4, .rf-h5, .rf-h6 { font-size: 1.06em; color: var(--duo-ink-soft); }
+/* 全站整改（C-01 / C-03 / TX-01）：原来 h2 / h3 / h4 = 1.42 / 1.22 / 1.06em，对 19px 正文是
+   27 / 23 / 20 / 19px 一串「相似但不同」的假对比。改成两档、要么相同要么截然不同：
+   - h2：1.5em（≈ 28.5px，与正文比 1.5）+ 800 + 底线；
+   - h3–h6：与正文同字号，只靠 800 粗细 + 标题色 + 上大下小的间距（P-04）区分；
+     不再给 h4–h6 换浅灰（与 h3 只差一点颜色 = TF-02 式冲突）。
+   见 docs/design/SITEWIDE-DESIGN.md §1.5 */
+.rf-h2 { font-size: 1.5em; padding-bottom: 0.35em; border-bottom: 2px solid var(--duo-border); }
 .rf-h:first-child { margin-top: 0; }
 
 .rf-quote {
@@ -314,7 +317,7 @@ body {
 .rf-callout::before {
   content: attr(data-label);
   display: block;
-  font-family: var(--font-sans, system-ui, sans-serif);
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-xs);
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -335,7 +338,7 @@ body {
   border: 2px solid var(--duo-border);
   border-radius: var(--rf-radius-md);
   overflow-x: auto;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--rf-font-mono);
   font-size: var(--rf-text-sm);
   line-height: 1.65;
   white-space: pre;
@@ -346,7 +349,7 @@ body {
   position: absolute;
   top: 8px;
   right: 12px;
-  font-family: var(--font-sans, system-ui, sans-serif);
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-xs);
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -362,16 +365,16 @@ body {
 
 .rf-figure { margin: 0 0 1.35em; }
 .rf-figure figcaption {
-  font-family: var(--font-sans, system-ui, sans-serif);
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-sm);
   color: var(--duo-ink-faint);
-  text-align: center;
 }
+/* 全站整改（A-03 / A-04 / A-05）：图片与图注不再居中，左缘落在正文左对齐线上 */
 .rf-figure img {
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 0 auto 0.45em;
+  margin: 0 0 0.45em;
   border: 2px solid var(--duo-border);
   border-radius: var(--rf-radius-md);
 }
@@ -385,7 +388,13 @@ body {
   margin: 1em 0;
   padding: 0.3em 0.2em;
   overflow-x: auto;
-  text-align: center;
+  /* 全站整改（A-04）：块级公式靠左（同 LaTeX fleqn），与正文共用一条对齐线 */
+  text-align: left;
+}
+/* KaTeX 自带的 .katex-display 会再居中一次，一并改成靠左 */
+.rf-math .katex-display,
+.rf-math .katex-display > .katex {
+  text-align: left;
 }
 /* 被提升成块的行内公式（display: false）别占一整行 */
 .rf-math-inline-block {
@@ -408,7 +417,7 @@ body {
 }
 /* KaTeX 都渲染不出来时的降级样式（保留文本坐标） */
 .rf-i-math {
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--rf-font-mono);
   font-size: 0.86em;
   color: var(--duo-ink-faint);
   background: var(--duo-surface);
@@ -444,7 +453,7 @@ body {
 .rf-table thead .rf-cell {
   background: var(--duo-surface);
   font-weight: 800;
-  font-family: var(--font-sans, system-ui, sans-serif);
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-sm);
 }
 .rf-cell-inline { display: inline; }
@@ -462,7 +471,7 @@ body {
 .rf-i-em { font-style: italic; }
 .rf-i-delete { text-decoration: line-through; opacity: 0.75; }
 .rf-i-code {
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--rf-font-mono);
   font-size: 0.84em;
   background: var(--duo-surface);
   border: 1px solid var(--duo-border);
@@ -809,8 +818,14 @@ body {
 
 /* 空状态 */
 .duo-empty {
-  text-align: center;
+  /* 全站整改（A-04 / A-05）：空状态也左对齐，与卡片其它内容共用左缘 */
   padding: 48px 24px;
+}
+
+/* 词库：空状态与上方工具栏（padding 16px）共用同一条左缘（A-03，避免 8px 错位） */
+.wl-toolbar ~ .duo-empty {
+  padding-left: 16px;
+  padding-right: 16px;
 }
 
 .duo-empty-icon {
@@ -1034,7 +1049,6 @@ body {
   font-size: var(--rf-text-3xl);
   line-height: var(--rf-leading-3xl);
   font-weight: 800;
-  letter-spacing: -0.01em;
 }
 
 /* 浮动 +N 动效 */
@@ -1406,7 +1420,7 @@ body {
 }
 
 .rf-md-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--rf-font-mono);
   font-size: 0.9em;
   background: var(--duo-surface);
   border: 1px solid var(--duo-border);
@@ -1438,7 +1452,7 @@ body {
   bottom: calc(100% + 2px);
   left: 0;
   z-index: 2;
-  font-family: var(--font-sans), "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-xs);
   font-weight: 700;
   line-height: 1.1;
@@ -2564,7 +2578,7 @@ body {
 }
 
 .rf-sec-text {
-  font-family: var(--font-sans);
+  font-family: var(--rf-font-sans);
   font-size: var(--rf-text-sm);
   line-height: 1.7;
   color: var(--rf-gray-800);
@@ -2767,7 +2781,8 @@ body {
 
 .cefr-band-num {
   width: 32px;
-  text-align: right;
+  /* 全站整改（A-04）：百分比左对齐在进度条终点之后，等宽数字保证上下对齐 */
+  font-variant-numeric: tabular-nums;
   font-size: var(--rf-text-xs);
   font-weight: 800;
   color: var(--duo-ink-soft);
@@ -2792,7 +2807,7 @@ body {
   padding: 0 20px;
   background: var(--duo-bg);
   border-bottom: 1px solid var(--duo-border);
-  font-family: var(--font-sans);
+  font-family: var(--rf-font-sans);
 }
 .rf-tb-left, .rf-tb-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .rf-tb-left { flex: 1; }
@@ -3486,7 +3501,6 @@ main h1:not(.rf-tb-title):not(.rf-home-hero) {
   font-size: var(--rf-text-2xl);
   line-height: var(--rf-leading-2xl);
   font-weight: 700;
-  letter-spacing: -0.01em;
 }
 main h1:not(.rf-tb-title):not(.rf-home-hero) + p {
   font-size: var(--rf-text-sm);
@@ -3558,7 +3572,6 @@ main h1:not(.rf-tb-title):not(.rf-home-hero) + p {
 /* 筛选区：标签右对齐，两行靠近；不再套灰底边框（规范 §5 不嵌套框） */
 .tm-filter-label {
   min-width: 32px;
-  text-align: right;
 }
 .tm-filter-row {
   gap: 12px;
