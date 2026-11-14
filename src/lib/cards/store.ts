@@ -6,6 +6,7 @@ import { sqlite } from "@/db/sqlite";
 import { GLOBAL_USER } from "@/db/ensure-auth";
 import { cardsEnabled, charLimitFor, listeningEnabled } from "./flags";
 import { cardQuotaDay } from "./quota";
+import { addUsage, refundUsage, usedOn } from "@/lib/daily-usage";
 
 /** 站级 cards.* 开关（owner 在设置里改，所有人共用） */
 export function siteCardsSettings(): Record<string, string> {
@@ -74,26 +75,16 @@ export function sentenceOf(c: { prefix: string; quote: string; suffix: string })
 }
 
 export function cardsUsedToday(userId: string): number {
-  const row = sqlite
-    .prepare("SELECT count FROM card_usage WHERE user_id = ? AND day = ?")
-    .get(userId, cardQuotaDay()) as { count: number } | undefined;
-  return row?.count ?? 0;
+  return usedOn(userId, "card", cardQuotaDay());
 }
 
 export function reserveQuota(userId: string, day: string): void {
-  sqlite
-    .prepare(
-      `INSERT INTO card_usage (user_id, day, count) VALUES (?, ?, 1)
-       ON CONFLICT(user_id, day) DO UPDATE SET count = count + 1`,
-    )
-    .run(userId, day);
+  addUsage(userId, "card", day);
 }
 
 /** 失败不计数：把预占的名额还回去（spec §7.3 第 9 步） */
 export function refundQuota(userId: string, day: string): void {
-  sqlite
-    .prepare("UPDATE card_usage SET count = MAX(0, count - 1) WHERE user_id = ? AND day = ?")
-    .run(userId, day);
+  refundUsage(userId, "card", day);
 }
 
 /** 这个词（按词形还原）是否已有推送成功的卡片 */

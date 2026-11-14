@@ -37,6 +37,7 @@
     "src/lib/cards/style.ts",
     "src/lib/cards/edit.ts",
     "src/db/alter.ts",
+    "src/db/ensure-usage.ts",
     "src/lib/cefr.ts",
     "src/lib/split.ts",
     "src/lib/tokenize.ts",

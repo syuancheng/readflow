@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { addColumnIfMissing } from "./alter";
+import { ensureDailyUsage } from "./ensure-usage";
 
 /**
  * 账户体系的表结构与老库迁移（P20）。
@@ -56,12 +57,6 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
       used_count INTEGER NOT NULL DEFAULT 0,
       revoked INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS ai_usage (
-      user_id TEXT NOT NULL,
-      day TEXT NOT NULL,
-      count INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (user_id, day)
     );
     -- 浏览器插件 Token（P30）：每人一个，只存 sha256；token_hint 是末 4 位，
     -- 让设置页能显示「…a1b2」帮用户认出是哪一个，明文只在生成时返回一次。
@@ -149,26 +144,6 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_cards_user_status ON cards(user_id, status);
 
-    -- 语音合成结果：按内容复用，所有用户共享（PRD F4）。阶段二才使用。
-    CREATE TABLE IF NOT EXISTS tts_audio (
-      hash TEXT PRIMARY KEY,                -- sha256(text + voice + speed + format，以换行分隔)
-      text TEXT NOT NULL, voice TEXT NOT NULL, speed TEXT NOT NULL,
-      file_path TEXT NOT NULL,              -- data/tts/<hash>.mp3
-      bytes INTEGER NOT NULL, created_at INTEGER NOT NULL
-    );
-
-    -- 音频在墨墨里的 file.id 只属于上传它的墨墨账号，所以按用户分别记录
-    CREATE TABLE IF NOT EXISTS markji_media (
-      user_id TEXT NOT NULL, audio_hash TEXT NOT NULL, file_id TEXT NOT NULL, created_at INTEGER NOT NULL,
-      PRIMARY KEY (user_id, audio_hash)
-    );
-
-    -- 每天做卡次数（PRD Q1：单独计数，不占讲解次数）
-    CREATE TABLE IF NOT EXISTS card_usage (
-      user_id TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (user_id, day)
-    );
-
     -- 推送任务（断点续传）
     CREATE TABLE IF NOT EXISTS push_jobs (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
@@ -183,6 +158,9 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
   if (!userCols.some((c) => c.name === "invite_code")) {
     addColumnIfMissing(sqlite, "ALTER TABLE users ADD COLUMN invite_code TEXT", "users", "invite_code");
   }
+
+  // 每日次数合并成 daily_usage，并删掉阶段二才用的空表（见 ensure-usage.ts）
+  ensureDailyUsage(sqlite);
 
   // P33 F7：查词事件里记录「这个词当时是否已有推送成功的卡片」
   const evCols = sqlite.prepare("PRAGMA table_info(explain_events)").all() as { name: string }[];

@@ -21,6 +21,7 @@
 - 每个接口都要在服务端确认用户身份：网站用 `currentUser()`，插件用 `requireExtensionUser()`。所有读写都要**校验数据属于当前用户**。
 - **不新增 npm 依赖**。语音合成、墨墨上传都用 Node 自带的 `fetch` 和 `FormData` / `Blob` 完成。
 - **不删除数据库里已有的表和字段**，`exports` 表也要保留。旧导出功能的**代码和页面**按 §9 删除。
+  - **修订（2026-11-14，用户决定）**：`ai_usage` 与 `card_usage` 合并为 `daily_usage(user_id, day, kind, count)`（`kind` = `ai` / `card`），启动时自动迁移旧数据并删除旧表；`tts_audio`、`markji_media` 一直为空、阶段一不用，已删除（为空才删），阶段二再按 §3 建回。迁移代码见 `src/db/ensure-usage.ts`。
 
 ### 0.2 UI（遵守设计规范）
 - 先读 `docs/design-system.md`。颜色、字号、间距、圆角、阴影**只能用** `src/styles/tokens.css` 里的 token，或者已经对齐 token 的 Tailwind 类。
