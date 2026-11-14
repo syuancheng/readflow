@@ -2790,6 +2790,15 @@ body {
 
 @media (max-width: 720px) {
   .cefr-pop { width: 260px; }
+  /* 窄屏首页列表：徽章在卡片中段，从徽章左缘展开 260px 会超出视口。
+     改为相对整张卡片（li.relative）定位，左右各留 16px，宽度随卡片，绝不溢出。 */
+  .text-list-item .cefr-wrap { position: static; }
+  .text-list-item .cefr-pop {
+    top: calc(100% + 8px);
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
 }
 
 /* ====== 阅读页常驻顶栏 + 目录（P19） ====== */
@@ -2904,6 +2913,8 @@ body {
    否则会被 .rf-reading-main 里的正文盖住（P18 踩过同一个坑） */
 .rf-topbar .cefr-wrap:hover, .rf-topbar .cefr-wrap:focus-within { z-index: 120; }
 .rf-topbar .cefr-pop { z-index: 200; }
+/* 阅读页顶栏的徽章在最右侧：浮层改为右缘对齐徽章、向左展开，不超出视口 */
+.rf-topbar .cefr-pop { left: auto; right: 0; }
 
 @media (max-width: 900px) {
   .rf-tb-title { max-width: 180px; }

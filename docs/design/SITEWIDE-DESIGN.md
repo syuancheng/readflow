@@ -118,7 +118,7 @@
 | `node scripts/e2e-personalized.mjs` | 91 通过 / 0 失败 |
 | `data/readflow.db` | 未被触碰（主仓库文件的修改时间仍是 17:15） |
 
-注意：新建的 worktree 里没有 `data/dict/ecdict.db`。缺了它，查词会全部失败，两个 E2E 也会因此失败（cards-ui 报 `contextId` 为 null，personalized 报 lookups=0）。验证时把主仓库的 `data/dict` 以符号链接方式接进 worktree。这个词典库按只读方式打开；链接只是本地环境配置，没有提交。
+注意：新建的 worktree 里没有 `data/dict/ecdict.db`。缺了它，查词会全部失败，两个 E2E 也会因此失败（cards-ui 报 `contextId` 为 null，personalized 报 lookups=0）。验证时把主仓库的 `data/dict` 以符号链接方式接进 worktree。这个词典库按只读方式打开；链接只是本地环境配置，没有提交。另外，`next build`（Turbopack）遇到这个指向 worktree 外的符号链接会直接报错，所以要先删掉链接再构建，构建完再链回来跑 E2E。
 
 ---
 
@@ -300,4 +300,15 @@ E-01 ~ E-06 沿用 `docs/design/P34-DESIGN.md` §4。其中 **E-04（既有 `glo
 
 ## 5. 顺带修复与遗留问题
 - **已修复：阅读正文颜色。** P29 迁移令牌时把阅读正文颜色 `#1a1a1a` 命名成 `--rf-text-reading`，和阅读器字号令牌 `--rf-text-reading: 19px` 重名，后定义的字号覆盖了颜色。结果 `--reader-ink` 得到 `19px`，是无效颜色，正文只能继承外层的 `#3c3c3c`。现在把颜色令牌改名为 `--rf-reading-ink`，正文实测计算值恢复为 `rgb(26, 26, 26)`（P29 之前的设计值，白底对比度约 17:1）。`docs/design-system.html` 的预览同步改了。
-- **遗留（既有，未改）：** 390px 下首页 CEFR 难度浮层从徽章向右展开，超出视口 7px，造成横向滚动（397 > 390）。换回改动前的 CSS 也一样，与本次整改无关。截图见 `.verify/sitewide/ink-after/home-cefr-pop-390.png`。
+- **已修复：CEFR 难度浮层超出视口。** 浮层原来固定从徽章左缘展开 300px（窄屏 260px），徽章靠右时就会超出视口。实测改前 → 改后（浮层左缘 / 右缘 / 视口宽，单位 px）：
+
+  | 位置 | 改前 | 改后 |
+  |---|---|---|
+  | 首页列表 1440 | 265 / 565 / 1440 | 不变 |
+  | 首页列表 390 | 137 / **397** / 390，溢出 | 32 / 358 / 390 |
+  | 阅读页顶栏 1440 | 1205 / **1505** / 1440，溢出 | 964 / 1264 / 1440 |
+  | 阅读页顶栏 390 | 214 / **474** / 390，溢出 | 12 / 272 / 390 |
+
+  - 阅读页顶栏：徽章在最右侧，浮层改为右缘对齐徽章、向左展开。
+  - 窄屏首页：浮层改为相对整张文本卡片定位，左右各留 16px，宽度跟随卡片。左缘与卡片内容同一条线（A-03）。
+  - 截图：`.verify/sitewide/cefr-before/`、`.verify/sitewide/cefr-after/` 下的 `home-cefr-pop-*`、`reader-cefr-pop-*`。
