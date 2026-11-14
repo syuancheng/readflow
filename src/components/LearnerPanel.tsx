@@ -8,6 +8,7 @@
  *
  * 紫色系只给 AI 的判断和笔记（design-system §1.1），全面板不引入绿色主按钮。
  */
+import { formatNoteTime } from "@/lib/learner/nightly";
 import { useCallback, useEffect, useState } from "react";
 import SurveyForm from "./SurveyForm";
 import type { SurveyAnswers } from "@/lib/learner/survey";
@@ -23,7 +24,7 @@ type LevelPayload = {
   basisText: string;
 };
 
-type NoteReason = "no_model" | { need_more_lookups: number } | null;
+type NoteReason = "no_model" | { waiting: number } | null;
 
 type LearnerPayload = {
   survey: SurveyAnswers | null;
@@ -32,6 +33,8 @@ type LearnerPayload = {
   difficulties: string[];
   note: string | null;
   noteUpdatedAt: number | null;
+  /** P34：nightly 每晚整理 / user 你修改过 / null 老数据 */
+  noteUpdateKind: "nightly" | "user" | null;
   noteReason: NoteReason;
 };
 
@@ -40,10 +43,19 @@ function noteReasonText(reason: NoteReason): string {
   if (reason === "no_model") {
     return "老师笔记需要可用的 AI 模型：在 设置 → 模型 里填一个 Key 即可开启";
   }
-  if (reason && reason.need_more_lookups > 0) {
-    return `再查 ${reason.need_more_lookups} 个词，AI 老师就会写下第一份观察`;
+  // P34：老师笔记改为每晚整理，新的查词、讲解、反馈合计攒够 10 次当晚才整理
+  if (reason && reason.waiting > 0) {
+    return `再攒 ${reason.waiting} 次查词或反馈，AI 老师当晚就会写下第一份观察`;
   }
-  return "AI 老师会在下次查词时写下第一份观察";
+  return "AI 老师今晚会写下第一份观察";
+}
+
+/** P34：笔记下方的更新说明：每晚整理 · 今天 03:00 / 你修改过 · AI 老师整理时会参考 / 更新于 … */
+function noteMetaText(p: Pick<LearnerPayload, "noteUpdatedAt" | "noteUpdateKind">): string {
+  if (p.noteUpdateKind === "user") return "你修改过 · AI 老师整理时会参考这段内容";
+  if (!p.noteUpdatedAt) return "你修改过 · AI 老师整理时会参考这段内容";
+  const when = formatNoteTime(p.noteUpdatedAt, Date.now());
+  return p.noteUpdateKind === "nightly" ? `每晚整理 · ${when}` : `更新于 ${when}`;
 }
 
 /** 词汇量显示成 ±15% 的区间，取整到百位（实现说明 §4.3） */
@@ -287,14 +299,11 @@ export default function LearnerPanel() {
                 </div>
               </div>
             ) : payload.note ? (
-              <div className="rf-learner-note">
-                {payload.note}
-                <div className="rf-learner-note-meta">
-                  {payload.noteUpdatedAt
-                    ? `更新于 ${new Date(payload.noteUpdatedAt).toLocaleString("zh-CN")}`
-                    : "你修改过，AI 老师会在下次更新时参考这段内容"}
-                </div>
-              </div>
+              <>
+                <div className="rf-learner-note">{payload.note}</div>
+                {/* P34：更新说明移到紫色笔记块下方（亲密性：块与说明 8px，同组），写明来源 */}
+                <p className="rf-note-meta">{noteMetaText(payload)}</p>
+              </>
             ) : (
               <p className="st-help">{noteReasonText(payload.noteReason)}</p>
             )}

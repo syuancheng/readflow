@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { defaultTurnText, parseThread, serializeThread } from "../../src/lib/ai-thread";
+import { attachAnswers } from "../../src/lib/ai-thread";
 import { cardGloss, inlineGloss } from "../../src/lib/gloss";
 
 test("往返：默认讲解 + 两次追问，存进去再读出来一字不差", () => {
@@ -42,4 +43,20 @@ test("行内中文和卡片背面只取默认讲解，追问的「释义：」�
 
 test("空回答不入串", () => {
   assert.equal(serializeThread([{ text: "释义：甲" }, { ask: "例句", text: "   " }]), "释义：甲");
+});
+
+test("P34 attachAnswers：按顺序给每段对上回答；新老混合；同文两段各配一个；没有回答；回答比段多", () => {
+  const turns = [{ text: "释义：a\n讲解一" }, { ask: "再给个例句", text: "例句" }, { ask: "再给个例句", text: "例句" }];
+  const answers = [
+    { answerId: "x1", text: "  释义：a\n讲解一  ", feedback: "deep" },
+    { answerId: "x2", text: "例句", feedback: null },
+    { answerId: "x3", text: "例句", feedback: "right" },
+    { answerId: "x4", text: "多出来的", feedback: null },
+  ];
+  const r = attachAnswers(turns, answers);
+  assert.deepEqual(r.map((t) => [t.answerId, t.feedback]), [["x1", "deep"], ["x2", null], ["x3", "right"]]);
+  const legacy = attachAnswers([{ text: "老讲解" }, { ask: "q", text: "例句" }], [{ answerId: "y", text: "例句", feedback: "shallow" }]);
+  assert.deepEqual(legacy.map((t) => t.answerId), [undefined, "y"]);
+  assert.deepEqual(attachAnswers(turns, []).map((t) => t.answerId), [undefined, undefined, undefined]);
+  assert.equal(r[1].ask, "再给个例句", "原有字段保留");
 });

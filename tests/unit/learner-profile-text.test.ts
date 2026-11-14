@@ -121,3 +121,42 @@ test("有没有可依据的档案：问卷 / 查词满 30 次 / 老师笔记，�
   assert.equal(hasUsableProfile({ ...none, note: "  " }), false, "空白笔记不算");
   assert.equal(hasUsableProfile({ ...none, note: "常卡在长句" }), true);
 });
+
+test("P34：最近的反馈放在「以往反馈」之后、「老师笔记」之前，每条一行", () => {
+  const text = buildLearnerBlock({ ...full, recentFeedback: ["单词，自动讲解：约 180 字，画了句子地图 → 太深", "短语，只讲这个词 → 刚好"] });
+  const lines = text.split("\n");
+  const head = lines.findIndex((l) => l.startsWith("- 最近的反馈"));
+  assert.ok(head > 0);
+  assert.equal(lines[head + 1], "  · 单词，自动讲解：约 180 字，画了句子地图 → 太深");
+  assert.equal(lines[head + 2], "  · 短语，只讲这个词 → 刚好");
+  const note = lines.findIndex((l) => l.startsWith("- 老师笔记"));
+  if (note >= 0) assert.ok(note > head + 2);
+});
+
+test("P34：没有最近反馈时不出现这一段；空白行被忽略", () => {
+  assert.ok(!buildLearnerBlock({ ...full, recentFeedback: [] }).includes("最近的反馈"));
+  assert.ok(!buildLearnerBlock({ ...full, recentFeedback: ["  "] }).includes("最近的反馈"));
+});
+
+test("P34：上限 720 字；超长时先截老师笔记，最后才从最旧的一条整行去掉最近反馈", () => {
+  assert.equal(LEARNER_BLOCK_MAX_CHARS, 720);
+  const recent = ["单词，自动讲解：约 180 字，画了句子地图 → 太深", "短语，只讲这个词 → 刚好", "单词，再给个例句 → 太浅"];
+  const longNote = "技术词汇明显强于日常词汇。".repeat(80);
+  const t = buildLearnerBlock({ ...full, note: longNote, recentFeedback: recent });
+  assert.ok(t.length <= 720);
+  assert.ok(recent.every((r) => t.includes(r)), "笔记截短后最近反馈完整保留");
+  // 极端情况：只有大量最近反馈也超长 → 从最旧的一条（最后一行）开始整行去掉
+  const huge = Array.from({ length: 3 }, (_, i) => `单词，${"很长的问题".repeat(50)}${i} → 太深`);
+  const t2 = buildLearnerBlock({ level: null, survey: null, stats: null, note: null, recentFeedback: huge });
+  assert.ok(t2.length <= 720);
+  assert.ok(t2.includes("0 → 太深") && !t2.includes("2 → 太深"), "最旧的先去掉");
+  const all = buildLearnerBlock({ level: null, survey: null, stats: null, note: null, recentFeedback: ["x".repeat(800)] });
+  assert.ok(all.length <= 720 && !all.includes("最近的反馈"), "全部去光时标题也去掉");
+});
+
+test("P34 hasUsableProfile：最近 30 天反馈 ≥3 次也算有档案（2 次不算）", () => {
+  const none = { survey: null, stats: null, note: null };
+  assert.equal(hasUsableProfile({ ...none, recentFeedbackCount: 2 }), false);
+  assert.equal(hasUsableProfile({ ...none, recentFeedbackCount: 3 }), true);
+  assert.equal(hasUsableProfile({ ...none }), false);
+});

@@ -7,9 +7,8 @@ import type { AuthUser } from "@/lib/auth";
 import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
-import { learnerBlockFor, logExplain } from "@/lib/learner-store";
+import { learnerBlockFor, linkExplainContext, logExplain, saveAnswer } from "@/lib/learner-store";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
-import { maybeUpdateNote } from "@/lib/note-generator";
 import { cardsEnabled } from "@/lib/cards/flags";
 import { explainCache } from "@/lib/cards/explain-cache";
 import { siteCardsSettings } from "@/lib/cards/store";
@@ -102,14 +101,7 @@ export async function handleExplain(
     console.error("[learner] 记录讲解事件失败:", err);
   }
 
-  // P32 F3：后台尝试更新老师笔记。绝不 await —— 25 次 + 24 小时的判断、模型调用
-  // 与校验都不占用本次讲解的响应时间；站点没配模型或失败时只记 note_last_error。
-  // 放在写事件之后，让这次请教也能进「最近的提问摘要」。
-  try {
-    void maybeUpdateNote(user.id);
-  } catch (err) {
-    console.error("[learner] 触发老师笔记更新失败:", err);
-  }
+  // P34：老师笔记改为每晚整理（lib/nightly-note.ts），讲解请求里不再触发。
 
   // P33（spec §7.1）：观察信息——其他文章查词次数、是否已做过卡。
   // 查询失败不影响讲解（拿不到就不给观察，模型照常工作）。
@@ -155,14 +147,25 @@ export async function handleExplain(
           controller.enqueue(encoder.encode(value));
         }
         streamDone = !cancelled;
+        // P34 F1：讲解完整结束 → 对上批注（请求里没有 contextId 时按锚点找）并存下这段回答原文。
+        // 失败只记日志，绝不影响讲解。
+        let linkedContextId: string | null = params.contextId ?? null;
+        if (streamDone && answerId) {
+          try {
+            linkedContextId = linkExplainContext(user.id, answerId, params.textId, params.anchor);
+            saveAnswer({ eventId: answerId, userId: user.id, contextId: linkedContextId, askLabel: params.askLabel, text: assistantText });
+          } catch (err) {
+            console.error("[learner] 保存回答原文失败:", err);
+          }
+        }
         // P33（spec §7.2）：讲解流式输出正常结束 → 存进进程内缓存（10 分钟）。
         // messages 与这次调用的逐字一致（含 system 提示词与学生档案），
         // 做卡时前缀复用才能命中模型缓存（spec §13 第 2 条）。
-        if (streamDone && answerId && cardsOn && params.contextId) {
+        if (streamDone && answerId && cardsOn && linkedContextId) {
           try {
             explainCache().put(answerId, {
               userId: user.id,
-              contextId: params.contextId,
+              contextId: linkedContextId,
               messages: explainTurns(enriched),
               assistantText,
               provider: ai.settings?.activeProvider ?? "",
@@ -253,5 +256,17 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     askKind: narrowAskKind((body as { askKind?: unknown }).askKind),
     contextId: str((body as { contextId?: unknown }).contextId)?.slice(0, 120),
     textId: str((body as { textId?: unknown }).textId)?.slice(0, 120),
+    // P34：「你问：…」标题与选区锚点，只用于存回答、对上批注，不发给模型
+    askLabel: str((body as { askLabel?: unknown }).askLabel)?.trim().slice(0, 60) || undefined,
+    anchor: narrowAnchor((body as { anchor?: unknown }).anchor),
   };
+}
+
+function narrowAnchor(v: unknown): ExplainParams["anchor"] {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const pid = typeof o.paragraphId === "string" ? o.paragraphId.slice(0, 120) : "";
+  const start = typeof o.start === "number" && Number.isInteger(o.start) && o.start >= 0 ? o.start : -1;
+  const end = typeof o.end === "number" && Number.isInteger(o.end) && o.end > start ? o.end : -1;
+  return pid && start >= 0 && end > 0 ? { paragraphId: pid, start, end } : undefined;
 }

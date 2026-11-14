@@ -50,6 +50,10 @@ export type ExplainParams = {
   signals?: SelectionSignals;
   /** P32：服务端合成的学生档案文本，插在 user 消息最前面；空串时不插入任何内容 */
   learnerBlock?: string;
+  /** P34：前端显示的「你问：…」标题，只存进 explain_answers，不发给模型 */
+  askLabel?: string;
+  /** P34：选区锚点（批注还没保存好时，讲解结束后据此对上批注），不发给模型 */
+  anchor?: { paragraphId: string; start: number; end: number };
   /** P32：个性化讲解开关。为假时系统提示词逐字保持旧规则 */
   personalized?: boolean;
   /** P32：偏好「讲细一点」时把 maxTokens 放到 600，其余保持 400 */
@@ -78,12 +82,12 @@ export type ExplainParams = {
  * 只替换「答案深度」那一段，其余提示词一个字都不动——开关关闭时就是回退保障。
  */
 const DEPTH_GUIDANCE_ZH = `【答案深度由你判断，不要问我】
-根据「学生档案」和「观察」判断讲多深：L1 只给这句里的意思；L2 加上在这句里怎么理解或搭配；L3 再加「整句大意：」一句话概括；L4 再加句子地图，必要时给一个例句。拖选长片段、档案显示长句是难点时往深处走；档案显示水平高、偏好简洁、以往反馈「太深」偏多时往浅处走。「之前问过的选区」只用来避免重复讲同一内容，不决定讲多深。偏好简洁的学生最多加「整句大意：」，不主动画句子地图。阅读目的会影响义项选择（例如技术文档读者优先给技术含义）。不论讲多深，第一行永远是「释义：」。
+根据「学生档案」和「观察」判断讲多深：L1 只给这句里的意思；L2 加上在这句里怎么理解或搭配；L3 再加「整句大意：」一句话概括；L4 再加句子地图，必要时给一个例句。拖选长片段、档案显示长句是难点时往深处走；档案显示水平高、偏好简洁、以往反馈「太深」偏多时往浅处走。「之前问过的选区」只用来避免重复讲同一内容，不决定讲多深。偏好简洁的学生最多加「整句大意：」，不主动画句子地图。学生档案里的「最近的反馈」是学生对你最近几次讲解的评价，三种评价各一条：向被评「刚好」的那次讲法靠拢，避开被评「太深」那次的做法（例如句子地图、篇幅长），补上被评「太浅」那次缺的部分；最近的反馈与「以往反馈」统计不一致时，以最近的为准。阅读目的会影响义项选择（例如技术文档读者优先给技术含义）。不论讲多深，第一行永远是「释义：」。
 判断句法角色、两次选区是否重叠是老师的本职；不要输出判断过程，直接用答案体现。`;
 
 /** monolingual 人设的等义英文指引（文档只给了中文段落，这里保持两套人设行为一致） */
 const DEPTH_GUIDANCE_EN = `Depth is yours to judge from the observations and the "student profile":
-L1 gives only the meaning in this sentence; L2 adds how to read or pair it here; L3 adds a one-sentence "整句大意：" whole-sentence meaning; L4 adds a sentence map and, if needed, one example. Go deeper when the student selected a long span, or the profile shows long sentences are a weak point. Go lighter when the profile shows a high level, a preference for brevity, or mostly "太深" feedback. The "prior asks" are only for avoiding repetition, not for deciding depth. A student who prefers brevity gets at most the one-line whole-sentence meaning — never volunteer a sentence map unless they ask for structure. The reading goal affects which sense you choose (a technical reader gets the technical meaning of "artifact"). Keep the prose short and answer exactly the selection. Do not output your reasoning.`;
+L1 gives only the meaning in this sentence; L2 adds how to read or pair it here; L3 adds a one-sentence "整句大意：" whole-sentence meaning; L4 adds a sentence map and, if needed, one example. Go deeper when the student selected a long span, or the profile shows long sentences are a weak point. Go lighter when the profile shows a high level, a preference for brevity, or mostly "太深" feedback. The "prior asks" are only for avoiding repetition, not for deciding depth. A student who prefers brevity gets at most the one-line whole-sentence meaning — never volunteer a sentence map unless they ask for structure. The "最近的反馈" (recent feedback) lines in the profile are the student's ratings of your last few answers, one per rating: move toward the answer rated 「刚好」 (just right), avoid what the 「太深」 (too deep) answer did (for example a sentence map or a long answer), and add what the 「太浅」 (too shallow) answer lacked; when recent feedback disagrees with the long-term 「以往反馈」 statistic, follow the recent feedback. The reading goal affects which sense you choose (a technical reader gets the technical meaning of "artifact"). Keep the prose short and answer exactly the selection. Do not output your reasoning.`;
 
 function personalizeDepth(prompt: string, monolingual: boolean): string {
   const start = monolingual

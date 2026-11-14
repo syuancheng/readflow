@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { InvalidAnchorError, ensureContextByAnchor, type WordAnchor } from "@/lib/word-store";
 import { currentUser } from "@/lib/auth";
 import { lookup } from "@/lib/dict";
-import { logLookup } from "@/lib/learner-store";
+import { backfillExplainContext, logLookup } from "@/lib/learner-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +56,12 @@ export async function POST(req: Request) {
         },
         user.id,
       );
+    // P34 F1：讲解可能比批注先发出，讲解结束时还没对上批注；这里补上
+    try {
+      if (saved.contextId) backfillExplainContext(user.id, saved.contextId, body.textId, body.quote);
+    } catch (err) {
+      console.error("[learner] 补写讲解的批注 id 失败:", err);
+    }
     // P32 F2：查词事件只用于行为推断，失败不能影响收词本身
     try {
       let dictHit: boolean | null = null;

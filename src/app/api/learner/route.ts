@@ -5,7 +5,7 @@ import { resolveProvider } from "@/lib/config";
 import {
   getLearner,
   getProfileForPrompt,
-  lookupCountSince,
+  newEventsSinceNote,
   needsSurvey,
   saveSurvey,
   setShowFeedback,
@@ -13,10 +13,10 @@ import {
   editNote,
 } from "@/lib/learner-store";
 import { SURVEY_QUESTIONS, EXAM_SCORE_BANDS } from "@/lib/learner/survey";
+import { NIGHTLY_MIN_NEW_EVENTS } from "@/lib/learner/nightly";
 
 export const dynamic = "force-dynamic";
 
-const NOTE_MIN_NEW_LOOKUPS = 25;
 
 export async function GET() {
   const user = await currentUser();
@@ -24,7 +24,7 @@ export async function GET() {
 
   const row = getLearner(user.id);
   const profile = getProfileForPrompt(user.id);
-  const lookupCount = lookupCountSince(user.id, row.memory_reset_at);
+  const newEvents = newEventsSinceNote(user.id);
   const modelReady = resolveProvider(allSettings(), process.env) !== null;
 
   return Response.json({
@@ -53,11 +53,14 @@ export async function GET() {
     difficulties: profile.stats?.difficulties ?? [],
     note: row.note,
     noteUpdatedAt: row.note_updated_at,
+    // P34：笔记来源 nightly / user（老数据为 null）
+    noteUpdateKind: row.note_update_kind,
+    // P34：还差几次新动静，当晚才会整理（0 = 今晚会整理）
     noteReason: !modelReady
       ? "no_model"
       : row.note
         ? null
-        : { need_more_lookups: Math.max(0, NOTE_MIN_NEW_LOOKUPS - lookupCount) },
+        : { waiting: Math.max(0, NIGHTLY_MIN_NEW_EVENTS - newEvents) },
   });
 }
 

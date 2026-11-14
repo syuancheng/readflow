@@ -11,13 +11,14 @@ import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
 import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
 import { inlineGloss } from "@/lib/gloss";
-import { parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
+import { attachAnswers, parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
 import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 import type { AskKind, Feedback } from "@/lib/learner/types";
 import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
 import MakeCardButton from "@/components/MakeCardButton";
+import FeedbackRow from "@/components/FeedbackRow";
 import { splitCardSuggestion } from "@/lib/cards/suggestion";
 
 /**
@@ -96,6 +97,10 @@ function shownText(t: { text: string; status: string }): string {
   const { body } = splitCardSuggestion(t.text);
   if (t.status !== "streaming") return body;
   return body.replace(/\n+制(卡(建(议(：.*)?)?)?)?$/, "");
+}
+
+function isFeedback(v: unknown): v is Feedback {
+  return v === "shallow" || v === "right" || v === "deep";
 }
 
 function turnsFrom(raw: string | null | undefined): Turn[] {
@@ -1499,6 +1504,7 @@ export default function Reader({
           <PickCard
             key={`${pick.paragraphId}:${pick.anchor.start}:${pick.anchor.end}:${pick.source}`}
             pick={pick}
+            textId={textId}
             onClose={close}
             initialGloss={pick.initialGloss}
             initialDict={pick.initialDict}
@@ -1551,6 +1557,7 @@ type DictResult = {
 
 function PickCard({
   pick,
+  textId,
   onClose,
   onCancel,
   initialGloss,
@@ -1560,6 +1567,8 @@ function PickCard({
   feedbackEnabled,
 }: {
   pick: Pick;
+  /** P34：讲解请求带上文章 id，讲解记录才能对上文章与批注 */
+  textId: string;
   onClose: () => void;
   /** 取消记录：删掉这个词在本文的记录（右栏、划线、行内中文一起消失） */
   onCancel: () => void;
@@ -1599,6 +1608,11 @@ function PickCard({
   const aiAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => aiAbortRef.current?.abort(), []);
 
+  // P34 F1：自动讲解在词典回调里触发，闭包里的 pick 可能还没拿到刚保存的 contextId；
+  // 讲解请求一律从 ref 读最新值，讲解记录才能对上批注。
+  const contextIdRef = useRef(pick.contextId);
+  contextIdRef.current = pick.contextId;
+
 
   // 是短语（含空格）还是单词
   const isPhrase = /\s/.test(anchor.quote.trim());
@@ -1626,8 +1640,38 @@ function PickCard({
     setMenuOpen(false);
     setAskPrompt("");
 
-    // 回看：一次请求都不发（词典 / AI 都不查），直接展示存下来的结果。
-    if (recall) return;
+    // 回看：词典 / AI 都不查，直接展示存下来的结果。
+    // P34 F4：只额外取一次这条批注保存过的回答，给每段对上 answerId 和当时的反馈，
+    // 反馈行就能显示（没点过的可以补点，点过的可以改）。对不上的老讲解照旧不显示反馈行。
+    if (recall) {
+      let stale = false;
+      const contextId = pick.contextId;
+      if (contextId && feedbackEnabled) {
+        fetch(`/api/explain/answers?contextId=${encodeURIComponent(contextId)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data: { answers?: { answerId: string; text: string; feedback: string | null }[] } | null) => {
+            if (stale || !data?.answers?.length) return;
+            const answers = data.answers;
+            updateTurns((prev) =>
+              attachAnswers(prev, answers).map((t, i) =>
+                prev[i].answerId
+                  ? prev[i]
+                  : {
+                      ...t,
+                      answerId: t.answerId,
+                      feedback: isFeedback(t.feedback) ? t.feedback : undefined,
+                    },
+              ),
+            );
+          })
+          .catch(() => {
+            /* 拿不到就和以前一样不显示反馈行 */
+          });
+      }
+      return () => {
+        stale = true;
+      };
+    }
 
     // 选区切换后，旧请求的回调不能再替新的选区发起 AI 请求
     let cancelled = false;
@@ -1729,8 +1773,15 @@ function PickCard({
           }
         : undefined;
 
+    // P34：文章 id、批注 id（读 ref）、选区锚点和「你问：…」标题，用于存回答原文、对上批注
+    const refs = {
+      textId,
+      ...(contextIdRef.current ? { contextId: contextIdRef.current } : {}),
+      anchor: { paragraphId: pick.paragraphId, start: anchor.start, end: anchor.end },
+      ...(req.ask ? { askLabel: req.ask } : {}),
+    };
     const body = req.wholeSentence
-      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default" }
+      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs }
       : {
           word: anchor.quote,
           prefix: aiContext.prefix,
@@ -1741,7 +1792,7 @@ function PickCard({
           ...(req.prompt ? { prompt: req.prompt } : {}),
           ...(signals ? { signals } : {}),
           askKind: req.askKind ?? "default",
-          ...(pick.contextId ? { contextId: pick.contextId } : {}),
+          ...refs,
         };
 
     try {
@@ -1938,28 +1989,7 @@ function PickCard({
               )}
             </div>
             {feedbackEnabled && t.status === "done" && !isNotAGloss(t.text) && t.answerId && (
-              <div className="rf-feedback-row" title={t.feedbackError}>
-                <span>这次讲得：</span>
-                {(["shallow", "right", "deep"] as const).map((r, j) => (
-                  <span key={r}>
-                    {j > 0 && <span aria-hidden> · </span>}
-                    <button
-                      type="button"
-                      className={`rf-feedback-btn ${t.feedback === r ? "rf-feedback-on" : ""}`}
-                      aria-pressed={t.feedback === r}
-                      title={t.feedbackError || undefined}
-                      onClick={() => void rate(i, r)}
-                    >
-                      {t.feedback === r && (
-                        <span className="rf-feedback-check" aria-hidden>
-                          ✓
-                        </span>
-                      )}
-                      {["太浅", "刚好", "太深"][j]}
-                    </button>
-                  </span>
-                ))}
-              </div>
+              <FeedbackRow value={t.feedback} error={t.feedbackError} onRate={(r) => void rate(i, r)} />
             )}
           </div>
         );

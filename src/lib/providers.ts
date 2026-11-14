@@ -189,7 +189,7 @@ export async function completeChat(
   const maxTokens = opts.maxTokens ?? 400;
 
   // OpenAI SDK 分支与 Anthropic fetch 分支共用同一个 60 秒硬超时；
-  // 超时抛 ProviderError，由 maybeUpdateNote 记为失败并进入冷却。
+  // 超时抛 ProviderError，由 generateNoteNow 记为失败并进入冷却。
   return runWithChatTimeout(
     async (signal) => {
       if (p.protocol === "openai") {
