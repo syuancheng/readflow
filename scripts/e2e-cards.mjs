@@ -225,7 +225,7 @@ async function waitSet(cookie, setId, timeoutMs = 20000) {
     await new Promise((r2) => setTimeout(r2, 250));
   }
 }
-const usageOf = (userId) => dbAll("SELECT count FROM card_usage WHERE user_id = ?", userId)[0]?.count ?? 0;
+const usageOf = (userId) => dbAll("SELECT count FROM daily_usage WHERE user_id = ? AND kind = 'card'", userId)[0]?.count ?? 0;
 const callsOf = (kind) => calls.filter((c) => c.kind === kind);
 
 try {
@@ -414,24 +414,24 @@ try {
   const rOk = await waitSet(friend, gOk.data.setId);
   check("J4 成功后计 1 次", rOk?.set?.status === "ready" && usageOf(friendId) === 1);
 
-  dbRun("UPDATE card_usage SET count = 30 WHERE user_id = ?", friendId);
+  dbRun("UPDATE daily_usage SET count = 30 WHERE user_id = ? AND kind = 'card'", friendId);
   const f2 = await seedContext(friend, "Friend text 2");
   const gq = await api("/api/cards/generate", { cookie: friend, method: "POST", body: { contextId: f2.contextId } });
   check("J5 当天已做 30 个词 → 429，提示里写明次数", gq.status === 429 && /30/.test(gq.data?.error ?? ""), `status=${gq.status} ${gq.data?.error}`);
   const forced = await api("/api/cards/generate", { cookie: friend, method: "POST", body: { contextId: f.contextId, force: true } });
   check("J6 force 重做也受额度限制", forced.status === 429);
-  dbRun("UPDATE card_usage SET count = 29 WHERE user_id = ?", friendId);
+  dbRun("UPDATE daily_usage SET count = 29 WHERE user_id = ? AND kind = 'card'", friendId);
   slowMs = 0;
 
   // ===== 卡死的 generating 组会过期，不会永远挡住去重 =====
-  dbRun("UPDATE card_usage SET count = 0 WHERE user_id = ?", friendId);
+  dbRun("UPDATE daily_usage SET count = 0 WHERE user_id = ? AND kind = 'card'", friendId);
   const f3 = await seedContext(friend, "Friend text 3");
   dbRun(
     `INSERT INTO card_sets (id, user_id, user_word_id, context_id, text_id, status, created_at, updated_at)
      SELECT 'stale-set', ?, w.id, ?, c.text_id, 'generating', ?, ? FROM contexts c JOIN user_words w ON w.id = c.user_word_id WHERE c.id = ?`,
     friendId, f3.contextId, Date.now() - 10 * 60 * 1000, Date.now() - 10 * 60 * 1000, f3.contextId,
   );
-  dbRun("INSERT INTO card_usage (user_id, day, count) VALUES (?, ?, 1) ON CONFLICT(user_id, day) DO UPDATE SET count = 1", friendId,
+  dbRun("INSERT INTO daily_usage (user_id, day, kind, count) VALUES (?, ?, 'card', 1) ON CONFLICT(user_id, day, kind) DO UPDATE SET count = 1", friendId,
     new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" }));
   const gs = await api("/api/cards/generate", { cookie: friend, method: "POST", body: { contextId: f3.contextId } });
   const stale = dbAll("SELECT status FROM card_sets WHERE id = 'stale-set'")[0];

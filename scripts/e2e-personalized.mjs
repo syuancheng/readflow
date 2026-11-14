@@ -576,7 +576,7 @@ try {
   check("H0 场景 7 前置：新增查词 ≥25 且距上次更新 ≥24 小时",
     lookupsBefore - 5 >= 25, `查词=${lookupsBefore} 上次游标=5 新增=${lookupsBefore - 5}`);
 
-  const usageBefore = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", ownerId)[0].n;
+  const usageBefore = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", ownerId)[0].n;
   const noteCallsBefore = noteCalls.length;
   await explain(owner);
   const hRow = await waitProfile((r) => Boolean(r.note) && r.note !== OLD_NOTE);
@@ -591,12 +591,12 @@ try {
     noteCalls.length > noteCallsBefore && noteCalls.at(-1)?.stream === false &&
     noteSystem.includes("不要列出具体单词") && noteSystem.includes("以统计数据为准"),
     `笔记调用=${noteCalls.length - noteCallsBefore}`);
-  const usageAfter = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", ownerId)[0].n;
+  const usageAfter = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", ownerId)[0].n;
   const noteGenSrc = fs.readFileSync(path.join(ROOT, "src/lib/note-generator.ts"), "utf8");
-  check("H4 生成笔记不扣每日免费 AI 次数（ai_usage 不增，且源码没有实际调用扣额度函数）",
+  check("H4 生成笔记不扣每日免费 AI 次数（daily_usage 里 ai 次数不增，且源码没有实际调用扣额度函数）",
     usageAfter === usageBefore &&
     !/consumeAiQuota\s*\(/.test(noteGenSrc) && !/from\s+["'][^"']*ai-quota/.test(noteGenSrc),
-    `ai_usage ${usageBefore} → ${usageAfter}`);
+    `ai 次数 ${usageBefore} → ${usageAfter}`);
   const hLearner = await api("/api/learner", { cookie: owner });
   check("H5 GET /api/learner 返回笔记全文与更新时间",
     hLearner.data?.note === hRow.note && typeof hLearner.data?.noteUpdatedAt === "number",
@@ -615,7 +615,7 @@ try {
     })();
     d.close();
   }
-  const usageFBefore = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", friendId)[0].n;
+  const usageFBefore = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", friendId)[0].n;
   const noteCallsFBefore = noteCalls.length;
   await explain(friendCookie);
   let friendNote = null;
@@ -623,7 +623,7 @@ try {
     friendNote = q("select note from learner_profiles where user_id = ?", friendId)[0]?.note ?? null;
     if (!friendNote) await sleep(200);
   }
-  const usageFAfter = q("select coalesce(sum(count),0) n from ai_usage where user_id = ?", friendId)[0].n;
+  const usageFAfter = q("select coalesce(sum(count),0) n from daily_usage where kind = 'ai' and user_id = ?", friendId)[0].n;
   check("H4b 普通账号：一次讲解 + 一次后台笔记只扣 1 次免费额度（笔记不额外扣）",
     Boolean(friendNote) && noteCalls.length > noteCallsFBefore && usageFAfter - usageFBefore === 1,
     `笔记=${Boolean(friendNote)} 笔记调用=${noteCalls.length - noteCallsFBefore} 额度增量=${usageFAfter - usageFBefore}`);

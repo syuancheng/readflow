@@ -355,26 +355,11 @@ export const cards = sqliteTable(
   (t) => [index("idx_cards_user_status").on(t.userId, t.status)],
 );
 
-export const ttsAudio = sqliteTable("tts_audio", {
-  hash: text("hash").primaryKey(),
-  text: text("text").notNull(),
-  voice: text("voice").notNull(),
-  speed: text("speed").notNull(),
-  filePath: text("file_path").notNull(),
-  bytes: integer("bytes").notNull(),
-  createdAt: integer("created_at").notNull(),
-});
-
-export const markjiMedia = sqliteTable("markji_media", {
-  userId: text("user_id").notNull(),
-  audioHash: text("audio_hash").notNull(),
-  fileId: text("file_id").notNull(),
-  createdAt: integer("created_at").notNull(),
-});
-
-export const cardUsage = sqliteTable("card_usage", {
+/** 每日次数：kind = 'ai'（免费讲解）| 'card'（做卡）。由 db/ensure-usage.ts 建表与迁移 */
+export const dailyUsage = sqliteTable("daily_usage", {
   userId: text("user_id").notNull(),
   day: text("day").notNull(),
+  kind: text("kind").notNull(),
   count: integer("count").notNull().default(0),
 });
 

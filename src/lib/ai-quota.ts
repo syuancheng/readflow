@@ -6,6 +6,7 @@
  * 查词典不走模型，不占次数。
  */
 import { sqlite } from "@/db/sqlite";
+import { addUsage, usedOn } from "@/lib/daily-usage";
 
 export function dailyAiQuota(): number {
   const n = Number(process.env.READFLOW_AI_DAILY_QUOTA);
@@ -17,10 +18,7 @@ export function quotaDay(now = Date.now()): string {
 }
 
 export function aiUsedToday(userId: string, now = Date.now()): number {
-  const row = sqlite
-    .prepare("SELECT count FROM ai_usage WHERE user_id = ? AND day = ?")
-    .get(userId, quotaDay(now)) as { count: number } | undefined;
-  return row?.count ?? 0;
+  return usedOn(userId, "ai", quotaDay(now));
 }
 
 /** 占用一次；超过上限返回 ok:false，不计数 */
@@ -30,11 +28,7 @@ export function consumeAiQuota(userId: string, now = Date.now()): { ok: boolean;
   return sqlite.transaction(() => {
     const used = aiUsedToday(userId, now);
     if (used >= limit) return { ok: false, used, limit };
-    sqlite
-      .prepare(
-        "INSERT INTO ai_usage (user_id, day, count) VALUES (?, ?, 1) ON CONFLICT(user_id, day) DO UPDATE SET count = count + 1",
-      )
-      .run(userId, day);
+    addUsage(userId, "ai", day);
     return { ok: true, used: used + 1, limit };
   })();
 }
