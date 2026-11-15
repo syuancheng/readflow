@@ -97,7 +97,7 @@ const fake = http.createServer((req, res) => {
         }));
         return;
       }
-      modelCalls.push({ messages: body.messages ?? [], stream: true });
+      modelCalls.push({ messages: body.messages ?? [], stream: true, hasMaxTokens: "max_tokens" in body });
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
       const cut = cutNext > 0;
       if (cut) cutNext--;
@@ -1072,6 +1072,8 @@ try {
   const lenRes = await explain(owner);
   check("T3 到了长度上限：回答末尾明确写出「超出了长度上限」，不装作讲完了",
     lenRes.text.startsWith(explainParts.join("")) && lenRes.text.includes("回答超出了长度上限"), lenRes.text.slice(-40));
+  check("T4 讲解请求不带 max_tokens（不设输出上限，回答多长显示多长）",
+    modelCalls.length > 0 && modelCalls.every((c) => c.hasMaxTokens === false), `带上限的调用=${modelCalls.filter((c) => c.hasMaxTokens).length}`);
   explainParts = ["释义：测试", "\n假模型讲解"];
 
   await ctxOwner.close();

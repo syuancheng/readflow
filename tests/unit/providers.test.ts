@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { streamChat, testProvider, ProviderError, TRUNCATED_NOTICE } from "../../src/lib/providers";
+import { streamChat, testProvider, ProviderError, TRUNCATED_NOTICE, CLAUDE_UNCAPPED_MAX_TOKENS } from "../../src/lib/providers";
 import { isRetryableError } from "../../src/lib/retry";
 import type { ResolvedProvider } from "../../src/lib/config";
 
@@ -203,4 +203,43 @@ test("消费方提前停止读取（前端切走）不算断开，不抛错", as
     assert.equal(first.value, "一");
     await it.return(undefined);
   });
+});
+
+// ---------- 2026-11-15：讲解不设输出上限 ----------
+
+/** 记下发出去的请求体，回一个正常结束的流 */
+async function capturedBody(p: ResolvedProvider, maxTokens: number | null | undefined): Promise<Record<string, unknown>> {
+  const original = globalThis.fetch;
+  let sent: Record<string, unknown> = {};
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    return sseHeaders(
+      p.protocol === "openai"
+        ? [oaChunk("好"), oaChunk(null, "stop"), "data: [DONE]\n\n"]
+        : [
+            'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"好"}}\n\n',
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          ],
+    );
+  }) as typeof fetch;
+  try {
+    await collect(streamChat(p, [{ role: "user", content: "x" }], maxTokens === undefined ? {} : { maxTokens }));
+  } finally {
+    globalThis.fetch = original;
+  }
+  return sent;
+}
+
+test("OpenAI 兼容流：maxTokens = null → 请求里不带 max_tokens（模型写到讲完为止）", async () => {
+  const body = await capturedBody(deepseek, null);
+  assert.equal("max_tokens" in body, false);
+});
+
+test("OpenAI 兼容流：显式给了上限 / 没给（默认 1200）时照常带上", async () => {
+  assert.equal((await capturedBody(deepseek, 300)).max_tokens, 300);
+  assert.equal((await capturedBody(deepseek, undefined)).max_tokens, 1200);
+});
+
+test("Claude 流：max_tokens 是必填，null 时用 CLAUDE_UNCAPPED_MAX_TOKENS", async () => {
+  assert.equal((await capturedBody(claude, null)).max_tokens, CLAUDE_UNCAPPED_MAX_TOKENS);
 });
