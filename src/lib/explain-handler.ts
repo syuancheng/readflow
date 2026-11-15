@@ -14,6 +14,7 @@ import { explainCache } from "@/lib/cards/explain-cache";
 import { siteCardsSettings } from "@/lib/cards/store";
 import { sqlite } from "@/db/sqlite";
 import { lemma as lemmaOf } from "@/lib/dict";
+import { STREAM_RESET } from "@/lib/config";
 
 const clamp = (v: unknown, lo: number, hi: number): number | undefined => {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
@@ -143,7 +144,11 @@ export async function handleExplain(
         while (!cancelled) {
           const { value, done } = await iter.next();
           if (done || cancelled) break;
-          assistantText += value;
+          // 模型重试时会先发 STREAM_RESET：前端据此清屏，这里也要丢掉上一次的半截回答，
+          // 否则存进 explain_answers / 做卡缓存的是「半截 + 重来」拼在一起的文字
+          assistantText = value.includes(STREAM_RESET)
+            ? (value.split(STREAM_RESET).pop() ?? "")
+            : assistantText + value;
           controller.enqueue(encoder.encode(value));
         }
         streamDone = !cancelled;

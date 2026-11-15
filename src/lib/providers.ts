@@ -84,10 +84,35 @@ async function* openaiStream(
     max_tokens: opts.maxTokens ?? 1200,
   });
 
+  let finish: string | null = null;
   for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
+    const choice = chunk.choices[0];
+    const delta = choice?.delta?.content;
     if (delta) yield delta;
+    if (choice?.finish_reason) finish = choice.finish_reason;
   }
+  yield* endOfStream(finish === null ? null : finish === "length" ? "length" : "ok");
+}
+
+/**
+ * 回答被截断时追加在末尾的说明（finish_reason = length / stop_reason = max_tokens）。
+ * 以前截断是静默的：页面显示半句话，看起来像讲完了（2026-11-15 用户报告）。
+ */
+export const TRUNCATED_NOTICE = "\n\n（回答超出了长度上限，后面的内容没有显示。可以换个问法再问一次。）";
+
+/**
+ * 流结束时的判定：
+ * - 正常结束 → 什么也不做；
+ * - 到了长度上限 → 吐一句说明，让用户知道后面还有；
+ * - 连接断了、没收到结束标记 → 抛 502（可重试）。上游的 streamTurns 会先发 STREAM_RESET
+ *   让前端清屏，再完整重来一次，而不是把半截回答当成讲完了。
+ */
+function* endOfStream(end: "ok" | "length" | null): Generator<string> {
+  if (end === "length") {
+    yield TRUNCATED_NOTICE;
+    return;
+  }
+  if (end === null) throw new ProviderError("模型的回答中途断开了（没有收到结束标记）", 502);
 }
 
 /** Anthropic Messages API 的 SSE：content_block_delta.delta.text 才是正文 */
@@ -128,6 +153,9 @@ async function* anthropicStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  /** message_stop 到了才算正常结束；message_delta 的 stop_reason = max_tokens 表示被截断 */
+  let end: "ok" | "length" | null = null;
+  let stopReason: string | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -143,7 +171,7 @@ async function* anthropicStream(
         if (!payload || payload === "[DONE]") continue;
         let evt: {
           type?: string;
-          delta?: { type?: string; text?: string };
+          delta?: { type?: string; text?: string; stop_reason?: string | null };
           error?: { type?: string; message?: string };
         };
         try {
@@ -160,9 +188,12 @@ async function* anthropicStream(
         if (evt.type === "content_block_delta" && evt.delta?.text) {
           yield evt.delta.text;
         }
+        if (evt.type === "message_delta" && evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+        if (evt.type === "message_stop") end = stopReason === "max_tokens" ? "length" : "ok";
       }
     }
   }
+  yield* endOfStream(end);
 }
 
 export function streamChat(

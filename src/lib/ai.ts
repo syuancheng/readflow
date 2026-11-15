@@ -56,7 +56,7 @@ export type ExplainParams = {
   anchor?: { paragraphId: string; start: number; end: number };
   /** P32：个性化讲解开关。为假时系统提示词逐字保持旧规则 */
   personalized?: boolean;
-  /** P32：偏好「讲细一点」时把 maxTokens 放到 600，其余保持 400 */
+  /** P32：偏好「讲细一点」时用更高的 maxTokens 上限（见 EXPLAIN_MAX_TOKENS_DETAILED） */
   detailed?: boolean;
   /** P33：服务端记事件用，不发给模型 */
   askKind?: string;
@@ -361,6 +361,10 @@ export function explainTurns(params: ExplainParams): ChatTurn[] {
   ];
 }
 
+/** 讲解的输出上限（token）。只是兜底，正常回答约 200–450 */
+export const EXPLAIN_MAX_TOKENS = 1000;
+export const EXPLAIN_MAX_TOKENS_DETAILED = 1400;
+
 export async function* streamExplain(
   params: ExplainParams,
   ai?: AiConfig,
@@ -371,8 +375,10 @@ export async function* streamExplain(
     turns,
     {
       temperature: 0.3, // 释义要准确，不要发散
-      // P32：偏好「讲细一点」的学生允许长一点，其余保持原来的 400
-      maxTokens: params.detailed ? 600 : 400,
+      // 长度由提示词控制（散文 ≤120 词 + 句子地图），这里只是兜底上限。
+      // 原来的 400 / 600 对「整句没看懂 + 句子地图」偏紧，到上限时回答停在半句话（2026-11-15）。
+      // 按实际输出计费，放宽不增加正常回答的成本。
+      maxTokens: params.detailed ? EXPLAIN_MAX_TOKENS_DETAILED : EXPLAIN_MAX_TOKENS,
     },
     ai,
   );

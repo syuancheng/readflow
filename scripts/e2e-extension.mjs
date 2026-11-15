@@ -89,6 +89,7 @@ const site = http.createServer((req, res) => {
         res.write(`data: ${JSON.stringify({ id: "slow", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
         await new Promise((r) => setTimeout(r, 900));
       }
+      res.write(`data: ${JSON.stringify({ id: "stop", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`); // 真实模型都会发结束标记，缺了会被当成「中途断开」
       res.write("data: [DONE]\n\n");
       res.end();
     });
@@ -112,6 +113,7 @@ function fastAnswer(res) {
         })}\n\n`,
       );
     }
+    res.write(`data: ${JSON.stringify({ id: "stop", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`); // 真实模型都会发结束标记，缺了会被当成「中途断开」
     res.write("data: [DONE]\n\n");
     return res.end();
   }
