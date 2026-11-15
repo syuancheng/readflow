@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { streamChat, testProvider, ProviderError } from "../../src/lib/providers";
+import { streamChat, testProvider, ProviderError, TRUNCATED_NOTICE, CLAUDE_UNCAPPED_MAX_TOKENS } from "../../src/lib/providers";
+import { isRetryableError } from "../../src/lib/retry";
 import type { ResolvedProvider } from "../../src/lib/config";
 
 const claude: ResolvedProvider = {
@@ -55,7 +56,7 @@ test("Claude SSE：JSON 被网络分块切断也能正确解析", async () => {
   const event =
     'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"跨块文本"}}\n\n';
   globalThis.fetch = (async () =>
-    sseResponse([event.slice(0, 42), event.slice(42, 80), event.slice(80)])) as typeof fetch;
+    sseResponse([event.slice(0, 42), event.slice(42, 80), event.slice(80), 'event: message_stop\ndata: {"type":"message_stop"}\n\n'])) as typeof fetch;
   try {
     const out = await collect(streamChat(claude, [{ role: "user", content: "x" }]));
     assert.equal(out, "跨块文本");
@@ -110,4 +111,135 @@ test("测试连接（非流式）能读到返回内容并去掉尾部斜杠", as
   } finally {
     globalThis.fetch = original;
   }
+});
+
+// ---------- 2026-11-15：回答被截断 / 中途断开不能再静默当成讲完了 ----------
+
+const deepseek: ResolvedProvider = {
+  id: "deepseek",
+  label: "DeepSeek",
+  protocol: "openai",
+  apiKey: "sk-test",
+  baseUrl: "https://api.deepseek.com/v1",
+  model: "deepseek-chat",
+  source: "db",
+};
+
+/** OpenAI 兼容的 SSE 片段 */
+const oaChunk = (content: string | null, finish: string | null = null) =>
+  `data: ${JSON.stringify({
+    id: "c1", object: "chat.completion.chunk", created: 1, model: "deepseek-chat",
+    choices: [{ index: 0, delta: content === null ? {} : { content }, finish_reason: finish }],
+  })}\n\n`;
+
+function sseHeaders(parts: string[]): Response {
+  const res = sseResponse(parts);
+  return new Response(res.body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+async function withFetch<T>(parts: string[], fn: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => sseHeaders(parts)) as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("OpenAI 兼容流：finish_reason = stop → 原样输出，不加任何说明", async () => {
+  const out = await withFetch(
+    [oaChunk("释义："), oaChunk("测试"), oaChunk(null, "stop"), "data: [DONE]\n\n"],
+    () => collect(streamChat(deepseek, [{ role: "user", content: "x" }])),
+  );
+  assert.equal(out, "释义：测试");
+});
+
+test("OpenAI 兼容流：finish_reason = length → 末尾追加「超出长度上限」说明", async () => {
+  const out = await withFetch(
+    [oaChunk("难点有两处。另外，make"), oaChunk(null, "length"), "data: [DONE]\n\n"],
+    () => collect(streamChat(deepseek, [{ role: "user", content: "x" }])),
+  );
+  assert.equal(out, "难点有两处。另外，make" + TRUNCATED_NOTICE);
+});
+
+test("OpenAI 兼容流：连接中途断开、没有结束标记 → 抛可重试的错误，不当成讲完了", async () => {
+  await withFetch([oaChunk("难点有两处。另外，make")], async () => {
+    await assert.rejects(
+      collect(streamChat(deepseek, [{ role: "user", content: "x" }])),
+      (err: unknown) => err instanceof ProviderError && err.status === 502 && isRetryableError(err),
+    );
+  });
+});
+
+test("Claude 流：stop_reason = max_tokens → 末尾追加说明", async () => {
+  const out = await withFetch(
+    [
+      'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"半句"}}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ],
+    () => collect(streamChat(claude, [{ role: "user", content: "x" }])),
+  );
+  assert.equal(out, "半句" + TRUNCATED_NOTICE);
+});
+
+test("Claude 流：没有 message_stop 就断开 → 抛可重试的错误", async () => {
+  await withFetch(
+    ['event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"半句"}}\n\n'],
+    async () => {
+      await assert.rejects(
+        collect(streamChat(claude, [{ role: "user", content: "x" }])),
+        (err: unknown) => err instanceof ProviderError && err.status === 502,
+      );
+    },
+  );
+});
+
+test("消费方提前停止读取（前端切走）不算断开，不抛错", async () => {
+  await withFetch([oaChunk("一"), oaChunk("二"), oaChunk(null, "stop")], async () => {
+    const it = streamChat(deepseek, [{ role: "user", content: "x" }]);
+    const first = await it.next();
+    assert.equal(first.value, "一");
+    await it.return(undefined);
+  });
+});
+
+// ---------- 2026-11-15：讲解不设输出上限 ----------
+
+/** 记下发出去的请求体，回一个正常结束的流 */
+async function capturedBody(p: ResolvedProvider, maxTokens: number | null | undefined): Promise<Record<string, unknown>> {
+  const original = globalThis.fetch;
+  let sent: Record<string, unknown> = {};
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    return sseHeaders(
+      p.protocol === "openai"
+        ? [oaChunk("好"), oaChunk(null, "stop"), "data: [DONE]\n\n"]
+        : [
+            'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"好"}}\n\n',
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          ],
+    );
+  }) as typeof fetch;
+  try {
+    await collect(streamChat(p, [{ role: "user", content: "x" }], maxTokens === undefined ? {} : { maxTokens }));
+  } finally {
+    globalThis.fetch = original;
+  }
+  return sent;
+}
+
+test("OpenAI 兼容流：maxTokens = null → 请求里不带 max_tokens（模型写到讲完为止）", async () => {
+  const body = await capturedBody(deepseek, null);
+  assert.equal("max_tokens" in body, false);
+});
+
+test("OpenAI 兼容流：显式给了上限 / 没给（默认 1200）时照常带上", async () => {
+  assert.equal((await capturedBody(deepseek, 300)).max_tokens, 300);
+  assert.equal((await capturedBody(deepseek, undefined)).max_tokens, 1200);
+});
+
+test("Claude 流：max_tokens 是必填，null 时用 CLAUDE_UNCAPPED_MAX_TOKENS", async () => {
+  assert.equal((await capturedBody(claude, null)).max_tokens, CLAUDE_UNCAPPED_MAX_TOKENS);
 });

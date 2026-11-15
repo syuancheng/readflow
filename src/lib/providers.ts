@@ -17,11 +17,18 @@ export type ChatTurn = { role: "system" | "user" | "assistant"; content: string 
 
 export type ChatOptions = {
   temperature?: number;
-  maxTokens?: number;
+  /**
+   * 输出上限（token）。不传 = 各调用的默认值；传 null = 流式调用不设上限：
+   * OpenAI 兼容接口不带 max_tokens，由模型自己写完；Claude 接口必须带，用 CLAUDE_UNCAPPED_MAX_TOKENS。
+   */
+  maxTokens?: number | null;
   signal?: AbortSignal;
   /** 仅 completeChat：覆盖默认的 60 秒超时（单测用来快速模拟超时，正常调用不要传） */
   timeoutMs?: number;
 };
+
+/** Claude 接口必须带 max_tokens；「不设上限」时用这个值（远超任何一次讲解的长度） */
+export const CLAUDE_UNCAPPED_MAX_TOKENS = 8192;
 
 /** 非流式调用的统一超时（P32-修复）：60 秒未返回即按失败处理 */
 export const COMPLETE_CHAT_TIMEOUT_MS = 60_000;
@@ -81,13 +88,39 @@ async function* openaiStream(
     messages: turns,
     stream: true,
     temperature: opts.temperature ?? 0.3,
-    max_tokens: opts.maxTokens ?? 1200,
+    // null = 不带 max_tokens（讲解用：模型写到讲完为止，只受服务商自身上限约束）
+    ...(opts.maxTokens === null ? {} : { max_tokens: opts.maxTokens ?? 1200 }),
   });
 
+  let finish: string | null = null;
   for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
+    const choice = chunk.choices[0];
+    const delta = choice?.delta?.content;
     if (delta) yield delta;
+    if (choice?.finish_reason) finish = choice.finish_reason;
   }
+  yield* endOfStream(finish === null ? null : finish === "length" ? "length" : "ok");
+}
+
+/**
+ * 回答被截断时追加在末尾的说明（finish_reason = length / stop_reason = max_tokens）。
+ * 以前截断是静默的：页面显示半句话，看起来像讲完了（2026-11-15 用户报告）。
+ */
+export const TRUNCATED_NOTICE = "\n\n（回答超出了长度上限，后面的内容没有显示。可以换个问法再问一次。）";
+
+/**
+ * 流结束时的判定：
+ * - 正常结束 → 什么也不做；
+ * - 到了长度上限 → 吐一句说明，让用户知道后面还有；
+ * - 连接断了、没收到结束标记 → 抛 502（可重试）。上游的 streamTurns 会先发 STREAM_RESET
+ *   让前端清屏，再完整重来一次，而不是把半截回答当成讲完了。
+ */
+function* endOfStream(end: "ok" | "length" | null): Generator<string> {
+  if (end === "length") {
+    yield TRUNCATED_NOTICE;
+    return;
+  }
+  if (end === null) throw new ProviderError("模型的回答中途断开了（没有收到结束标记）", 502);
 }
 
 /** Anthropic Messages API 的 SSE：content_block_delta.delta.text 才是正文 */
@@ -110,7 +143,8 @@ async function* anthropicStream(
     },
     body: JSON.stringify({
       model: p.model,
-      max_tokens: opts.maxTokens ?? 1200,
+      // Claude 接口的 max_tokens 是必填项：不设上限时给一个远超讲解长度的值
+      max_tokens: opts.maxTokens === null ? CLAUDE_UNCAPPED_MAX_TOKENS : (opts.maxTokens ?? 1200),
       temperature: opts.temperature ?? 0.3,
       ...(system ? { system } : {}),
       messages,
@@ -128,6 +162,9 @@ async function* anthropicStream(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  /** message_stop 到了才算正常结束；message_delta 的 stop_reason = max_tokens 表示被截断 */
+  let end: "ok" | "length" | null = null;
+  let stopReason: string | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -143,7 +180,7 @@ async function* anthropicStream(
         if (!payload || payload === "[DONE]") continue;
         let evt: {
           type?: string;
-          delta?: { type?: string; text?: string };
+          delta?: { type?: string; text?: string; stop_reason?: string | null };
           error?: { type?: string; message?: string };
         };
         try {
@@ -160,9 +197,12 @@ async function* anthropicStream(
         if (evt.type === "content_block_delta" && evt.delta?.text) {
           yield evt.delta.text;
         }
+        if (evt.type === "message_delta" && evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+        if (evt.type === "message_stop") end = stopReason === "max_tokens" ? "length" : "ok";
       }
     }
   }
+  yield* endOfStream(end);
 }
 
 export function streamChat(
@@ -186,7 +226,7 @@ export async function completeChat(
   opts: ChatOptions = {},
 ): Promise<string> {
   const temperature = opts.temperature ?? 0.3;
-  const maxTokens = opts.maxTokens ?? 400;
+  const maxTokens = opts.maxTokens ?? 400; // 非流式调用都显式传上限，不支持 null
 
   // OpenAI SDK 分支与 Anthropic fetch 分支共用同一个 60 秒硬超时；
   // 超时抛 ProviderError，由 generateNoteNow 记为失败并进入冷却。
@@ -262,7 +302,7 @@ export async function completeJson(
   opts: ChatOptions = {},
 ): Promise<JsonChatResult> {
   const temperature = opts.temperature ?? 0.4;
-  const maxTokens = opts.maxTokens ?? 1800;
+  const maxTokens = opts.maxTokens ?? 1800; // 同上
 
   return runWithChatTimeout(
     async (signal): Promise<JsonChatResult> => {

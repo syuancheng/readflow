@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildSystemPrompt, buildUserMessage } from "../../src/lib/ai";
+import { buildSystemPrompt, buildUserMessage, streamExplain } from "../../src/lib/ai";
 import { SUGGESTION_PREFIX } from "../../src/lib/cards/suggestion";
 
 // 单测编译到 .unit/ 后 __dirname 会变，统一从仓库根（npm test 的工作目录）读快照
@@ -137,4 +137,34 @@ test("P34：个性化深度指引写明怎么用「最近的反馈」；关闭�
   const en = buildSystemPrompt("en", true, "steer", { personalized: true });
   assert.ok(en.includes("最近的反馈") && en.includes("follow the recent feedback"));
   assert.ok(!buildSystemPrompt("en", false, "steer", { personalized: false }).includes("最近的反馈"));
+});
+
+test("讲解请求不设输出上限：OpenAI 兼容接口的请求体里没有 max_tokens（2026-11-15）", async () => {
+  const original = globalThis.fetch;
+  let sent: Record<string, unknown> = {};
+  globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    const enc = new TextEncoder();
+    const chunk = (d: object) => `data: ${JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, ...d }] })}\n\n`;
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(enc.encode(chunk({ delta: { content: "释义：好" }, finish_reason: null })));
+        c.enqueue(enc.encode(chunk({ delta: {}, finish_reason: "stop" })));
+        c.enqueue(enc.encode("data: [DONE]\n\n"));
+        c.close();
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }) as typeof fetch;
+  try {
+    let out = "";
+    for await (const s of streamExplain(
+      { word: "artifact", context: "x", detailed: true, personalized: true },
+      { settings: { "ai.activeProvider": "deepseek", "ai.deepseek.apiKey": "sk-test" }, env: {} },
+    )) out += s;
+    assert.equal(out, "释义：好");
+    assert.equal("max_tokens" in sent, false);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

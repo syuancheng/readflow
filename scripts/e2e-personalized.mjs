@@ -73,6 +73,10 @@ let badNoteMode = false;
 // P34：讲解流的内容与延迟可调（测句子地图特征、测中途中止）
 let explainParts = ["释义：测试", "\n假模型讲解"];
 let streamDelayMs = 0;
+// 2026-11-15 截断修复：cutNext = 接下来几次讲解只发前半段就断开（不发结束标记）；
+// lengthNext = 下一次讲解以 finish_reason = length 结束（到了长度上限）
+let cutNext = 0;
+let lengthNext = false;
 const fake = http.createServer((req, res) => {
   if (req.url.split("?")[0] === "/v1/chat/completions") {
     let buf = "";
@@ -93,13 +97,20 @@ const fake = http.createServer((req, res) => {
         }));
         return;
       }
-      modelCalls.push({ messages: body.messages ?? [], stream: true });
+      modelCalls.push({ messages: body.messages ?? [], stream: true, hasMaxTokens: "max_tokens" in body });
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
-      for (const part of explainParts) {
+      const cut = cutNext > 0;
+      if (cut) cutNext--;
+      const parts = cut ? explainParts.slice(0, 1) : explainParts;
+      for (const part of parts) {
         if (streamDelayMs) await new Promise((r) => setTimeout(r, streamDelayMs));
         if (res.destroyed) return;
         res.write(`data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: { content: part }, finish_reason: null }] })}\n\n`);
       }
+      if (cut) return res.end(); // 连接断开：没有结束标记
+      const finish = lengthNext ? "length" : "stop";
+      lengthNext = false;
+      res.write(`data: ${JSON.stringify({ id: "stop", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\n`); // 真实模型都会发结束标记，缺了会被当成「中途断开」
       res.write("data: [DONE]\n\n");
       res.end();
     });
@@ -1043,6 +1054,27 @@ try {
     JSON.stringify({ e31: exists("old-e31-done"), e29: exists("old-e29-done"), f31: exists("f-e31"), e91: exists("old-e91"), l89: exists("old-l89"), l91: exists("old-l91") }));
   const lAfter = await api("/api/learner", { cookie: owner });
   check("P9 删除后学习档案与讲解正常", lAfter.status === 200 && (await explain(owner)).status === 200);
+
+  // ============ T. 2026-11-15：回答不能再静默停在半句话 ============
+  explainParts = ["释义：完整回答的第一段。", "第二段：另外，make 这里是使役结构。", "\n🧩 句子地图在最后"];
+  cutNext = 1; // 第一次只发第一段就断开，没有结束标记
+  const callsBeforeCut = modelCalls.length;
+  const cutRes = await explain(owner, { word: "generic", textId: pText, anchor: pAnchor });
+  const cutId = cutRes.headers.get("x-rf-answer-id");
+  const shown = (cutRes.text.split("\u0000RF_RESET\u0000").pop() ?? "");
+  const savedCut = q("select answer_text from explain_answers where event_id = ?", cutId)[0]?.answer_text ?? "";
+  check("T1 模型连接中途断开：自动重来一次，前端拿到完整回答（不是停在半句话）",
+    modelCalls.length - callsBeforeCut === 2 && shown === explainParts.join("") && cutRes.text.includes("\u0000RF_RESET\u0000"),
+    `调用=${modelCalls.length - callsBeforeCut} 显示=${JSON.stringify(shown.slice(-20))}`);
+  check("T2 存下的回答原文是重来后的完整一段，不夹带前一次的半截和重置标记",
+    savedCut === explainParts.join(""), JSON.stringify(savedCut.slice(0, 40)));
+  lengthNext = true;
+  const lenRes = await explain(owner);
+  check("T3 到了长度上限：回答末尾明确写出「超出了长度上限」，不装作讲完了",
+    lenRes.text.startsWith(explainParts.join("")) && lenRes.text.includes("回答超出了长度上限"), lenRes.text.slice(-40));
+  check("T4 讲解请求不带 max_tokens（不设输出上限，回答多长显示多长）",
+    modelCalls.length > 0 && modelCalls.every((c) => c.hasMaxTokens === false), `带上限的调用=${modelCalls.filter((c) => c.hasMaxTokens).length}`);
+  explainParts = ["释义：测试", "\n假模型讲解"];
 
   await ctxOwner.close();
 } catch (err) {

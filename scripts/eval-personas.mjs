@@ -68,6 +68,7 @@ const fake = http.createServer((req, res) => {
       calls.push({ system, user, answer });
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
       res.write(`data: ${JSON.stringify({ id: "eval", object: "chat.completion.chunk", created: 0, model: "eval", choices: [{ index: 0, delta: { content: answer }, finish_reason: null }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ id: "stop", object: "chat.completion.chunk", created: 0, model: "fake-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`); // 真实模型都会发结束标记，缺了会被当成「中途断开」
       res.write("data: [DONE]\n\n");
       return res.end();
     }
