@@ -1962,6 +1962,8 @@ body {
   border-radius: var(--rf-radius-md);
   background: var(--rf-gray-0);
 }
+/* 亲密性：同一区块内多张卡片之间留 24px，避免上下 1px 边框叠成一条双线 */
+.st-section > .st-panel + .st-panel { margin-top: 24px; }
 .st-panel-row {
   display: flex;
   align-items: flex-start;
