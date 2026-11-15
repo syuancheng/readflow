@@ -199,16 +199,40 @@ function parseCard(v: unknown): CardSpec | null {
 }
 
 /**
+ * 宽松地取出模型输出里的 JSON 对象：先原样解析；不行就去掉 ```json 代码块围栏，
+ * 或截取第一个「{」到最后一个「}」之间的部分再解析（有的模型会在 JSON 前后加一句话）。
+ * 都不行返回 undefined。纯函数，导出供单测与选择题复核共用。
+ */
+export function parseJsonLoose(raw: string): unknown {
+  const tryParse = (t: string): unknown => {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return undefined;
+    }
+  };
+  const text = raw.trim();
+  const direct = tryParse(text);
+  if (direct !== undefined) return direct;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
+  if (fenced) {
+    const v = tryParse(fenced);
+    if (v !== undefined) return v;
+  }
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) return tryParse(text.slice(start, end + 1));
+  return undefined;
+}
+
+/**
  * 解析模型的出题输出。要求顶层是 `{"cards": [...]}`，1~3 张（PRD Q6）。
  * 未知字段丢弃；任何必要字段类型不对 → 整体失败（按失败重出处理）。
  */
 export function parseCardGen(raw: string): ParseResult {
-  let v: unknown;
-  try {
-    v = JSON.parse(raw);
-  } catch {
-    return { ok: false, reason: "模型没有返回合法的 JSON" };
-  }
+  if (!raw.trim()) return { ok: false, reason: "模型返回了空内容" };
+  const v = parseJsonLoose(raw);
+  if (v === undefined) return { ok: false, reason: "模型没有返回合法的 JSON" };
   if (!v || typeof v !== "object") return { ok: false, reason: "模型返回的顶层不是对象" };
   const cardsRaw = (v as Record<string, unknown>).cards;
   if (!Array.isArray(cardsRaw) || cardsRaw.length === 0) {

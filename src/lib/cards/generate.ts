@@ -14,7 +14,7 @@ import { completeJson, type ChatTurn } from "@/lib/providers";
 import { explainTurns } from "@/lib/ai";
 import { inlineGloss } from "@/lib/gloss";
 import { learnerBlockFor, getLearner, surveyOf } from "@/lib/learner-store";
-import { parseCardGen, type CardSpec } from "./spec";
+import { parseCardGen, parseJsonLoose, type CardSpec } from "./spec";
 import { validateCard, type ValidateCtx } from "./validate";
 import { renderCardChecked } from "./render";
 import { buildCardPrompt } from "./prompt";
@@ -51,7 +51,11 @@ type Who = { id: string; isOwner: boolean };
 type Provider = ResolvedProvider;
 type Usage = { promptTokens?: number; completionTokens?: number; cacheHitTokens?: number };
 
-const GEN_OPTS = { temperature: 0.4, maxTokens: 1800 } as const;
+/**
+ * 出题不设输出上限（2026-11-15）：JSON 被上限截断就整个作废（报「模型没有返回合法的 JSON」），
+ * 长度由出题指令（1~3 张卡）控制。正常一组约 700–800 token。
+ */
+const GEN_OPTS = { temperature: 0.4, maxTokens: null } as const;
 
 // ---------- 入口 ----------
 
@@ -132,13 +136,28 @@ async function runGenerate(
   // 1) 出题；解析失败重出一次（spec §7.3 第 8 步）
   let usage: Usage = {};
   let parsed = parseCardGen("");
+  let finish: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await completeJson(provider, run.messages, GEN_OPTS);
     usage = res.usage;
+    finish = res.finish;
     parsed = parseCardGen(res.text);
     if (parsed.ok) break;
+    // 留下现场：以后再遇到「没有返回合法的 JSON」，服务日志里能看到模型到底写了什么
+    console.error("[cards] 出题输出解析失败:", {
+      setId,
+      attempt,
+      reason: parsed.reason,
+      finish: res.finish,
+      completionTokens: res.usage.completionTokens,
+      length: res.text.length,
+      head: res.text.slice(0, 200),
+      tail: res.text.slice(-200),
+    });
   }
-  if (!parsed.ok) return { ok: false, reason: parsed.reason };
+  if (!parsed.ok) {
+    return { ok: false, reason: finish === "length" ? "模型的输出到了长度上限，JSON 没写完" : parsed.reason };
+  }
 
   // 2) 校验 → 重出 → 选择题复核
   const settled: { spec: CardSpec; needsReview: string | null }[] = [];
@@ -324,7 +343,7 @@ async function redo(provider: Provider, run: Run, prev: CardSpec, reason: string
     },
   ];
   try {
-    const res = await completeJson(provider, turns, { temperature: 0.4, maxTokens: 1200 });
+    const res = await completeJson(provider, turns, GEN_OPTS);
     const parsed = parseCardGen(res.text);
     return parsed.ok ? withStyle(parsed.cards[0], run.family) : null;
   } catch (err) {
@@ -358,7 +377,7 @@ export async function reviewChoice(
   ];
   try {
     const res = await completeJson(provider, ask, { temperature: 0, maxTokens: 200 });
-    return samePossible(JSON.parse(res.text), expected) ? "ok" : "mismatch";
+    return samePossible(parseJsonLoose(res.text), expected) ? "ok" : "mismatch";
   } catch {
     return "mismatch";
   }

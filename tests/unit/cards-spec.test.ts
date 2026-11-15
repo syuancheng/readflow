@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCardGen } from "../../src/lib/cards/spec";
+import { parseCardGen, parseJsonLoose } from "../../src/lib/cards/spec";
 import { baseChoiceCard, baseClozeCard } from "./cards-fixtures";
 
 const wrap = (...cards: unknown[]) => JSON.stringify({ cards });
@@ -114,4 +114,35 @@ test("可选块：hints/explanation 为 null 当作没有；audio 保留；多�
     assert.deepEqual((c.back.answer[0] as { emphasis?: string[] }).emphasis, ["a"]);
     assert.equal((c.front[1] as { multi?: boolean }).multi, true);
   }
+});
+
+// ---------- 2026-11-15：正式服务报「模型没有返回合法的 JSON」 ----------
+
+test("模型把 JSON 包在 ```json 代码块里 / 前后多写一句话 → 仍能解析", () => {
+  const body = wrap(baseClozeCard());
+  for (const raw of ["```json\n" + body + "\n```", "```\n" + body + "\n```", "好的，卡片如下：\n" + body + "\n希望有帮助。"]) {
+    const r = parseCardGen(raw);
+    assert.equal(r.ok, true, raw.slice(0, 20));
+  }
+});
+
+test("JSON 被截断（写到一半）→ 仍然失败，不会把半截当成功", () => {
+  const body = wrap(baseClozeCard(), baseClozeCard());
+  const r = parseCardGen(body.slice(0, Math.floor(body.length * 0.7)));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.reason, "模型没有返回合法的 JSON");
+});
+
+test("空内容单独给原因", () => {
+  const r = parseCardGen("   ");
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.reason, "模型返回了空内容");
+});
+
+test("parseJsonLoose：原样 / 代码块 / 夹在文字里都取得出；取不出返回 undefined", () => {
+  assert.deepEqual(parseJsonLoose('{"possible":[1]}'), { possible: [1] });
+  assert.deepEqual(parseJsonLoose('```json\n{"possible":[2]}\n```'), { possible: [2] });
+  assert.deepEqual(parseJsonLoose('答案：{"possible":[1,3]}。'), { possible: [1, 3] });
+  assert.equal(parseJsonLoose("没有 JSON"), undefined);
+  assert.equal(parseJsonLoose('{"possible":[1'), undefined);
 });
