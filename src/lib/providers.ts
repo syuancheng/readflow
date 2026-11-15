@@ -289,6 +289,11 @@ export async function completeChat(
  */
 export type JsonChatResult = {
   text: string;
+  /**
+   * 模型为什么停下：stop = 写完了；length = 到了输出上限（JSON 多半没写完）；
+   * 其它值原样透传；接口没给时为 null。出题失败时据此给出准确原因。
+   */
+  finish: string | null;
   usage: {
     promptTokens?: number;
     completionTokens?: number;
@@ -302,7 +307,8 @@ export async function completeJson(
   opts: ChatOptions = {},
 ): Promise<JsonChatResult> {
   const temperature = opts.temperature ?? 0.4;
-  const maxTokens = opts.maxTokens ?? 1800; // 同上
+  // null = 不设输出上限（出题用：JSON 被截断就整个作废，宁可让模型写完）
+  const maxTokens = opts.maxTokens === undefined ? 1800 : opts.maxTokens;
 
   return runWithChatTimeout(
     async (signal): Promise<JsonChatResult> => {
@@ -312,7 +318,7 @@ export async function completeJson(
             model: p.model,
             messages: turns,
             temperature,
-            max_tokens: maxTokens,
+            ...(maxTokens === null ? {} : { max_tokens: maxTokens }),
             response_format: { type: "json_object" },
           },
           { signal },
@@ -327,6 +333,7 @@ export async function completeJson(
           | undefined;
         return {
           text: res.choices[0]?.message?.content?.trim() ?? "",
+          finish: res.choices[0]?.finish_reason ?? null,
           usage: {
             promptTokens: u?.prompt_tokens,
             completionTokens: u?.completion_tokens,
@@ -350,7 +357,7 @@ export async function completeJson(
         },
         body: JSON.stringify({
           model: p.model,
-          max_tokens: maxTokens,
+          max_tokens: maxTokens ?? CLAUDE_UNCAPPED_MAX_TOKENS,
           temperature,
           ...(system ? { system: `${system}\n\nOutput only valid JSON.` } : { system: "Output only valid JSON." }),
           messages,
@@ -363,10 +370,13 @@ export async function completeJson(
       }
       const data = (await res.json()) as {
         content?: { text?: string }[];
+        stop_reason?: string | null;
         usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number };
       };
       return {
         text: (data.content ?? []).map((c) => c.text ?? "").join("").trim(),
+        // 与 OpenAI 的叫法对齐：max_tokens → length，end_turn → stop
+        finish: data.stop_reason === "max_tokens" ? "length" : data.stop_reason === "end_turn" ? "stop" : (data.stop_reason ?? null),
         usage: {
           promptTokens: data.usage?.input_tokens,
           completionTokens: data.usage?.output_tokens,

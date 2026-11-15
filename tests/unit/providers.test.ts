@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { streamChat, testProvider, ProviderError, TRUNCATED_NOTICE, CLAUDE_UNCAPPED_MAX_TOKENS } from "../../src/lib/providers";
+import { streamChat, testProvider, ProviderError, TRUNCATED_NOTICE, CLAUDE_UNCAPPED_MAX_TOKENS, completeJson } from "../../src/lib/providers";
 import { isRetryableError } from "../../src/lib/retry";
 import type { ResolvedProvider } from "../../src/lib/config";
 
@@ -242,4 +242,44 @@ test("OpenAI 兼容流：显式给了上限 / 没给（默认 1200）时照常�
 
 test("Claude 流：max_tokens 是必填，null 时用 CLAUDE_UNCAPPED_MAX_TOKENS", async () => {
   assert.equal((await capturedBody(claude, null)).max_tokens, CLAUDE_UNCAPPED_MAX_TOKENS);
+});
+
+// ---------- 2026-11-15：出题（JSON）调用 ----------
+
+async function jsonCall(p: ResolvedProvider, maxTokens: number | null | undefined, reply: object) {
+  const original = globalThis.fetch;
+  let sent: Record<string, unknown> = {};
+  globalThis.fetch = (async (_u: unknown, init?: RequestInit) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const out = await completeJson(p, [{ role: "user", content: "json" }], maxTokens === undefined ? {} : { maxTokens });
+    return { sent, out };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+const oaReply = (content: string, finish: string) => ({
+  id: "x", object: "chat.completion", created: 0, model: "m",
+  choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: finish }],
+  usage: { prompt_tokens: 1, completion_tokens: 2 },
+});
+
+test("completeJson：maxTokens = null → 不带 max_tokens；带回 finish（stop / length）", async () => {
+  const a = await jsonCall(deepseek, null, oaReply('{"cards":[]}', "stop"));
+  assert.equal("max_tokens" in a.sent, false);
+  assert.equal(a.out.finish, "stop");
+  const b = await jsonCall(deepseek, 200, oaReply('{"cards":[', "length"));
+  assert.equal(b.sent.max_tokens, 200);
+  assert.equal(b.out.finish, "length");
+});
+
+test("completeJson（Claude）：null 时用 CLAUDE_UNCAPPED_MAX_TOKENS；stop_reason 对齐成 stop / length", async () => {
+  const a = await jsonCall(claude, null, { content: [{ text: "{}" }], stop_reason: "end_turn" });
+  assert.equal(a.sent.max_tokens, CLAUDE_UNCAPPED_MAX_TOKENS);
+  assert.equal(a.out.finish, "stop");
+  const b = await jsonCall(claude, 100, { content: [{ text: "{" }], stop_reason: "max_tokens" });
+  assert.equal(b.out.finish, "length");
 });

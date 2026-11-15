@@ -73,7 +73,7 @@ const leakyCard = () => ({
 });
 
 const calls = []; // { kind: 'explain'|'cards'|'review'|'redo'|'regen', messages }
-let cardsMode = "good";          // good | bad (永远不合格) | garbage (非 JSON) | leak-then-good
+let cardsMode = "good";          // good | bad (永远不合格) | garbage (非 JSON) | leak-then-good | fenced (JSON 包在代码块里) | truncated (到长度上限、JSON 没写完)
 let leakServed = false;
 let reviewMode = "ok";           // ok | multi (说有多个可行答案)
 let slowMs = 0;
@@ -97,7 +97,7 @@ const fake = http.createServer((req, res) => {
     try { body = JSON.parse(buf); } catch { /* 畸形请求 */ }
     const messages = body.messages ?? [];
     const kind = classify(messages);
-    calls.push({ kind, messages, stream: body.stream === true, json: body.response_format?.type === "json_object" });
+    calls.push({ kind, messages, stream: body.stream === true, json: body.response_format?.type === "json_object", hasMaxTokens: "max_tokens" in body });
 
     if (body.stream === true) {
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" });
@@ -116,6 +116,10 @@ const fake = http.createServer((req, res) => {
       content = JSON.stringify({ possible: reviewMode === "ok" ? [1] : [1, 2] });
     } else if (cardsMode === "garbage") {
       content = "这不是 JSON";
+    } else if (cardsMode === "fenced" && kind === "cards") {
+      content = "```json\n" + JSON.stringify({ cards: [choiceCard(), layeredCard()] }) + "\n```";
+    } else if (cardsMode === "truncated" && kind === "cards") {
+      content = JSON.stringify({ cards: [choiceCard(), layeredCard()] }).slice(0, 120);
     } else if (cardsMode === "bad") {
       content = JSON.stringify({ cards: [leakyCard()] });
     } else if (cardsMode === "leak-then-good" && kind === "cards" && !leakServed) {
@@ -129,7 +133,7 @@ const fake = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
       id: "f", object: "chat.completion", created: 0, model: "fake-model",
-      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: cardsMode === "truncated" && kind === "cards" ? "length" : "stop" }],
       usage: { prompt_tokens: 1000, completion_tokens: 200, prompt_cache_hit_tokens: 800 },
     }));
   });
@@ -414,6 +418,23 @@ try {
   check("J3 生成中就已占用一个名额（并发请求不会一起冲过上限）", usageOf(friendId) === 1, `usage=${usageOf(friendId)}`);
   const rOk = await waitSet(friend, gOk.data.setId);
   check("J4 成功后计 1 次", rOk?.set?.status === "ready" && usageOf(friendId) === 1);
+
+  // 2026-11-15：正式服务报「模型没有返回合法的 JSON」
+  cardsMode = "fenced";
+  const gFence = await api("/api/cards/generate", { cookie: friend, method: "POST", body: { contextId: f.contextId, force: true } });
+  const rFence = await waitSet(friend, gFence.data.setId);
+  check("J2b 模型把 JSON 包在 ```json 代码块里：照样做成卡片", rFence?.set?.status === "ready" && (rFence?.cards?.length ?? 0) > 0,
+    `status=${rFence?.set?.status} error=${rFence?.set?.error}`);
+  cardsMode = "truncated";
+  const gTrunc = await api("/api/cards/generate", { cookie: friend, method: "POST", body: { contextId: f.contextId, force: true } });
+  const rTrunc = await waitSet(friend, gTrunc.data.setId);
+  check("J2c 到了长度上限、JSON 没写完：失败原因写明「到了长度上限」，服务日志留下模型输出",
+    rTrunc?.set?.status === "failed" && /长度上限/.test(rTrunc?.set?.error ?? "") && serverLog.includes("[cards] 出题输出解析失败"),
+    `error=${rTrunc?.set?.error}`);
+  const cardCalls = calls.filter((c) => c.kind === "cards" || c.kind === "redo" || c.kind === "regen");
+  check("J2d 出题、重出、换一道的请求都不带 max_tokens（不设输出上限）",
+    cardCalls.length > 0 && cardCalls.every((c) => c.hasMaxTokens === false), `带上限=${cardCalls.filter((c) => c.hasMaxTokens).length}/${cardCalls.length}`);
+  cardsMode = "good";
 
   dbRun("UPDATE daily_usage SET count = 30 WHERE user_id = ? AND kind = 'card'", friendId);
   const f2 = await seedContext(friend, "Friend text 2");
