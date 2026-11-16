@@ -97,6 +97,19 @@ function shownText(t: { text: string; status: string }): string {
   return body.replace(/\n+制(卡(建(议(：.*)?)?)?)?$/, "");
 }
 
+/**
+ * 追问标题的徽章：按问题类型给 emoji + 颜色，让不同身份的回答一眼可辨。
+ * 领域专家用紫色（与 AI 色一致，区别于绿色「AI 释义」），句子结构等用蓝色。
+ * 这里按 ask 文本而不是 req.askKind 判断——回看历史时对话串只还原文本，req 已丢失。
+ */
+function askTurnBadge(ask: string): { emoji: string; label: string; tone: string } {
+  if (ask.includes("专业角度")) return { emoji: "🛠️", label: "专业视角", tone: "duo-badge-ai" };
+  if (ask.includes("句子结构")) return { emoji: "🧩", label: "句子结构", tone: "duo-badge-blue" };
+  if (ask.includes("整句")) return { emoji: "📖", label: "整句讲解", tone: "duo-badge-blue" };
+  if (ask.includes("例句")) return { emoji: "💬", label: "再给例句", tone: "duo-badge-blue" };
+  return { emoji: "✨", label: "追问", tone: "" };
+}
+
 function isFeedback(v: unknown): v is Feedback {
   return v === "shallow" || v === "right" || v === "deep";
 }
@@ -1958,11 +1971,18 @@ function PickCard({
       {/* AI 对话串：每段一个问题，新回答追加在下面，不覆盖词典和之前的回答 */}
       {turns.map((t, i) => {
         const failed = t.status === "error" || (t.status === "done" && isNotAGloss(t.text));
+        // P40：追问带身份徽章——领域专家是紫色「🛠️ 专业视角」，与绿色「AI 释义」一眼可分
+        const badge = t.ask ? askTurnBadge(t.ask) : null;
         return (
           <div className="mt-4" key={i}>
-            <div className="flex items-center gap-2 mb-2">
-              {t.ask ? (
-                <span className="rf-turn-ask">你问：{t.ask}</span>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {badge ? (
+                <>
+                  <span className={`duo-badge ${badge.tone}`}>
+                    {badge.emoji} {badge.label}
+                  </span>
+                  <span className="rf-turn-ask">你问：{t.ask}</span>
+                </>
               ) : (
                 <span className="duo-badge duo-badge-green">AI 释义</span>
               )}
