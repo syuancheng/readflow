@@ -8,7 +8,7 @@ import { formatFeedbackLine, type RecentFeedbackItem } from "./recent-feedback";
 
 /** 每天几点整理（北京时间） */
 export const NIGHTLY_HOUR = 3;
-/** 自上次整理以来，新的反馈 + 查词 + 讲解合计满几次才整理 */
+/** 自上次整理以来，新的提问 + 反馈合计满几次才整理（一次划选算一次提问，见 learner-store 的 newEventsSinceNote） */
 export const NIGHTLY_MIN_NEW_EVENTS = 10;
 /** 讲解记录（含反馈、回答原文）：已整理过的保留 30 天 */
 export const EXPLAIN_RETENTION_DAYS = 30;

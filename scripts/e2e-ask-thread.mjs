@@ -1,5 +1,6 @@
 /**
- * P26 回归：中文悬停才显示 / 同句逐级加深 / 「问 AI」对话串追加不覆盖。
+ * P26 回归：中文悬停才显示 / 「问 AI」对话串追加不覆盖。
+ * P36：同一句问了几次不再决定要不要问 AI——词典查得到就不自动问，由学生点「问 AI」。
  * 隔离库 + 临时端口（3124），跑完删库；/api/explain 由 Playwright 拦截返回模拟回答，
  * 不调真实模型、不花钱，同时能检查每次请求带了什么。需要先 npm run build。
  *
@@ -179,37 +180,56 @@ try {
   card = await cardText();
   check("6 回看：三段追问原样还原，零请求", asks.length === before && (card.match(/你问：/g) ?? []).length === 3, `新请求=${asks.length - before}`);
 
-  // ---- 7. 同句第二个词（词典查得到）：自动追加加深讲解 ----
+  // ---- 7. P36：同句第二个词（词典查得到）：不再自动问 AI，由学生自己点「问 AI」 ----
   await page.keyboard.press("Escape");
   b = await boxOf("tracks");
   const n7 = asks.length;
+  const lookups7 = q("select count(*) n from explain_events where kind = 'lookup'")?.n ?? 0;
   await page.mouse.click(b.x, b.y);
   await page.waitForTimeout(1500);
-  const a7 = asks.slice(n7)[0];
   card = await cardText();
+  const lookups7b = q("select count(*) n from explain_events where kind = 'lookup'")?.n ?? 0;
   check(
-    "7 同句第二个词：词典查得到也自动问老师，带上第几次和之前问过的词",
-    a7?.signals?.repeatCount === 2 && a7.signals.priorAsks?.some((p) => p.selection === "database") && card.includes("AI 释义"),
-    `repeatCount=${a7?.signals?.repeatCount} prior=${JSON.stringify(a7?.signals?.priorAsks)}`,
+    "7 同句第二个词、词典查得到：不调模型（问了几次不再决定要不要问 AI）；这次划选照样记成一次提问",
+    asks.length === n7 && !card.includes("AI 释义") && lookups7b === lookups7 + 1,
+    `新请求=${asks.length - n7} 查词事件 +${lookups7b - lookups7}`,
+  );
+  await askBtn.click();
+  const chips7 = await page.locator(".rf-ask-chip").allInnerTexts();
+  check(
+    "7b 「问 AI」里有「这个词在这句里什么意思」，没有「只讲这个词，不讲整句」",
+    chips7.includes("这个词在这句里什么意思") && !chips7.some((c) => c.includes("只讲这个词")),
+    chips7.join(" / "),
+  );
+  await page.locator('.rf-ask-chip:has-text("这个词在这句里什么意思")').click();
+  await page.waitForTimeout(1200);
+  const a7 = asks.slice(n7)[0];
+  check(
+    "7c 自己点了才问：请求不带「第几次」，但带上之前问过的词（只用来避免重复）",
+    a7 && a7.signals?.priorAsks?.some((p) => p.selection === "database") && a7.askKind === "default",
+    `prior=${JSON.stringify(a7?.signals?.priorAsks)} askKind=${a7?.askKind}`,
   );
 
-  // ---- 8. 刷新页面后查第三个词：计数不丢 ----
+  // ---- 8. 刷新后同句第三个词：仍然不自动问 ----
   await open();
   b = await boxOf("history");
   const n8 = asks.length;
   await page.mouse.click(b.x, b.y);
   await page.waitForTimeout(1500);
-  const a8 = asks.slice(n8)[0];
-  check("8 刷新后同句第三个词：计数接着算（来自已存记录）", a8?.signals?.repeatCount === 3, `repeatCount=${a8?.signals?.repeatCount}`);
+  check("8 刷新后同句第三个词、词典查得到：仍然不调模型", asks.length === n8, `新请求=${asks.length - n8}`);
 
-  // ---- 9. 换到另一句：从 1 开始 ----
+  // ---- 9. 词典查不到的短语：照旧自动问（不然右栏是空的） ----
   await page.keyboard.press("Escape");
-  b = await boxOf("crossover");
+  const from = await boxOf("skill");
+  const to = await boxOf("database");
   const n9 = asks.length;
-  await page.mouse.click(b.x, b.y);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await page.mouse.up();
   await page.waitForTimeout(1500);
   const a9 = asks.slice(n9)[0];
-  check("9 另一句：重新从第 1 次算", !a9 || a9.signals?.repeatCount === 1, a9 ? `repeatCount=${a9.signals?.repeatCount}` : "词典查得到，未调模型");
+  check("9 拖选短语（词典没有）：自动问 AI", a9?.word === "skill database" && a9.askKind === "auto", `word=${a9?.word} askKind=${a9?.askKind}`);
 
   await browser.close();
 } finally {

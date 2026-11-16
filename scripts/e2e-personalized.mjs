@@ -26,11 +26,11 @@ const TMP = path.join(ROOT, ".verify", "personalized");
 const DB = path.join(TMP, "readflow.db");
 const SHOTS = path.join(ROOT, ".verify", "personas", "shots");
 const LEGACY_ZH = fs.readFileSync(
-  path.join(ROOT, "tests/unit/fixtures/ai-system-zh-before-p32.txt"),
+  path.join(ROOT, "tests/unit/fixtures/ai-system-zh-p36.txt"),
   "utf8",
 );
 
-// P33：系统提示词末尾多了制卡建议段（有意追加），比对 P32 快照时先去掉
+// P33：系统提示词末尾多了制卡建议段（有意追加），比对快照时先去掉（P36 起快照是固定深度版）
 const stripCardRule = (p) => p.replace(/\n*【制卡建议（可选，只在最后一行）】[\s\S]*$/, "").replace(/\n+$/, "");
 
 let pass = 0, fail = 0;
@@ -419,7 +419,7 @@ try {
 
   // 环境变量强制关闭：重启太重，这里只断言纯函数（单测已覆盖），接口层保持设置值
 
-  // ===== E+. 「同句第几次」：有档案时不再出现，没有档案时作为兜底 =====
+  // ===== E+. 「同句第几次」：P36 起有没有档案都不再出现 =====
   const REPEAT_SIGNALS = { source: "word", position: "middle", selectionWords: 1, sentenceWords: 7, coverage: 0.15, sentence: "The build produced a useful artifact.", sentenceStart: 0, sentenceEnd: 37, repeatCount: 2, priorAsks: [{ selection: "build" }] };
   await explain(owner, { signals: REPEAT_SIGNALS });
   const sysHas = lastCall().messages[0]?.content ?? "";
@@ -432,9 +432,9 @@ try {
   await explain(friendCookie, { signals: REPEAT_SIGNALS });
   const sysNo = lastCall().messages[0]?.content ?? "";
   const userNo = lastCall().messages[1]?.content ?? "";
-  check("E5 没有档案（跳过问卷、无查词记录）：退回旧规则——提示词与 P32 前逐字相同，观察里带「同句连续请教: 第 2 次」",
-    stripCardRule(sysNo) === LEGACY_ZH.replace(/\n+$/, "") && !userNo.includes("学生档案") && userNo.includes("同句连续请教: 第 2 次"),
-    `系统相同=${stripCardRule(sysNo) === LEGACY_ZH.replace(/\n+$/, "")} 含档案=${userNo.includes("学生档案")} 含次数=${userNo.includes("同句连续请教: 第 2 次")}`);
+  check("E5 没有档案（跳过问卷、无查词记录）：固定深度——提示词与 P36 快照逐字相同，观察里没有「同句第几次」，之前问过的选区仍在",
+    stripCardRule(sysNo) === LEGACY_ZH.replace(/\n+$/, "") && !userNo.includes("学生档案") && !userNo.includes("同句连续请教") && userNo.includes("之前问过的选区"),
+    `系统相同=${stripCardRule(sysNo) === LEGACY_ZH.replace(/\n+$/, "")} 含档案=${userNo.includes("学生档案")} 含次数=${userNo.includes("同句连续请教")}`);
 
   // ===== F. 设置 →「学习档案」面板截图 =====
   await ownerPage.goto(BASE, { waitUntil: "networkidle" });
@@ -477,8 +477,8 @@ try {
     d.close();
   }
   const learner2 = await api("/api/learner", { cookie: owner });
-  check("G1 30 次查词后给出行为推断，依据写着「最近 30 次查词」",
-    learner2.data?.stats?.lookups === 30 && /最近 30 次查词/.test(learner2.data?.level?.basisText ?? ""),
+  check("G1 30 次提问后给出行为推断，依据写着「最近 30 次提问」",
+    learner2.data?.stats?.lookups === 30 && /最近 30 次提问/.test(learner2.data?.level?.basisText ?? ""),
     `lookups=${learner2.data?.stats?.lookups} basis=${learner2.data?.level?.basisText}`);
   const lookupEvents = q("select count(*) n from explain_events where kind = 'lookup' and text_id = ?", textId)[0].n;
   check("G2 查词事件带 text_id / context_id，且归属本人", lookupEvents === 30,
@@ -662,17 +662,25 @@ try {
     hLearner.data?.note === hRow.note && typeof hLearner.data?.noteUpdatedAt === "number" && hLearner.data?.noteUpdateKind === "nightly",
     `kind=${hLearner.data?.noteUpdateKind}`);
 
-  // 门槛：刚整理完再加 9 次查词 → 不整理；第 10 次后才整理
+  // 门槛：刚整理完再加 9 次提问 → 不整理；第 10 次后才整理。
+  // P36：一次划选算一次提问——这 9 次里有的自动问了 AI、有的自己点了「这个词在这句里什么意思」，
+  // 这些讲解属于同一次提问，不另算，所以加上它们也还是 9 次。
   {
     const d = new Database(DB);
     const ins = d.prepare("INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES (?, ?, 'lookup', 'reader', 'artifact', ?)");
-    d.transaction(() => { for (let i = 0; i < 9; i++) ins.run(`h8-lookup-${i}`, ownerId, Date.now() + 1000 + i); })();
+    const insAi = d.prepare("INSERT INTO explain_events (id, user_id, kind, ask_kind, via, word, created_at) VALUES (?, ?, 'explain', ?, 'reader', 'artifact', ?)");
+    d.transaction(() => {
+      for (let i = 0; i < 9; i++) {
+        ins.run(`h8-lookup-${i}`, ownerId, Date.now() + 1000 + i);
+        insAi.run(`h8-ai-${i}`, ownerId, i % 2 ? "auto" : "default", Date.now() + 1000 + i);
+      }
+    })();
     d.close();
   }
   const callsBefore9 = noteCalls.length;
   const at9 = profile().note_updated_at;
   await runNightly();
-  check("H8 新动静只有 9 次：当晚不整理（不调用模型，笔记时间不变）",
+  check("H8 新提问只有 9 次（另有 9 段同一处的自动 / 默认讲解，不另算）：当晚不整理（不调用模型，笔记时间不变）",
     noteCalls.length === callsBefore9 && profile().note_updated_at === at9, `调用=${noteCalls.length - callsBefore9}`);
   update("INSERT INTO explain_events (id, user_id, kind, via, word, created_at) VALUES ('h8-lookup-9', ?, 'lookup', 'reader', 'artifact', ?)", ownerId, Date.now() + 2000);
   const waiting = (await api("/api/learner", { cookie: owner })).data?.noteReason;

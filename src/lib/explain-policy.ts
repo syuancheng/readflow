@@ -32,19 +32,18 @@ export const NO_MODEL_NOTICE =
  * - `dictHit`：词典已经够用；
  * - `hasInitialGloss`：这条批注存过 AI 释义，回看时原样展示即可；
  * - `fromAnnotation`：点回正文里已存批注的绿色标记，用户只是想看一眼，不是在请教。
+ *
+ * 同一句里问了几次不参与判断（P36）。
  */
 export function shouldAutoExplain(input: {
   dictHit: boolean;
   hasInitialGloss: boolean;
   fromAnnotation: boolean;
-  /** 同一句里这是第几次请教（含本次）；缺省视为 1 */
-  repeatCount?: number;
 }): boolean {
   if (input.hasInitialGloss) return false;
   if (input.fromAnnotation) return false;
-  // P26：同一句查到第 2 个及以上选区，说明卡的不止一个词 —— 即使词典查得到，
-  // 也自动在词典下面追加老师的整句大意 / 句子结构，否则逐级加深永远不会发生。
-  if ((input.repeatCount ?? 1) >= 2) return true;
+  // P36：去掉 P26 的「同一句查到第 2 个选区就自动问 AI」。同一句问了几次不再决定要不要问 AI，
+  // 词典查得到时由学生自己点「问 AI」。
   if (input.dictHit) return false;
   return true;
 }

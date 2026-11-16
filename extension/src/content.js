@@ -586,7 +586,6 @@
     if (!s) return [];
     const isPhrase = /\s/.test(String(s.quote || "").trim());
     const hasDefault = threadTurns.some((t) => !t.ask && t.status !== "error");
-    const repeat = Number(s.signals?.repeatCount) || 1;
     const sentence = sentenceText();
     const isWholeSentence = Boolean(sentence) && String(s.quote || "").length >= sentence.length - 2;
 
@@ -596,8 +595,6 @@
         label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思",
         req: { askKind: "default" },
       });
-    } else if (repeat >= 2) {
-      opts.push({ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true, askKind: "word_only" } });
     }
     if (!isWholeSentence) {
       opts.push({
@@ -827,7 +824,6 @@
         ? {
             ...s.signals,
             dictHit: Boolean(s.dict?.entry),
-            ...(req.forceWord ? { repeatCount: 0, priorAsks: undefined } : {}),
           }
         : undefined;
 

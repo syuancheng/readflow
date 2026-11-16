@@ -43,9 +43,9 @@ function noteReasonText(reason: NoteReason): string {
   if (reason === "no_model") {
     return "老师笔记需要可用的 AI 模型：在 设置 → 模型 里填一个 Key 即可开启";
   }
-  // P34：老师笔记改为每晚整理，新的查词、讲解、反馈合计攒够 10 次当晚才整理
+  // P34：老师笔记改为每晚整理，新的提问和反馈合计攒够 10 次当晚才整理（P36：划一次词就算一次提问）
   if (reason && reason.waiting > 0) {
-    return `再攒 ${reason.waiting} 次查词或反馈，AI 老师当晚就会写下第一份观察`;
+    return `再攒 ${reason.waiting} 次提问或反馈，AI 老师当晚就会写下第一份观察`;
   }
   return "AI 老师今晚会写下第一份观察";
 }

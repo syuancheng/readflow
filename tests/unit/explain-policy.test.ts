@@ -30,12 +30,13 @@ test("控制变量三：只改成「从已存批注回看」 → 不自动，不
   assert.equal(shouldAutoExplain({ ...BASE, fromAnnotation: true }), false);
 });
 
-test("P26 同一句第 2 次及以上：词典命中也自动追加老师的讲解（逐级加深）", () => {
-  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 2 }), true);
-  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 3 }), true);
-  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 1 }), false);
-  // 回看 / 已有答案仍然不发请求
-  assert.equal(shouldAutoExplain({ ...BASE, dictHit: true, repeatCount: 3, fromAnnotation: true }), false);
+test("P36 同一句问了几次不影响：词典命中就不自动问 AI，由学生自己点「问 AI」", () => {
+  // 旧调用方多传了 repeatCount 也被忽略（插件旧版本可能还会带）
+  const withCount = (n: number) => ({ ...BASE, dictHit: true, repeatCount: n }) as Parameters<typeof shouldAutoExplain>[0];
+  assert.equal(shouldAutoExplain(withCount(2)), false);
+  assert.equal(shouldAutoExplain(withCount(5)), false);
+  // 词典没收录时仍自动讲（短语多半查不到，不然右栏是空的）
+  assert.equal(shouldAutoExplain({ ...BASE, dictHit: false }), true);
 });
 
 test("三个例外同时成立仍不自动；纯函数不改动入参", () => {

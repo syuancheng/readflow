@@ -25,9 +25,63 @@ export type NotePromptInput = {
   /** 用户手动改过笔记：改过的内容要在提示词里作为重要参考保留 */
   userEdited: boolean;
   stats: BehaviorStats;
-  /** 最近的问答摘要；word 只用来判断单词/短语，不把具体英文写进提示词 */
-  recent: { word: string; askKind?: string; feedback?: string; repeatCount?: number }[];
+  /** 最近的提问（一次划选 = 一条，见 groupQuestions）；word 只用来判断单词/短语，不把具体英文写进提示词 */
+  recent: RecentQuestion[];
 };
+
+/** 查词 / 讲解事件表里的一行（notePromptInputFor 从 explain_events 读出） */
+export type NoteEventRow = {
+  kind: "lookup" | "explain";
+  word: string;
+  contextId: string | null;
+  askKind: string | null;
+  feedback: string | null;
+  createdAt: number;
+};
+
+/**
+ * 一次提问：学生划了一个词或一段。
+ * - ai：这次有没有问 AI（自动讲解，或点了「这个词在这句里什么意思」）；
+ * - asks：在「问 AI」里接着点的其它问题（整句没看懂、句子结构、例句、自己写的问题）；
+ * - feedback：对这几段回答的评价。
+ */
+export type RecentQuestion = { word: string; ai: boolean; asks: string[]; feedback: string[] };
+
+/** 属于「同一次提问」的讲解：自动讲解、默认那一问（以及旧版的「只讲这个词」） */
+const SAME_QUESTION_KINDS = new Set(["auto", "default", "word_only"]);
+
+/**
+ * P36：把事件整理成「一次划选 = 一次提问」。
+ * 以前一条查词和它引出的自动讲解在摘要里算成两条，只查了词典的划选又和问了 AI 的混在一起，
+ * 老师看不出学生到底问了几次。现在每条查词事件是一次提问，讲解按批注 id 挂到它所属的那次提问上
+ * （讲解可能比查词先落库，所以按时间找最近的一次，不限先后）。找不到所属提问的讲解单独算一次。
+ * 返回从新到旧。
+ */
+export function groupQuestions(rows: NoteEventRow[]): RecentQuestion[] {
+  const sorted = [...rows].sort((a, b) => a.createdAt - b.createdAt);
+  const questions: (RecentQuestion & { contextId: string | null; at: number })[] = [];
+  for (const r of sorted) {
+    if (r.kind === "lookup") questions.push({ word: r.word, ai: false, asks: [], feedback: [], contextId: r.contextId, at: r.createdAt });
+  }
+  for (const r of sorted) {
+    if (r.kind !== "explain") continue;
+    const same = r.contextId ? questions.filter((q) => q.contextId === r.contextId) : [];
+    let q = same.length
+      ? same.reduce((best, cur) => (Math.abs(cur.at - r.createdAt) < Math.abs(best.at - r.createdAt) ? cur : best))
+      : undefined;
+    if (!q) {
+      q = { word: r.word, ai: false, asks: [], feedback: [], contextId: r.contextId, at: r.createdAt };
+      questions.push(q);
+    }
+    const kind = r.askKind ?? "auto";
+    if (SAME_QUESTION_KINDS.has(kind)) q.ai = true;
+    else q.asks.push(kind);
+    if (r.feedback) q.feedback.push(r.feedback);
+  }
+  return questions
+    .sort((a, b) => b.at - a.at)
+    .map(({ word, ai, asks, feedback }) => ({ word, ai, asks, feedback }));
+}
 
 const DIFFICULTY_LABEL: Record<string, string> = {
   long_sentence: "长句结构",
@@ -67,7 +121,7 @@ export function buildNotePrompt(input: NotePromptInput): { system: string; user:
   const s = input.stats;
   const lines: string[] = [];
   lines.push("【统计数据（以这些为准）】");
-  lines.push(`最近 ${s.lookups} 次查词；估计水平：${s.cefr ?? "未知"}；估计词汇量：${s.vocab ?? "未知"}。`);
+  lines.push(`最近 ${s.lookups} 次提问（划一个词或一段算一次，不管有没有问 AI）；估计水平：${s.cefr ?? "未知"}；估计词汇量：${s.vocab ?? "未知"}。`);
   lines.push(
     `常见难点：${s.difficulties.length ? s.difficulties.map((d) => DIFFICULTY_LABEL[d] ?? d).join("、") : "暂无"}。`,
   );
@@ -80,12 +134,12 @@ export function buildNotePrompt(input: NotePromptInput): { system: string; user:
   if (input.recent.length === 0) {
     lines.push("暂无。");
   } else {
+    // P36：一行 = 一次划选（不管只看了词典还是也问了 AI）
     for (const r of input.recent.slice(0, 20)) {
-      const kind = /\s/.test(r.word.trim()) ? "短语" : "单词";
-      const parts = [kind];
-      if (r.askKind) parts.push(ASK_LABEL[r.askKind] ?? r.askKind);
-      if (typeof r.repeatCount === "number" && r.repeatCount > 1) parts.push(`同句第 ${r.repeatCount} 次`);
-      if (r.feedback) parts.push(`反馈「${FEEDBACK_LABEL[r.feedback] ?? r.feedback}」`);
+      const parts = [/\s/.test(r.word.trim()) ? "短语" : "单词"];
+      parts.push(r.ai ? "问了 AI" : r.asks.length ? "看了词典" : "只看了词典");
+      if (r.asks.length) parts.push(`又问了${r.asks.map((k) => `「${ASK_LABEL[k] ?? k}」`).join("")}`);
+      if (r.feedback.length) parts.push(`反馈${r.feedback.map((f) => `「${FEEDBACK_LABEL[f] ?? f}」`).join("")}`);
       lines.push(`- ${parts.join("，")}`);
     }
   }
