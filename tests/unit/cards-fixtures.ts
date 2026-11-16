@@ -3,10 +3,14 @@ import type { ValidateCtx } from "../../src/lib/cards/validate";
 
 export const SENTENCE = "The ephemeral joy faded quickly.";
 
-/** 能通过全部校验的基准卡：原句高亮 + 单选题 */
+/**
+ * 基准卡：原句高亮 + 单选题块。
+ * 出题层已禁用选择题，但解析器 / 渲染器 / 编辑器仍保留对旧卡和历史卡的处理能力，
+ * 这组 fixture 用来测那部分底层能力（校验层会拒绝它，见 cards-validate.test.ts）。
+ */
 export function baseChoiceCard(over: Partial<CardSpec> = {}): CardSpec {
   return {
-    kind: "context_meaning",
+    kind: "situation_say",
     target: "ephemeral 的语境义",
     front: [
       { t: "sentence", source: "original", text: SENTENCE, mark: { start: 4, end: 13, as: "highlight" } },
@@ -25,10 +29,10 @@ export function baseChoiceCard(over: Partial<CardSpec> = {}): CardSpec {
   };
 }
 
-/** 能通过全部校验的基准卡：原句挖空 */
+/** 基准卡：原句挖空（底层渲染/解析能力用；出题层已禁用） */
 export function baseClozeCard(over: Partial<CardSpec> = {}): CardSpec {
   return {
-    kind: "word_completion",
+    kind: "rephrase",
     target: "补全 ephemeral",
     front: [
       { t: "sentence", source: "original", text: SENTENCE, mark: { start: 4, end: 13, as: "blank" } },
@@ -44,7 +48,6 @@ export function ctx(over: Partial<ValidateCtx> = {}): ValidateCtx {
     originalSentence: SENTENCE,
     quote: "ephemeral",
     glossZh: "短暂的",
-    listeningEnabled: false,
     charLimit: 1800,
     ...over,
   };

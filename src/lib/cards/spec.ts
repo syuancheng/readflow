@@ -4,23 +4,22 @@
  * 单测编译走 CommonJS，只用相对路径 import。
  */
 
+/**
+ * 只保留输出类题型（用户 2026-11-16 定稿）：
+ * 卡的目的是「积累能在口语/写作里用出来的表达」和「强化难点句型的输出」，
+ * 不是做语法游戏。四选一辨义、挖介词、指代、TFNG、原句补全等识别/填空类
+ * 题型全部移除。所有保留的题型都要求用户自己产出英文。
+ */
 export type CardKind =
-  | "context_meaning" | "word_completion" | "paraphrase_fill" | "sentence_understanding"
-  | "true_false_ng" | "reference" | "collocation" | "listen_fill" | "listen_choose"
-  | "layered_cloze" | "paragraph_cloze" | "custom"
-  // P35 使用类：用句子学词、练开口（背面给参考说法，自己对照）
-  | "back_translate" | "situation_say" | "rephrase" | "usage";
+  | "back_translate" | "situation_say" | "rephrase" | "usage" | "custom";
 
 const KINDS: readonly CardKind[] = [
-  "context_meaning", "word_completion", "paraphrase_fill", "sentence_understanding",
-  "true_false_ng", "reference", "collocation", "listen_fill", "listen_choose",
-  "layered_cloze", "paragraph_cloze", "custom",
-  "back_translate", "situation_say", "rephrase", "usage",
+  "back_translate", "situation_say", "rephrase", "usage", "custom",
 ];
 
-/** P35 使用类题型（回译、情景说一句、换个说法、搭配与用法）；其余都是认识类 */
+/** 全部题型都是输出类：custom 是 AI 灵活出输出题的出口，也按输出类校验 */
 export const PRODUCTIVE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>([
-  "back_translate", "situation_say", "rephrase", "usage",
+  "back_translate", "situation_say", "rephrase", "usage", "custom",
 ]);
 
 export function isProductive(kind: string): boolean {

@@ -2,22 +2,37 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildCardPrompt } from "../../src/lib/cards/prompt";
 
-const base = { learnerBlock: "", listeningEnabled: false, otherTextLookups: 0, cardedBefore: false };
+const base = { learnerBlock: "", otherTextLookups: 0, cardedBefore: false };
 
-test("包含 PRD 原则、零件清单、示例菜单、JSON 格式", () => {
+test("包含目的、零件清单、输出题菜单、组卡规则、JSON 格式", () => {
   const p = buildCardPrompt(base);
-  for (const needle of ["出题必须遵守的原则", "你能用的零件", "默认题型", "组卡规则", "只输出 JSON", "原句一字不改", "不泄露答案"]) {
+  for (const needle of [
+    "出题的目的只有两个", "积累实用表达", "强化难点句型", "你能用的零件",
+    "出题菜单", "组卡规则", "只输出 JSON", "不泄露", "语法游戏",
+  ]) {
     assert.ok(p.includes(needle), needle);
   }
 });
 
-test("听力开关：关闭时不出现音频零件和听力卡型；打开时出现", () => {
-  const off = buildCardPrompt(base);
-  assert.ok(!off.includes("单词音频") && !off.includes("听句填空"));
-  assert.ok(!off.includes("音频"), "听力关闭时整份指令里不能出现「音频」二字");
-  const on = buildCardPrompt({ ...base, listeningEnabled: true, examFamily: "toefl_ielts" });
-  assert.ok(on.includes("单词音频") && on.includes("听句填空") && on.includes("听音选词"));
-  assert.ok(on.includes("或整句音频"));
+test("明确禁止识别/填空类题型，不做语法游戏", () => {
+  const p = buildCardPrompt(base);
+  assert.ok(p.includes("不要四选一辨义") && p.includes("不要挖介词"));
+  assert.ok(p.includes("不允许 choice、fill 块"));
+  assert.ok(!p.includes("context_meaning") && !p.includes("true_false_ng") && !p.includes("listen_fill"));
+});
+
+test("语音：背面所有参考说法自动配发音，不提听力开关", () => {
+  const p = buildCardPrompt(base);
+  assert.ok(p.includes("系统会自动给背面每一句英文配上发音"));
+  assert.ok(!p.includes("听力开关") && !p.includes("听句填空"));
+});
+
+test("原文段落传进来时，用于挑口语实用短语造新句", () => {
+  const without = buildCardPrompt(base);
+  assert.ok(!without.includes("原文段落"));
+  const withPara = buildCardPrompt({ ...base, sourceParagraph: "pi comes with most creature comforts you're used to from other tools" });
+  assert.ok(withPara.includes("原文段落") && withPara.includes("creature comforts"));
+  assert.ok(withPara.includes("挑原文里那个在口语中有用的短语"));
 });
 
 test("学生档案放在最前面；为空时不留空行", () => {
@@ -33,38 +48,32 @@ test("观察信息：其他文章查过 N 次 / 已做过卡", () => {
 });
 
 test("考试风格段落：传了才出现，放在 JSON 格式之前", () => {
-  const p = buildCardPrompt({ ...base, styleLines: "因人而异（PRD F3）：\n- x" });
+  const p = buildCardPrompt({ ...base, styleLines: "因人而异：\n- x" });
   assert.ok(p.indexOf("因人而异") > 0 && p.indexOf("因人而异") < p.indexOf("只输出 JSON"));
   assert.ok(!buildCardPrompt(base).includes("因人而异"));
 });
 
 test("提示层说明：分层揭示，提示不能写出答案；examStyle 由系统决定", () => {
   const p = buildCardPrompt(base);
-  assert.ok(p.includes("点一下出提示，再点一下出答案"));
-  assert.ok(p.includes("examStyle 不用填"));
+  assert.ok(p.includes("提示不能直接写出背面的英文答案"));
+  assert.ok(!p.includes("examStyle 不用填"), "输出类卡不再有考试题型标签需要 AI 填");
 });
 
 test("同样输入输出逐字相同（前缀缓存的前提）", () => {
   assert.equal(buildCardPrompt({ ...base, learnerBlock: "a" }), buildCardPrompt({ ...base, learnerBlock: "a" }));
 });
 
-test("P35：使用类题型排在最前，张数由 AI 决定，提示词里没有固定张数", () => {
+test("四种输出题型都在菜单里，张数由 AI 决定，提示词里没有固定张数", () => {
   const p = buildCardPrompt(base);
-  for (const kind of ["back_translate", "situation_say", "rephrase", "usage"]) assert.ok(p.includes(kind), kind);
-  assert.ok(p.indexOf("默认题型") < p.indexOf("认识类（只给"));
+  for (const kind of ["back_translate", "situation_say", "rephrase", "usage", "custom"]) assert.ok(p.includes(kind), kind);
   assert.ok(p.includes("出几张由你按这个词决定"));
-  assert.ok(p.includes("至少要有一张使用类卡"));
-  assert.ok(!/\d\s*[~～-]\s*\d\s*张/.test(p), "不能出现「1~3 张」这类固定张数");
-  assert.ok(!p.includes("8 张"), "保险上限不写进提示词");
-  assert.ok(p.includes("系统都会自动配上发音"));
+  assert.ok(!/固定\s*\d|必须出\s*\d|恰好\s*\d\s*张/.test(p), "不能规定固定张数");
+  assert.ok(p.includes("2～3 张"), "口语常用词可以多出几张，这是建议不是硬性规则");
 });
 
-test("P35：没有考试目标不给考试题型菜单；有考试目标才给", () => {
-  const none = buildCardPrompt(base);
-  assert.ok(!none.includes("考试题型（学生在备考"));
-  assert.ok(!none.includes("托福阅读词汇题"));
-  const exam = buildCardPrompt({ ...base, examFamily: "cet" });
-  assert.ok(exam.includes("考试题型（学生在备考") && exam.includes("托福阅读词汇题"));
-  const examListening = buildCardPrompt({ ...base, examFamily: "toefl_ielts", listeningEnabled: true });
-  assert.ok(examListening.includes("听句填空"));
+test("参考雅思托福场景，明确不参考国内考试题", () => {
+  const p = buildCardPrompt(base);
+  assert.ok(p.includes("雅思口语 Part 1/3"));
+  assert.ok(p.includes("托福"));
+  assert.ok(p.includes("雅思口语 / 托福口语写作的真实任务") === false || p.includes("雅思"));
 });

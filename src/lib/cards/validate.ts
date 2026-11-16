@@ -2,7 +2,7 @@
  * 卡片校验（P33 spec §5.2，PRD §5 的 11 条原则）。纯函数，逐条单测。
  * 校验失败 → 生成流程重出一次；仍失败 → 组级 failed（或选择题标记 needs_review）。
  */
-import { isProductive, type CardSpec, type Block } from "./spec";
+import type { CardSpec, Block } from "./spec";
 import { renderCardChecked } from "./render";
 import type { Voice } from "./audio";
 
@@ -13,7 +13,6 @@ export type ValidateCtx = {
   quote: string;
   /** 这个词在这句里的中文意思（讲解「释义：」那一行，或词典第一个义项） */
   glossZh: string | null;
-  listeningEnabled: boolean;
   /** 1800 或 4000（PRD Q7，用户已确认文档里的 4500 是错的） */
   charLimit: number;
   /** 来源标题（渲染进标签行，计入字数）；不传按空 */
@@ -131,20 +130,19 @@ export const REFERENCE_MAX = 3;
 
 export function validateCard(spec: CardSpec, ctx: ValidateCtx): ValidateResult {
   const reasons: string[] = [];
-  const productive = isProductive(spec.kind);
 
   // ---------- 1. 以句子为本 ----------
-  // 使用类卡的正面可以是中文（回译的中文意思、情景说一句的场景），背面必须有英文句子
+  // 输出类卡的正面可以是中文（回译的中文意思、情景说一句的场景），背面必须有英文句子
   const frontHasSentence =
     spec.front.some((b) => b.t === "sentence") ||
     spec.front.some((b) => b.t === "audio" && b.of === "sentence") ||
-    (productive && spec.front.some((b) => b.t === "text" && b.text.trim() !== ""));
+    spec.front.some((b) => b.t === "text" && b.text.trim() !== "");
   if (!frontHasSentence) {
-    reasons.push("正面必须有一个句子（原句、改写句或整句音频）");
+    reasons.push("正面必须有一个句子（中文场景、英文句或整句音频）");
   }
   const answerSentences = englishSentences(spec.back.answer);
-  if (productive && answerSentences.length === 0) {
-    reasons.push("使用类卡的背面必须有英文参考说法");
+  if (answerSentences.length === 0) {
+    reasons.push("输出类卡的背面必须有英文参考说法");
   }
 
   // ---------- 2. 原句一字不改 ----------
@@ -182,52 +180,29 @@ export function validateCard(spec: CardSpec, ctx: ValidateCtx): ValidateResult {
 
   // ---------- 4. 正面不泄露答案 ----------
   const frontText = visibleText(spec.front) + "\n" + visibleText(spec.hints);
-  // 使用类卡练的就是「用这个词说话」：正面可以有目标词和整句中文，但不能出现背面的英文参考说法
-  if (!productive && ctx.glossZh && ctx.glossZh.trim() && frontText.includes(ctx.glossZh.trim())) {
-    reasons.push("题干不能出现目标词的中文意思");
+  // 输出类卡练的就是「用这个词说话」：正面可以有目标词和整句中文，但不能出现背面的英文参考说法
+  const frontPlain = frontText.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const leaked = answerSentences.some((b) => {
+    const n = b.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return n.length > 0 && frontPlain.includes(n);
+  });
+  if (leaked) reasons.push("输出类卡的正面不能出现背面的英文参考说法");
+
+  // ---------- 5. 不允许识别/填空类零件（不做语法游戏）----------
+  const allForRecognition = [...spec.front, ...(spec.hints ?? []), ...spec.back.answer, ...(spec.back.explanation ?? [])];
+  if (allForRecognition.some((b) => b.t === "choice")) {
+    reasons.push("不允许选择题：卡必须让用户输出英文，不是做识别题");
   }
-  if (productive) {
-    const frontPlain = frontText.toLowerCase().replace(/[^a-z0-9]+/g, " ");
-    const leaked = answerSentences.some((b) => {
-      const n = b.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      return n.length > 0 && frontPlain.includes(n);
-    });
-    if (leaked) reasons.push("使用类卡的正面不能出现背面的英文参考说法");
+  if (allForRecognition.some((b) => b.t === "fill")) {
+    reasons.push("不允许填空块：卡必须让用户自己说出或写出英文");
   }
-  const hasBlank =
-    blanksOf(spec.front).some((x) => x.mark.as === "blank" || x.mark.as === "prefix") ||
-    spec.front.some((b) => b.t === "fill");
-  if (hasBlank && leaksQuote(frontText, ctx.quote)) {
-    reasons.push("挖空类卡片的正面不能出现完整的目标词");
+  if (allForRecognition.some((b) => b.t === "sentence" && b.mark && (b.mark.as === "blank" || b.mark.as === "prefix"))) {
+    reasons.push("不允许挖空：卡必须让用户输出完整表达");
   }
 
-  // ---------- 5. 选择题 ----------
-  const choices = [...spec.front, ...(spec.hints ?? [])].filter(
-    (b): b is Extract<Block, { t: "choice" }> => b.t === "choice",
-  );
-  for (const c of choices) {
-    const texts = c.options.map((o) => o.text);
-    if (c.options.length < 3 || c.options.length > 5) {
-      reasons.push("选择题选项必须在 3~5 个之间");
-    }
-    if (new Set(texts.map((t) => t.trim().toLowerCase())).size !== texts.length) {
-      reasons.push("选择题选项不能重复");
-    }
-    const correctCount = c.options.filter((o) => o.correct).length;
-    if (c.multi && correctCount < 2) reasons.push("多选题至少要有 2 个正确答案");
-    if (!c.multi && correctCount !== 1) reasons.push("单选题有且只能有一个正确答案");
-  }
-
-  // ---------- 6. 只考一个点 ----------
+  // ---------- 6. 背面必须有英文答案 ----------
   if (!spec.back.answer || spec.back.answer.length === 0) {
     reasons.push("背面必须有答案");
-  }
-  if (choices.length > 1) {
-    reasons.push("一张卡最多一个选择块");
-  }
-  const blankGroups = blanksOf(spec.front).length + (spec.front.some((b) => b.t === "fill") ? 1 : 0);
-  if (spec.kind !== "paragraph_cloze" && blankGroups > 1) {
-    reasons.push("一张卡最多一组挖空（一段多空卡除外）");
   }
 
   // ---------- P35 使用类卡（§11.2） ----------
@@ -260,30 +235,10 @@ export function validateCard(spec: CardSpec, ctx: ValidateCtx): ValidateResult {
     }
   }
 
-  // ---------- 7. 听力 ----------
+  // ---------- 7. 语音 ----------
   const allBlocks = [...spec.front, ...(spec.hints ?? []), ...spec.back.answer, ...(spec.back.explanation ?? [])];
-  if (!ctx.listeningEnabled && (spec.back.audio?.length ?? 0) > 0) {
-    reasons.push("听力零件未开放（背面不能附发音）");
-  }
-  if (!ctx.listeningEnabled && allBlocks.some((b) => b.t === "audio")) {
-    reasons.push("听力零件未开放");
-  }
-  if (spec.kind === "listen_choose") {
-    const frontSentence = spec.front.find((b) => b.t === "sentence");
-    if (frontSentence) reasons.push("听音选词的正面不能显示句子文字");
-  }
-  if (spec.kind === "listen_fill") {
-    const frontSentence = spec.front.find((b) => b.t === "sentence");
-    if (frontSentence && leaksQuote(maskedSentence(frontSentence), ctx.quote)) {
-      reasons.push("听句填空的正面必须把目标词挖空");
-    }
-  }
-  if (spec.kind === "listen_fill" && !spec.front.some((b) => b.t === "audio" && b.of === "sentence")) {
-    reasons.push("听句填空的正面必须有整句音频");
-  }
-  if (spec.kind === "listen_choose" && !spec.front.some((b) => b.t === "audio")) {
-    reasons.push("听音选词的正面必须有音频");
-  }
+  // 背面配音由渲染器按音色自动加到每句英文上，不受任何听力开关控制（用户 2026-11-16 定稿）。
+  // 正面如需「先听再说」，AI 可以放一句整句音频；这是出题自由，不再由开关决定是否允许。
 
   // ---------- 8~11：作用在 AI 文本和渲染结果上 ----------
   const aiTexts = [

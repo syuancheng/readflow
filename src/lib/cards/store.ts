@@ -4,7 +4,7 @@
  */
 import { sqlite } from "@/db/sqlite";
 import { GLOBAL_USER } from "@/db/ensure-auth";
-import { cardsEnabled, charLimitFor, listeningEnabled, sentenceAudioEnabled } from "./flags";
+import { cardsEnabled, charLimitFor, listeningEnabled } from "./flags";
 import { currentVoice, ttsKeyAvailable } from "@/lib/tts";
 import { voiceInContent } from "./voices";
 import type { Voice } from "./audio";
@@ -43,10 +43,13 @@ export function listeningOn(): boolean {
   return listeningEnabled(siteCardsSettings());
 }
 
-/** 一条批注 + 它所在的词、文章（按用户归属过滤） */
-/** P35：新生成 / 修改的卡要不要配句子音频——开关打开并且拿得到百炼 Key；要配就返回音色 */
+/**
+ * 新生成 / 修改的卡要不要配句子音频（用户 2026-11-16 定稿：一律配）。
+ * 输出类卡的背面参考说法必须能听，所以不再看 cards.audio 开关；
+ * 唯一硬约束是要有可用的语音合成 Key —— 没配 Key 技术上无法合成。
+ */
 export function cardAudioVoice(): Voice | null {
-  return sentenceAudioEnabled(siteCardsSettings()) && ttsKeyAvailable() ? currentVoice() : null;
+  return ttsKeyAvailable() ? currentVoice() : null;
 }
 
 /** 预览用：这张卡的草稿内容里有占位符才显示播放按钮（音色以写进占位符时的为准） */
@@ -66,6 +69,8 @@ export type CardContext = {
   translation: string;
   ai_gloss: string | null;
   text_title: string | null;
+  /** 这条批注所在段落的全文（出题时从中挑口语实用短语造新句） */
+  paragraph_content: string | null;
 };
 
 export function loadCardContext(userId: string, contextId: string): CardContext | undefined {
@@ -73,10 +78,11 @@ export function loadCardContext(userId: string, contextId: string): CardContext 
     .prepare(
       `SELECT c.id, c.text_id, c.quote, c.prefix, c.suffix, c.ai_gloss,
               w.id AS word_id, w.lemma, w.display_form, w.translation,
-              t.title AS text_title
+              t.title AS text_title, p.content AS paragraph_content
          FROM contexts c
          JOIN user_words w ON w.id = c.user_word_id
          LEFT JOIN texts t ON t.id = c.text_id
+         LEFT JOIN paragraphs p ON p.id = c.paragraph_id
         WHERE c.id = ? AND w.user_id = ?`,
     )
     .get(contextId, userId) as CardContext | undefined;
@@ -85,6 +91,11 @@ export function loadCardContext(userId: string, contextId: string): CardContext 
 /** 所在句子（buildAnchor 的 prefix + quote + suffix，spec §5.1） */
 export function sentenceOf(c: { prefix: string; quote: string; suffix: string }): string {
   return `${c.prefix}${c.quote}${c.suffix}`.trim() || c.quote;
+}
+
+/** 出题用的整段原文；拿不到段落时退回到句子 */
+export function paragraphOf(c: { paragraph_content?: string | null; prefix: string; quote: string; suffix: string }): string {
+  return c.paragraph_content?.trim() || sentenceOf(c);
 }
 
 export function cardsUsedToday(userId: string): number {

@@ -30,13 +30,17 @@ test("P35：张数由 AI 决定——6 张照常解析，超过保险上限 8 �
   assert.equal(many.ok && many.dropped, 3);
 });
 
-test("P35：四种使用类题型都能解析，PRODUCTIVE_KINDS 只含这四种", () => {
-  const r = parseCardGen(wrap(backTranslateCard(), situationCard(), rephraseCard(), usageCard()));
+test("五种输出题型都能解析，PRODUCTIVE_KINDS 含全部保留题型", () => {
+  const r = parseCardGen(wrap(backTranslateCard(), situationCard(), rephraseCard(), usageCard(), { ...rephraseCard(), kind: "custom" }));
   assert.equal(r.ok, true);
-  if (r.ok) assert.deepEqual(r.cards.map((c) => c.kind), ["back_translate", "situation_say", "rephrase", "usage"]);
-  assert.deepEqual([...PRODUCTIVE_KINDS].sort(), ["back_translate", "rephrase", "situation_say", "usage"]);
+  if (r.ok) assert.deepEqual(r.cards.map((c) => c.kind), ["back_translate", "situation_say", "rephrase", "usage", "custom"]);
+  assert.deepEqual([...PRODUCTIVE_KINDS].sort(), ["back_translate", "custom", "rephrase", "situation_say", "usage"]);
   assert.equal(isProductive("rephrase"), true);
+  assert.equal(isProductive("custom"), true);
+  // 识别/填空类题型已从白名单移除，解析直接失败
   assert.equal(isProductive("context_meaning"), false);
+  const old = parseCardGen(wrap({ ...situationCard(), kind: "context_meaning" }));
+  assert.equal(old.ok, false);
 });
 
 test("未知字段被丢弃，卡片本身保留", () => {

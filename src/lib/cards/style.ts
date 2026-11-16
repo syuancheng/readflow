@@ -37,19 +37,19 @@ export function examFamilyOf(survey: SurveyAnswers | null | undefined): ExamFami
   }
 }
 
-/** 题型 → 考试里对应的题目名；没有对应关系的题型不加风格标签 */
+/**
+ * 输出类题型 → 海外考试里对应的能力名（用户 2026-11-16 定稿：只参考雅思托福，不参考国内考试）。
+ * 旧的「词汇题 / 补全题 / 判断题」等识别题型已移除，不再有对应标签。
+ */
 const KIND_QUESTION: Record<string, string> = {
-  context_meaning: "词汇题",
-  word_completion: "补全题",
-  paraphrase_fill: "填空题",
-  sentence_understanding: "句子题",
-  true_false_ng: "判断题",
-  reference: "指代题",
-  collocation: "搭配题",
+  back_translate: "口译",
+  situation_say: "口语",
+  rephrase: "改写",
+  usage: "搭配",
 };
 
-/** 雅思风格更强的题型；其余按托福算（PRD「默认以托福和雅思为主」） */
-const IELTS_KINDS = new Set(["paraphrase_fill", "true_false_ng"]);
+/** 雅思风格更强的题型；其余按托福算 */
+const IELTS_KINDS = new Set<string>([]);
 
 const FAMILY_NAME: Record<ExamFamily, string> = {
   toefl_ielts: "托福 / 雅思",
@@ -74,24 +74,19 @@ export function stylePromptLines(
   family: ExamFamily | null,
   survey: SurveyAnswers | null | undefined,
 ): string {
-  const lines: string[] = ["因人而异（PRD F3）："];
+  const lines: string[] = ["因人而异："];
   if (family) {
-    lines.push(`- 学生在备考：在使用类卡之外，最后再加一张${FAMILY_NAME[family]}风格的考试题，题目指令的措辞和选项的设计向真实考试靠拢。`);
+    lines.push(`- 学生在备考，目标是${FAMILY_NAME[family]}：把题目场景和参考说法往雅思口语 / 托福口语写作的真实任务上靠，例如日常话题、校园场景、观点陈述。`);
     const target = targetExamText(survey);
-    if (target) lines.push(`- 备考目标：${target}。考试题的难度和用词向这个目标靠拢。`);
-  } else {
-    lines.push("- 学生没有考试目标：不出考试题型。");
+    if (target) lines.push(`- 备考目标：${target}。例句的难度和用词向这个目标靠拢。`);
   }
   const feel = survey?.readingFeel;
   if (feel === "every_sentence") {
-    lines.push("- 学生读英文很吃力：题目指令可以用中文；选择题的干扰项要一眼能区分；背面多给整句意思；情景说一句的场景和参考说法用简单的词，每句参考说法不超过 12 个词。");
+    lines.push("- 学生读英文很吃力：题目指令用中文；背面多给整句意思；情景说一句的场景和参考说法用简单的词，每句参考说法不超过 12 个词。");
   } else if (feel === "fluent") {
-    lines.push("- 学生读英文基本无障碍：题目指令用英文；干扰项用意思相近、容易混淆的词；背面只给要点。");
+    lines.push("- 学生读英文基本无障碍：题目指令可用英文；背面只给要点，多给他自己组织语言的空间。");
   } else {
-    lines.push("- 按学生档案里的水平自行判断：水平低时指令用中文、干扰项易区分；水平高时指令用英文、干扰项更相近。");
-  }
-  if (family) {
-    lines.push("- 考试题：难点是长句结构的，出整句理解、指代类题目；难点是词汇的，出语境理解、补全类题目。");
+    lines.push("- 按学生档案里的水平自行判断：水平低时指令用中文、参考说法简单；水平高时指令可用英文、参考说法更地道。");
   }
   lines.push("- 已经做过卡又查到的词，优先出情景说一句或换个说法，不要重复上一次的题型。");
   return lines.join("\n");

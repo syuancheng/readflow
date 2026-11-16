@@ -6,8 +6,8 @@ import { baseChoiceCard, baseClozeCard, SENTENCE } from "./cards-fixtures";
 const R = { sourceTitle: "A Very Long Title ".repeat(5) };
 
 test("预览标签：题型、风格、来源（截 40 字）", () => {
-  const p = renderPreview(baseChoiceCard({ examStyle: "托福 · 词汇题" }), R);
-  assert.deepEqual([p.tags.emoji, p.tags.label, p.tags.style], ["📖", "语境理解", "托福 · 词汇题"]);
+  const p = renderPreview(baseChoiceCard({ examStyle: "托福 · 口语" }), R);
+  assert.deepEqual([p.tags.emoji, p.tags.label, p.tags.style], ["💬", "情景说一句", "托福 · 口语"]);
   assert.equal(p.tags.source?.length, 40);
   assert.equal(renderPreview(baseChoiceCard(), { sourceTitle: "" }).tags.source, null);
 });

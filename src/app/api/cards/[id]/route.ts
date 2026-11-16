@@ -7,7 +7,7 @@ import { renderCardChecked } from "@/lib/cards/render";
 import { examFamilyOf, examStyleLabel } from "@/lib/cards/style";
 import { getLearner, surveyOf } from "@/lib/learner-store";
 import { inlineGloss } from "@/lib/gloss";
-import { cardAudioVoice, charLimitOfUser, listeningOn } from "@/lib/cards/store";
+import { cardAudioVoice, charLimitOfUser } from "@/lib/cards/store";
 import { audioTextsOf } from "@/lib/cards/audio";
 import { ensureAudio } from "@/lib/tts";
 
@@ -82,7 +82,6 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     originalSentence: context.originalSentence,
     quote: context.quote,
     glossZh: context.glossZh,
-    listeningEnabled: listeningOn(),
     charLimit,
     sourceTitle: text?.title ?? "",
     audio,

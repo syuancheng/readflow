@@ -1,7 +1,12 @@
 /**
- * 出题指令（P33 spec §7.3 第 6 步；P35 spec §4.1 改写）。纯函数。
- * 必须包含：零件清单与限制、PRD §5 全部原则、题型菜单（使用类为主，考试题型只给有考试目标的学生）、
- * 组卡规则（张数由 AI 决定，不写固定数字）、学生档案、听力开关说明、JSON 格式。
+ * 出题指令。纯函数。
+ *
+ * 用户 2026-11-16 定稿的出题哲学：
+ * - 卡不是语法游戏。目的只有两个：①积累能在雅思/托福口语和日常沟通里真正用出来的表达；
+ *   ②针对难句型，让用户反复输出。所有题都要求用户自己产出英文。
+ * - 参考雅思、托福等海外考试的口语/写作任务来设计题，不参考国内考试。
+ * - 例句不必和文章原句一样：从原文里挑一个口语中真用得上的短语，用它造一个新句子来考。
+ * - 背面参考说法一律配语音（由系统自动完成，不写进 JSON）。
  */
 import type { ExamFamily } from "./style";
 
@@ -10,115 +15,86 @@ export type CardPromptInput = {
   styleLines?: string;
   /** 学生档案文本（P32 buildLearnerBlock 的产物；缓存命中时必须是缓存里那份） */
   learnerBlock: string;
-  /** 听力零件是否开放 */
-  listeningEnabled: boolean;
-  /** 这个词在其他文章里查过几次（spec §7.1 观察信息） */
+  /** 原句所在的整段原文（用于挑出口语实用短语造新句）；非必填 */
+  sourceParagraph?: string;
+  /** 这个词在其他文章里查过几次（观察信息） */
   otherTextLookups: number;
-  /** 这个词是否已推送过卡片（spec §7.1 观察信息） */
+  /** 这个词是否已推送过卡片（观察信息） */
   cardedBefore: boolean;
-  /** P35：学生的考试目标；null 时不给考试题型菜单 */
+  /** 学生的考试目标；null 时不给考试风格标签 */
   examFamily?: ExamFamily | null;
 };
 
-/** PRD §5 的全部原则，逐字转写给出题请求 */
-const PRINCIPLES = (listening: boolean) => `出题必须遵守的原则（PRD §5）：
-1. 每张卡的正面必须包含一个句子（原句、改写句${listening ? "或整句音频" : ""}）。禁止「正面只有单词、背面只有中文释义」。
-2. 每张卡只练一个词或短语。认识类卡只考一个能判断对错的点；使用类卡（回译、情景说一句、换个说法、搭配与用法）背面给参考说法，学生自己对照。
-3. 正面不泄露答案。认识类卡的题干不能出现目标词的中文意思，也不能有能直接推出答案的线索；使用类卡的正面可以出现目标词和整句的中文意思，但不能出现背面的英文参考说法。
-4. 解释放在背面；你补充的内容（改写句、例句、助记）必须和原文区分开，不编造出处。
-5. 选择题有且只有一个正确答案（多选题除外）。
-6. 英文质量：原句一字不改地引用；你写的英文必须拼写正确、语法正确、表达地道。
-7. 只输出卡片的**内容与结构**（JSON），不要写任何墨墨格式语法。
-8. 词汇量边缘的词值得做卡；专有名词、产品名、人名、对他太简单或太生僻的词不值得。`;
+/** 两类目的 + 禁止语法游戏，逐条写给出题请求 */
+const PURPOSE = `出题的目的只有两个，每个决定都要回到这两条：
+1. 积累实用表达：挑那些在雅思/托福口语、写作或日常英文沟通里真用得上的词和短语，
+   目标是学生能在真实交流里主动说出来，不是认得它、不是会做一道题。
+2. 强化难点句型：对结构难、容易说错的句子，让学生反复把它说出来、写出来。
 
-const PARTS = `你能用的零件（每种零件的限制）：
-正面：原句（可对目标词高亮或挖空）、改写句、题目指令、单选或多选题、填空。
-背面：正确答案、解析、整句翻译或大意、句子主干、补充例句。
-提示层：可以在正面和背面之间加一层提示（中文提示或首字母）。复习时先只看到正面，点一下出提示，再点一下出答案——所以提示不能直接写出答案。
-背面的每一句英文，系统都会自动配上发音，学生说完以后点开听、对照自己说得对不对。你不用写任何发音相关的块。`;
+绝对不要出成语法游戏。不要四选一辨义、不要挖介词或搭配词、不要判断指代或正误、
+不要补全原句里的一个词、不要填空——这些都是「认得就算会」的识别题，考完就忘。
+每张卡的正面都必须让学生自己产出一段英文（说或写），背面给参考说法让他对照。`;
 
-const PARTS_LISTENING = `你能用的零件（每种零件的限制）：
-正面：原句（可对目标词高亮或挖空）、改写句、单词音频、整句音频、题目指令、单选或多选题、填空（可以多个空）。
-背面：正确答案、解析、整句翻译或大意、句子主干、补充例句、发音音频。
-提示层：可以在正面和背面之间加一层提示（中文提示或首字母）。复习时先只看到正面，点一下出提示，再点一下出答案——所以提示不能直接写出答案。
-背面的每一句英文，系统都会自动配上发音，学生说完以后点开听、对照自己说得对不对。你不用写任何发音相关的块。`;
+const PARTS = `你能用的零件：
+正面：中文场景或中文句子（text）、题目指令（instruction）、可选的整句音频（audio，先听再说）。
+背面：英文参考说法（sentence）、解析或用法说明（text）、整句中文意思（sentenceMeaning）、句子主干（structure）、补充例句（example）。
+提示层：可以在正面和背面之间给一句中文提示或目标词，但提示不能直接写出背面的英文答案。
+系统会自动给背面每一句英文配上发音，学生说完点开听、自己对照。你不用写任何音频相关的块（除了正面可选的整句音频）。`;
 
-/** P35 默认题型：用句子学词、练开口（PRD F1） */
-const MENU_PRODUCTIVE = `默认题型（使用类，优先出这些）：
-- 回译 back_translate：正面 = 原句的中文意思（text）+ 指令「用英文说出这句话」（instruction）；提示层可放目标词（text）；背面 answer = 原句（sentence，source: "original"，目标词 highlight）。原句超过 35 个词时不要出回译。
-- 情景说一句 situation_say：正面 = 一个贴近日常、工作或学习的中文场景（text，不编造人名和事实）+ 指令「用 X 说一句」；背面 answer = 2～3 组「英文参考说法（sentence，source: "paraphrase"，每句都用上目标词）+ 它的中文（text）」。
-- 换个说法 rephrase：正面 = 一句意思相同、用词更简单、不含目标词的英文（sentence，source: "paraphrase"）+ 指令「用 X 改写这句话」；背面 answer = 用上目标词的改写句（sentence，source: "paraphrase"），explanation 里可以放原句作对照。
-- 搭配与用法 usage：正面 = 原句（目标词 highlight）+ 指令「它常和哪些词连用？先自己想两个」；背面 answer = 2～3 组「搭配或句型（text）+ 一个短例句（sentence，source: "paraphrase"）+ 例句的中文（text）」，有易错点时在 explanation 里写一句。`;
-
-/** P35：只需要认识、不太会主动用的词，才出认识类卡 */
-const MENU_RECOGNITION = `认识类（只给「只需要认识、不太会主动用」的词，比如文学用词、生僻词、专有领域的术语）：
-- 语境理解 context_meaning：原句，目标词高亮，选出最接近的意思 → 答案和每个选项的解析
-- 分层提示 layered_cloze：原句挖空 → 提示（中文或首字母）→ 答案和解析`;
+/** 四种输出题型，对标雅思口语 Part 1/2/3 与托福口语独立/综合题、写作造句 */
+const MENU = `出题菜单（都是输出题，从里面挑适合这个词的）：
+- 回译 back_translate：正面 = 这句话的中文（text）+ 指令「用英文说出这句话」；提示层可给目标词或关键短语；背面 answer = 对应的英文句子（sentence，source: "original" 或 "paraphrase"）。适合意思清楚、句子不太长的表达。原句超过 35 个词时不要用回译。
+- 情景说一句 situation_say：正面 = 一个贴近日常、工作、学习或雅思口语话题的中文场景（text，不编造人名和具体事实）+ 指令「用 X 说一句」；背面 answer = 2～3 组「英文参考说法（sentence，source: "paraphrase"）+ 它的中文（text）」。适合口语里常用的词，参考雅思口语 Part 1/3 的问答场景。
+- 换个说法 rephrase：正面 = 一句意思相同、用词更简单、不含目标词的英文（sentence，source: "paraphrase"）+ 指令「用 X 改写这句话」；背面 answer = 用上目标词的改写句（sentence，source: "paraphrase"），explanation 里可以放原句作对照。适合书面表达和难句型的替换练习。
+- 搭配与用法 usage：正面 = 一个中文语义或场景（text）+ 指令「你想用 X 怎么说？」；背面 answer = 2～3 组「常用搭配或句型（text）+ 一个短例句（sentence，source: "paraphrase"）+ 例句的中文（text）」。适合动词短语、固定搭配、容易用错介词的词。
+- 自定义 custom：上面四种都不合适时，自己设计一道输出题（customLabel ≤6 个字），同样必须让学生产出英文、背面给参考说法。例如「按提示补全一段口语回答」「把这句中文讲给外国朋友听」。`;
 
 const COMPOSE = `组卡规则：
-- 出几张由你按这个词决定：难的、用法多的可以多出几张，简单的一张就够。不要为了凑数出卡。
-- 至少要有一张使用类卡。
-- 回译适合大多数词；原句太长或结构太复杂时，换成情景说一句。
-- 情景说一句更适合口语里常用的词，换个说法更适合偏书面的词；用法丰富的词两种都可以出。
-- 搭配与用法只给搭配特征明显的词，比如动词短语、固定搭配，或者容易用错介词的词。`;
+- 出几张由你按这个词决定：口语里常用、用法多的可以出 2～3 张（一个偏日常说、一个偏考试话题、一个偏难句型）；简单的词一张就够。不要为凑数出卡。
+- 至少让这个词的「实用表达」和「输出练习」都有体现，但同一个意思不要换着法子问三遍。
+- 一张卡只练一个点；正面不泄露背面的英文答案。
+- 专有名词、产品名、人名，或对学生太简单、太生僻、口语里根本用不上的词，不出卡。
 
-const MENU = `考试题型（学生在备考，最后再加一张考试风格的卡，从下面选；也可以组合出新卡型，但必须遵守上面的原则）：
-- 语境理解（托福阅读词汇题）：原句，目标词高亮，「…is closest in meaning to」四选一 → 答案和每个选项的解析
-- 原句补全（新托福 Complete the Words）：原句中目标词只露出前半部分，填出完整的词 → 完整原句和释义
-- 改写填空（雅思 Sentence Completion）：换一种说法的句子，留一到两个词的空 → 答案和原句对照
-- 整句理解（托福句子简化题 / 雅思 True/False/Not Given）：难句，选出最准确的改写，或判断一个陈述 → 整句大意和句子主干
-- 指代（托福指代题）：句中的 it / this / they 指的是什么，四选一 → 答案和指代关系说明
-- 搭配挖空：原句挖掉介词或搭配词 → 完整搭配和用法
-- 分层提示：原句挖空 → 提示（中文或首字母）→ 答案和解析`;
-
-const MENU_LISTENING = MENU + `
-- 听句填空（雅思听力填空）：整句音频 + 这句的文字，目标词位置留空 → 答案
-- 听音选词：一句话的音频（不显示文字），选出句中出现的那个词，选项是发音相近的词 → 正确的词、音标、原句`;
+例句怎么造（重要）：
+- 参考说法不要求和文章原句一模一样。相反，要挑原文里那个在口语中有用的短语，
+  放到一个全新的、贴近真实交流的句子里，让学生在语境里学会用它。
+- 例如原文是「pi comes with most creature comforts you're used to from other tools」，
+  口语里有用的是 creature comforts，就可以出题让学生说
+  "After a long trip, I really appreciate the creature comforts of home."
+  而不是把原句原封不动搬上来。
+- 新造的句子必须自然、地道、确实用得上目标词或那个短语；不编造出处，不写生僻场景。
+- 只有 kind = back_translate 且原句本身就是一句好的口语句时，才直接用原句；
+  原句太长、太书面、太技术化时，用 paraphrase 造新句。`;
 
 const JSON_FORMAT = `只输出 JSON，格式如下（TypeScript 类型）：
 \`\`\`
 type Block =
-  | { t: "sentence"; source: "original" | "paraphrase"; text: string;
-      mark?: { start: number; end: number; as: "highlight" | "blank" | "prefix"; keep?: number } }
+  | { t: "sentence"; source: "original" | "paraphrase"; text: string }
   | { t: "instruction"; text: string }
-  | { t: "choice"; multi?: boolean; options: { text: string; correct: boolean }[] }
-  | { t: "fill"; answer: string; hint?: string }
   | { t: "audio"; of: "word" | "sentence"; text: string }
   | { t: "text"; text: string; emphasis?: string[] };
 
 type CardSpec = {
-  kind: "back_translate" | "situation_say" | "rephrase" | "usage"
-       | "context_meaning" | "word_completion" | "paraphrase_fill" | "sentence_understanding"
-       | "true_false_ng" | "reference" | "collocation" | "listen_fill" | "listen_choose"
-       | "layered_cloze" | "paragraph_cloze" | "custom";
+  kind: "back_translate" | "situation_say" | "rephrase" | "usage" | "custom";
   customLabel?: string;         // kind = custom 时的题型名（≤6 个字）
-  examStyle?: string | null;    // 例如「托福 · 词汇题」
-  target: string;               // 这张卡考的是什么（≤30 个字），不出现在卡面上
+  target: string;               // 这张卡练的表达（≤30 个字），不出现在卡面上
   front: Block[];
-  hints?: Block[];              // 可选的提示层
+  hints?: Block[];
   back: {
-    answer: Block[];
-    explanation?: Block[];
-    sentenceMeaning?: string;
-    structure?: string;
+    answer: Block[];            // 必须有至少一句英文 sentence
+    sentenceMeaning?: string;   // 整句中文意思
+    structure?: string;         // 难句型的主干说明
     example?: { en: string; zh: string };
-    audio?: ("word" | "sentence")[];
   };
 };
 \`\`\`
 约束：
-- mark 的 start / end 是相对 sentence.text 的字符下标，[start, end)。
-- as: "blank" 或 "prefix" 时盖住的部分必须是目标词本身。
-- source: "original" 的 text 必须逐字来自用户消息里给出的原句。
-- choice 的选项 3~5 个；单选恰好一个 correct。
-- examStyle 不用填，由系统按学生的备考目标决定。
+- 不允许 choice、fill 块，不允许 sentence 上带 mark（挖空 / 高亮）——那些是识别题，不是输出题。
+- source: "original" 的 sentence 必须逐字来自原文；自己造的句子一律用 source: "paraphrase"。
+- 只用上面列的 kind；不认识的类型会被丢弃。
 - 返回 { "cards": CardSpec[] }，张数由你按组卡规则决定。`;
 
 export function buildCardPrompt(input: CardPromptInput): string {
-  const parts = input.listeningEnabled ? PARTS_LISTENING : PARTS;
-  const examMenu = input.examFamily ? (input.listeningEnabled ? MENU_LISTENING : MENU) : "";
-  const menu = [MENU_PRODUCTIVE, MENU_RECOGNITION, examMenu].filter(Boolean).join("\n\n");
-
   const obs: string[] = [];
   if (input.otherTextLookups > 0) {
     obs.push(`这个词在其他文章里也查过 ${input.otherTextLookups} 次`);
@@ -130,18 +106,20 @@ export function buildCardPrompt(input: CardPromptInput): string {
   const learner = input.learnerBlock.trim()
     ? `${input.learnerBlock.trim()}\n\n`
     : "";
-
   const obsBlock = obs.length > 0 ? `观察：\n${obs.map((o) => `- ${o}`).join("\n")}\n\n` : "";
+  const source = input.sourceParagraph?.trim()
+    ? `原文段落（从中挑口语实用短语造新句）：\n${input.sourceParagraph.trim()}\n\n`
+    : "";
 
-  return `${learner}${obsBlock}请为这个词出记忆卡，帮学生通过句子学会这个词的意思、用法和搭配，并练习开口说。学生是中文母语者，正在读英文文章。
+  return `${learner}${obsBlock}请为这个词出记忆卡，帮学生把它变成能在口语和写作里真正用出来的表达。学生是中文母语者，正在读英文文章。
 
-${parts}
+${PURPOSE}
 
-${PRINCIPLES(input.listeningEnabled)}
+${PARTS}
 
-${menu}
+${MENU}
 
 ${COMPOSE}
 
-${input.styleLines ? input.styleLines.trim() + "\n\n" : ""}${JSON_FORMAT}`;
+${source}${input.styleLines ? input.styleLines.trim() + "\n\n" : ""}${JSON_FORMAT}`;
 }

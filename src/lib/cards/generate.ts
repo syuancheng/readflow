@@ -30,9 +30,9 @@ import {
   cardsUsedToday,
   charLimitOfUser,
   hasPushedCards,
-  listeningOn,
   loadCardContext,
   otherTextLookups,
+  paragraphOf,
   refundQuota,
   reserveQuota,
   sentenceOf,
@@ -275,13 +275,12 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
   }
 
   const family = examFamilyOf(surveyFor(user.id));
-  const listening = listeningOn();
   const audio = cardAudioVoice();
   const prompt = buildCardPrompt({
     learnerBlock,
     styleLines: stylePromptLines(family, surveyFor(user.id)),
     examFamily: family,
-    listeningEnabled: listening,
+    sourceParagraph: paragraphOf(ctx),
     otherTextLookups: otherTextLookups(user.id, ctx.lemma, ctx.text_id),
     cardedBefore: hasPushedCards(user.id, ctx.word_id),
   });
@@ -292,7 +291,6 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
       originalSentence: sentenceOf(ctx),
       quote: ctx.quote,
       glossZh: inlineGloss(ctx.ai_gloss, ctx.translation, 40) || null,
-      listeningEnabled: listening,
       charLimit: charLimitOfUser(user.id),
       sourceTitle: ctx.text_title ?? "",
       audio,

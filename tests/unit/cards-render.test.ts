@@ -12,7 +12,7 @@ test("标签行：题型（白字绿底）+ 考试风格（紫）+ 来源（灰�
   const out = renderCard(baseChoiceCard({ examStyle: "托福 · 词汇题" }), R);
   const first = out.split("\n")[0];
   assert.match(first, /^\[P#L#/);
-  assert.ok(first.includes("[T#B,!ffffff,!!58a700# 📖 语境理解 ]"));
+  assert.ok(first.includes("[T#B,!ffffff,!!58a700# 💬 情景说一句 ]"));
   assert.ok(first.includes("[T#B,!7a3cc0,!!f5ecff# 托福 · 词汇题 ]"));
   assert.ok(first.includes("[T#!888888#My Text]"));
 });
@@ -54,14 +54,14 @@ test("普通卡一条答案线；带提示层的卡两条：正面 → 提示 �
   const plain = renderCard(baseClozeCard(), R);
   assert.equal(answerLines(plain), 1);
   assert.equal(answerLinesOf(baseClozeCard()), 1);
-  const layered = baseClozeCard({ kind: "layered_cloze", hints: [{ t: "text", text: "首字母 e" }] });
+  const layered = baseClozeCard({ kind: "custom", hints: [{ t: "text", text: "首字母 e" }] });
   const out = renderCard(layered, R);
   assert.equal(answerLines(out), 2);
   assert.equal(answerLinesOf(layered), 2);
   const [front, hint, back] = out.split("\n---\n");
   assert.ok(!front.includes("首字母"), "提示不能出现在正面");
   assert.ok(hint.includes("🧭 提示") && hint.includes("首字母 e"));
-  assert.ok(back.includes("✅ 答案"));
+  assert.ok(back.includes("🗣 参考说法"));
 });
 
 test("背面分区：标题由渲染器固定；AI 补充的例句带标注；中括号被转义", () => {
@@ -78,8 +78,8 @@ test("背面分区：标题由渲染器固定；AI 补充的例句带标注；�
     }),
     R,
   );
-  for (const t of ["✅ 答案", "💡 解析", "📝 整句意思", "🧩 句子主干", "📌 补充例句", "🔊 发音"]) {
-    assert.ok(out.includes(t) || t === "🧩 句子主干", t);
+  for (const t of ["🗣 参考说法", "💡 解析", "📝 整句意思", "🔍 句子主干", "📌 补充例句"]) {
+    assert.ok(out.includes(t), t);
   }
   assert.ok(out.includes("（AI 补充）"));
   assert.ok(out.includes("\\[见 1\\]"));
