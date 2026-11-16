@@ -3816,6 +3816,38 @@ a:focus-visible,
 @keyframes rf-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .rf-spin { animation-duration: 2.4s; } }
 
+/* 做卡进度：服务端只有「生成中」，百分比是按已等待时间给的估算，最高到 95%，
+   真正完成由状态切换收尾。@property 让 conic-gradient 的角度能平滑过渡。 */
+@property --rf-pct {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+.rf-progress-ring {
+  --rf-pct: 0;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: var(--rf-radius-full);
+  background: conic-gradient(
+    currentColor calc(var(--rf-pct) * 1%),
+    color-mix(in srgb, currentColor 18%, transparent) 0
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black 0);
+  transition: --rf-pct 0.25s linear;
+}
+.rf-card-progress-note {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rf-progress-ring { transition: none; }
+}
+
 /* ===== P33：待推送（词库）/ 卡片预览 / 卡片修改 ===== */
 .pc-wrap { display: flex; flex-direction: column; gap: 16px; }
 .pc-bar {

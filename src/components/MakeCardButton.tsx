@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 /** /api/cards/state 的返回（PRD F2 的五种状态） */
 type CardState = {
@@ -34,6 +34,10 @@ export default function MakeCardButton({
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
   const polls = useRef(0);
+  // 服务端只给「generating」，没有真实百分比。这里按已等待时间给一条
+  // 明确标注为「估算」的进度曲线：到 95% 就停住，等真实状态落地再收尾。
+  const [progressStart, setProgressStart] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
 
   const refresh = useCallback(async (): Promise<CardState | null> => {
     if (!contextId) return null;
@@ -59,7 +63,13 @@ export default function MakeCardButton({
   // 生成中：每 2 秒查一次
   const generating = st?.state === "generating";
   useEffect(() => {
-    if (!generating) return;
+    if (!generating) {
+      setProgressStart(null);
+      return;
+    }
+    setProgressStart((cur) => cur ?? Date.now());
+    setTick(Date.now());
+    const ticker = setInterval(() => setTick(Date.now()), 200);
     const timer = setInterval(() => {
       polls.current += 1;
       if (polls.current > POLL_MAX) {
@@ -68,7 +78,10 @@ export default function MakeCardButton({
       }
       void refresh();
     }, POLL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearInterval(ticker);
+    };
   }, [generating, refresh]);
 
   async function generate(force: boolean) {
@@ -106,6 +119,9 @@ export default function MakeCardButton({
   if (st && !st.enabled) return null;
 
   const state = st?.state ?? "none";
+  const elapsedSec = progressStart ? Math.max(0, Math.floor((tick - progressStart) / 1000)) : 0;
+  const pct = Math.min(95, Math.round(100 * (1 - Math.exp(-elapsedSec / 20))));
+  const eta = Math.max(0, 45 - elapsedSec);
   const suggested = suggestion !== null && (state === "none" || state === "failed");
   // 与「问 AI」同一个按钮底盘（.duo-btn-sm.duo-btn-white）：高度、圆角、按下反馈都一致；
   // 有建议时只多一点紫色点缀。各状态在原位变化，不整块换成别的元素。
@@ -132,10 +148,25 @@ export default function MakeCardButton({
         </button>
       )}
       {state === "generating" && (
-        <button type="button" className={cls} disabled aria-busy="true">
-          <span className="rf-spin" aria-hidden />
-          正在做卡…
-        </button>
+        <>
+          <button
+            type="button"
+            className={cls}
+            disabled
+            aria-busy="true"
+            title="生成在后台进行，离开这里也不会中断"
+          >
+            <span
+              className="rf-progress-ring"
+              style={{ "--rf-pct": pct } as CSSProperties}
+              aria-hidden
+            />
+            做卡 {pct}%
+          </button>
+          <p className="rf-card-progress-note" aria-live="polite">
+            {eta > 0 ? `预计还需约 ${eta} 秒 · 估算` : "正在收尾，马上就好…"}
+          </p>
+        </>
       )}
       {state === "ready" && (
         <>
