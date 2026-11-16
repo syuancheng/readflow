@@ -96,6 +96,7 @@ export const ASK_LABEL: Record<string, string> = {
   whole_sentence: "整句没看懂",
   structure: "讲讲句子结构",
   example: "再给个例句",
+  domain: "从专业角度讲讲",
   custom: "自己写的问题",
 };
 

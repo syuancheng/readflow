@@ -2,7 +2,7 @@
 import type { AskKind } from "./types";
 
 export const ASK_KINDS: readonly AskKind[] = [
-  "auto", "default", "word_only", "whole_sentence", "structure", "example", "custom",
+  "auto", "default", "word_only", "whole_sentence", "structure", "example", "domain", "custom",
 ];
 
 export function narrowAskKind(v: unknown): AskKind {

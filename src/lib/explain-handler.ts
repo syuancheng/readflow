@@ -16,6 +16,30 @@ import { sqlite } from "@/db/sqlite";
 import { lemma as lemmaOf } from "@/lib/dict";
 import { STREAM_RESET } from "@/lib/config";
 
+/**
+ * P40：「从专业角度讲讲」需要知道文章属于哪个领域。标题 / 分类只从库里按 textId 取，
+ * 且必须属于当前账号；前端传来的同名字段一律不信（explainParamsFromBody 白名单里没有）。
+ * 查不到就返回空串：模型仍可凭选区上下文自己判断领域，不该因此报错。
+ */
+function domainBlockFor(textId: string | undefined, userId: string): string {
+  if (!textId) return "";
+  try {
+    const row = sqlite
+      .prepare("SELECT title, category FROM texts WHERE id = ? AND user_id = ?")
+      .get(textId, userId) as { title?: string; category?: string | null } | undefined;
+    if (!row) return "";
+    const title = (row.title ?? "").trim().slice(0, 200);
+    const category = (row.category ?? "").trim().slice(0, 60);
+    const lines: string[] = [];
+    if (title) lines.push(`标题：${title}`);
+    if (category) lines.push(`用户设定分类：${category}`);
+    return lines.join("\n");
+  } catch (err) {
+    console.error("[domain] 读取文章领域信息失败，本次按上下文自行判断:", err);
+    return "";
+  }
+}
+
 const clamp = (v: unknown, lo: number, hi: number): number | undefined => {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
   return Math.max(lo, Math.min(hi, v));
@@ -132,6 +156,8 @@ export async function handleExplain(
     otherTextLookups,
     cardedBefore: cardedBefore === true,
     cardsEnabled: cardsOn,
+    // P40：只有领域追问才注入，其他种类的批量与逐字快照都不受影响
+    domainBlock: narrowAskKind(params.askKind) === "domain" ? domainBlockFor(params.textId, user.id) : "",
   };
   const encoder = new TextEncoder();
   const iter = streamExplain(enriched, ai)[Symbol.asyncIterator]();

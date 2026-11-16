@@ -23,7 +23,7 @@ test("flag 用的键名与 config.ts 的 SETTINGS_KEYS 是同一个", () => {
 
 test("askKind 白名单与缺省值", () => {
   assert.deepEqual([...ASK_KINDS], [
-    "auto", "default", "word_only", "whole_sentence", "structure", "example", "custom",
+    "auto", "default", "word_only", "whole_sentence", "structure", "example", "domain", "custom",
   ]);
   for (const k of ASK_KINDS) assert.equal(narrowAskKind(k), k);
   assert.equal(narrowAskKind(undefined), "default");

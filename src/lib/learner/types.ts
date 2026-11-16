@@ -14,6 +14,7 @@ export type AskKind =
   | "whole_sentence"
   | "structure"
   | "example"
+  | "domain"
   | "custom";
 
 export type Feedback = "shallow" | "right" | "deep";

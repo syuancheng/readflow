@@ -71,6 +71,11 @@ export type ExplainParams = {
   cardedBefore?: boolean;
   /** P33：做卡开关关闭时不追加制卡建议段（服务端在 handleExplain 里决定） */
   cardsEnabled?: boolean;
+  /**
+   * P40：文章领域信息，由服务端按 textId 查库后注入，前端传值一律忽略。
+   * 只有 askKind=domain 时才会带值；其他追问与默认讲解都为空，提示词逐字不变。
+   */
+  domainBlock?: string;
 };
 
 /**
@@ -122,6 +127,45 @@ After the answer, if you think this word is worth turning into a flashcard, outp
 - Worth it: at the edge of the student's vocabulary; relevant to their reading goal; a second encounter across articles; a collocation worth mastering.
 - Not worth it: proper nouns, product names, people's names; too easy for them; too rare to meet again.
 - Output nothing when not worth it. Nothing may follow this line.`;
+
+/**
+ * P40：领域专家人设（「从专业角度讲讲这句」专用）。
+ *
+ * 与英语老师彻底分开：默认讲解的 system prompt 有逐字快照测试，这里一行都不碰。
+ * 只在 askKind=domain 时由 explainTurns 选用；学生已经看过翻译和句法，这一轮
+ * 回答的是「这句话在它的专业领域里到底在说什么、为什么这么说」。
+ */
+export function buildDomainSystemPrompt(): string {
+  return `你是一位资深的专业技术人员，不是英语老师。学生已经知道这句话的中文意思和句子结构，现在他问的是：「这句话在我的专业领域里，到底在说什么？」
+
+【你收到的信息】
+用户消息最前面是「这篇文章」——标题与用户设定的分类（可能只有其中一项，也可能都没有）；接着是「用户选中」「前文」「后文」和一组客观「观察」。
+
+【第一步：判断领域，但不要花篇幅论证判断】
+用标题、分类和选区内容判断这篇文章属于哪个专业领域——法律、AI 工程、医学、金融、材料、历史，等等。
+- 标题或分类给了线索：直接用它，按那个领域的行话讲。分类很宽泛（例如「技术文档」）时，再从选区内容收窄到具体方向。
+- 都没有线索：从选区里的术语推断；推断不出来就说明「仅凭这句话难以确定具体领域」，然后就这句话本身能确定的内容讲，不要装作某个领域的专家。
+- 不要输出「本文属于 X 领域」这类判断过程，直接按该领域的理解作答。
+
+【第二步：用这个领域的语言把这句话讲透】
+学生缺的不是中文，是作者默认读者已经懂的领域背景。按需要的顺序讲：
+- 这句话涉及什么专业概念、现象或设计取舍；它在这一行里通常指什么；
+- 作者为什么这么写、这么划分或这么设计——背后的约束、惯例或权衡是什么；
+- 这个词／说法在这个领域里的含义和日常英语里的差别（如果有的话）；
+- 它在这篇文章的论证里起什么作用，只讲能从上下文推断出来的，不要脑补作者没写的立场。
+
+【领域知识的可信边界——最重要】
+- 不确定的具体内容直接标注「（存疑）」或「这里不确定」，不要编造法条编号、条款名称、论文标题、数值、产品型号、API 名称、公司案例。
+- 领域判断有把握时按该领域的通行理解讲；只有中等把握时说「通常来说」「在这类场景下」，给典型情况而不是唯一答案。
+- 宁可少讲一个点，也不要给一个听起来专业但可能是错的事实。
+
+【硬性边界】
+- 不逐字翻译，不解释时态、介词、从句，不画句子地图——那些是英语老师刚才已经讲过的，重复就是浪费。
+- 不写「释义：」行：那一行会显示在正文词的上方，是英语老师专用的。
+- 中文说明控制在 250 字以内；一次只讲一两个最要紧的点，讲透比讲全重要。
+- 不使用 Markdown 标题、编号列表、表格、代码块、HTML；不寒暄、不写「希望有帮助」。
+- 用中文作答；专业术语、缩写、原文引用保留英文。`;
+}
 
 /** 导出供单测断言输出结构（不对外承诺稳定性） */
 export function buildSystemPrompt(
@@ -232,7 +276,10 @@ export function buildUserMessage(params: ExplainParams): string {
     : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
   // P32：学生档案放在最前面；为空时不插入任何字符，旧调用的输出逐字不变
   const learner = params.learnerBlock?.trim() ? `${params.learnerBlock.trim()}\n\n` : "";
-  return `${learner}${contextBlock(params)}
+  // P40：领域块只由服务端按 textId 查库后注入；前端伪造的字段会在 handler 里被丢弃。
+  // 没有值时一个字符都不插入，其他追问与默认讲解的 user message 逐字不变。
+  const domain = params.domainBlock?.trim() ? `这篇文章：\n${params.domainBlock.trim()}\n\n` : "";
+  return `${domain}${learner}${contextBlock(params)}
 ${question}`;
 }
 
@@ -304,14 +351,16 @@ function observations(params: ExplainParams): string {
 export function explainTurns(params: ExplainParams): ChatTurn[] {
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
+  // P40：只有「从专业角度讲讲」这一轮换人设；其他所有 askKind 仍走逐字不变的英语老师。
+  const system =
+    params.askKind === "domain"
+      ? buildDomainSystemPrompt()
+      : buildSystemPrompt(language, monolingual, params.word, {
+          personalized: params.personalized === true,
+          cardsEnabled: params.cardsEnabled !== false,
+        });
   return [
-    {
-      role: "system",
-      content: buildSystemPrompt(language, monolingual, params.word, {
-        personalized: params.personalized === true,
-        cardsEnabled: params.cardsEnabled !== false,
-      }),
-    },
+    { role: "system", content: system },
     { role: "user", content: buildUserMessage(params) },
   ];
 }
