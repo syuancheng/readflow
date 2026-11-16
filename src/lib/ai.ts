@@ -40,6 +40,17 @@ export function currentSettings(): SettingsMap {
 /** 这次调用用谁的模型配置（P28：按账号区分，见 lib/user-secrets.ts）；不传 = 站级配置 */
 export type AiConfig = { settings: SettingsMap; env: EnvMap };
 
+/**
+ * 同一条批注内、本轮之前已经完成的问答（2026-11-16 真正的多轮追问）。
+ * - 默认讲解 ask 为空；追问 ask 是用户的问题标签/原文
+ * - 只有文本、没有状态；进行中 / 报错的轮次由前端排除
+ */
+export type ExplainHistoryTurn = { ask?: string; text: string };
+
+/** 历史的硬上限：条数与单轮字数，防止长对话把上下文撑爆（服务端也会再校验一次） */
+export const EXPLAIN_HISTORY_MAX_TURNS = 12;
+export const EXPLAIN_HISTORY_MAX_CHARS = 2000;
+
 export type ExplainParams = {
   word: string;          // 要解释的词或短语（选区）
   context: string;       // 兜底上下文（旧调用只传一句话时使用）
@@ -76,6 +87,11 @@ export type ExplainParams = {
    * 只有 askKind=domain 时才会带值；其他追问与默认讲解都为空，提示词逐字不变。
    */
   domainBlock?: string;
+  /**
+   * 同一批注内本轮之前的对话（历史问答），由服务端白名单校验后传入。
+   * 空/不传时 explainTurns 仍是原来的 [system, user] 两条，逐字不变。
+   */
+  history?: ExplainHistoryTurn[];
 };
 
 /**
@@ -348,6 +364,46 @@ function observations(params: ExplainParams): string {
  * 构建「讲解」这一轮的完整 messages（P33：供 handleExplain 缓存做卡复用）。
  * 与 streamExplain 内部用的逐字一致——做卡时前缀命中模型缓存的前提（spec §13 第 2 条）。
  */
+/**
+ * 历史白名单：客户端传来的 history 只取 {ask?, text}，
+ * 逐条裁剪字数、限制条数；非法结构整条丢弃，额外字段不透传。
+ * 放在纯函数模块里，服务端与单测共用同一份规则。
+ */
+export function narrowHistory(v: unknown): ExplainHistoryTurn[] | undefined {
+  if (!Array.isArray(v) || v.length === 0) return undefined;
+  const out: ExplainHistoryTurn[] = [];
+  for (const item of v.slice(-EXPLAIN_HISTORY_MAX_TURNS)) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.text !== "string") continue;
+    const text = o.text.trim().slice(0, EXPLAIN_HISTORY_MAX_CHARS);
+    if (!text) continue;
+    const ask = typeof o.ask === "string" ? o.ask.trim().slice(0, 60) : undefined;
+    out.push({ ...(ask ? { ask } : {}), text });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * 把历史问答展开成多轮 messages：一轮 = 一条 user（学生当时的问题）+ 一条 assistant（老师当时的回答）。
+ *
+ * 默认讲解那轮 ask 为空，用一句固定措辞还原当时「学生没说出具体问题」的情形，
+ * 与 buildUserMessage 在无 prompt 时的收尾一致，避免凭空编一个问题。
+ * 历史按原顺序截断到上限；空文本轮次丢弃。
+ */
+export function historyTurns(history: readonly ExplainHistoryTurn[] | undefined): ChatTurn[] {
+  if (!history || history.length === 0) return [];
+  const out: ChatTurn[] = [];
+  for (const t of history.slice(-EXPLAIN_HISTORY_MAX_TURNS)) {
+    const answer = t.text?.trim();
+    if (!answer) continue;
+    const asked = t.ask?.trim();
+    out.push({ role: "user", content: asked ? `学生的问题: ${asked}` : "学生没有说出具体问题，请我判断他卡在哪里。" });
+    out.push({ role: "assistant", content: answer.slice(0, EXPLAIN_HISTORY_MAX_CHARS) });
+  }
+  return out;
+}
+
 export function explainTurns(params: ExplainParams): ChatTurn[] {
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
@@ -359,8 +415,10 @@ export function explainTurns(params: ExplainParams): ChatTurn[] {
           personalized: params.personalized === true,
           cardsEnabled: params.cardsEnabled !== false,
         });
+  // 历史在前、本轮 user 在最后；无历史时就是你看到的原有两条，逐字不变。
   return [
     { role: "system", content: system },
+    ...historyTurns(params.history),
     { role: "user", content: buildUserMessage(params) },
   ];
 }

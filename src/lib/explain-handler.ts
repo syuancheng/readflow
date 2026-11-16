@@ -2,7 +2,12 @@
  * AI 释义的共用处理（/api/explain 与插件的 /api/extension/explain 共用）。
  * 路由文件只能导出 GET/POST 等固定名字，所以放在这里。
  */
-import { streamExplain, explainTurns, type ExplainParams } from "@/lib/ai";
+import {
+  streamExplain,
+  explainTurns,
+  narrowHistory,
+  type ExplainParams,
+} from "@/lib/ai";
 import type { AuthUser } from "@/lib/auth";
 import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
@@ -290,6 +295,7 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     // P34：「你问：…」标题与选区锚点，只用于存回答、对上批注，不发给模型
     askLabel: str((body as { askLabel?: unknown }).askLabel)?.trim().slice(0, 60) || undefined,
     anchor: narrowAnchor((body as { anchor?: unknown }).anchor),
+    history: narrowHistory((body as { history?: unknown }).history),
   };
 }
 

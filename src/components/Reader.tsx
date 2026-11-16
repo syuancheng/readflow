@@ -1770,6 +1770,14 @@ function PickCard({
   async function triggerAI(req: AskReq = {}) {
     const controller = new AbortController();
     aiAbortRef.current = controller;
+
+    // 真正的多轮追问（2026-11-16）：本轮之前已完成的问答全部带上，让模型记得之前问了什么、
+    // 答了什么。必须在 push 本轮之前提取；进行中 / 报错 / 引导文案都不是答案，不带。
+    // 换词时 PickCard 按锚点卸载、turns 从 initialGloss 重置，所以历史天然只属于当前批注。
+    const history = turnsRef.current
+      .filter((t) => t.status === "done" && t.text.trim() && !isNotAGloss(t.text))
+      .map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text }));
+
     const index = turnsRef.current.length;
     updateTurns((prev) => [...prev, { ask: req.ask, text: "", status: "loading", req }]);
     const patch = (p: Partial<Turn>) =>
@@ -1791,8 +1799,9 @@ function PickCard({
       anchor: { paragraphId: pick.paragraphId, start: anchor.start, end: anchor.end },
       ...(req.ask ? { askLabel: req.ask } : {}),
     };
+    const withHistory = { ...(history.length > 0 ? { history } : {}) };
     const body = req.wholeSentence
-      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs }
+      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs, ...withHistory }
       : {
           word: anchor.quote,
           prefix: aiContext.prefix,
@@ -1804,6 +1813,7 @@ function PickCard({
           ...(signals ? { signals } : {}),
           askKind: req.askKind ?? "default",
           ...refs,
+          ...withHistory,
         };
 
     try {

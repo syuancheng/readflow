@@ -819,6 +819,12 @@
     abortStream();
 
     const s = panelState;
+    // 真正的多轮追问：本轮之前已完成的问答全部带上（换记录时 threadTurns 会重置，天然隔离）。
+    // 必须在 push 本轮之前提取；进行中 / 报错的轮次不是答案，不带。
+    const history = threadTurns
+      .filter((t) => t.status === "done" && t.text && t.text.trim())
+      .map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text }));
+    const withHistory = history.length > 0 ? { history } : {};
     const signals =
       s.signals && !req.wholeSentence
         ? {
@@ -836,6 +842,7 @@
           monolingual: false,
           askKind: req.askKind || "default",
           ...(req.prompt ? { prompt: req.prompt } : {}),
+          ...withHistory,
         }
       : {
           word: s.quote,
@@ -847,6 +854,7 @@
           askKind: req.askKind || "default",
           ...(req.prompt ? { prompt: req.prompt } : {}),
           ...(signals ? { signals } : {}),
+          ...withHistory,
         };
 
     const index = threadTurns.length;
