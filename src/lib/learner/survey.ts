@@ -45,7 +45,11 @@ export type SurveyQuestion = {
   showWhenGoal?: Goal;
 };
 
-/** Q2a 的分数段。四级/六级同档；雅思托福共用一道题但档位分开；专四专八选的是哪一种考试 */
+/**
+ * Q2a 的分数段。四级/六级同档；雅思托福共用一道题但档位分开；专四专八选的是哪一种考试。
+ * 托福：2026-01-21 起新版成绩是 1–6 分（半分一档），旧版 0–120 分仍有人拿着，所以两种都写上；
+ * 分档按 ETS 官方对照表（6=114+，5.5=107+，5=95+，4.5=86+，4=72+）。key 沿用旧名，已存的答案不受影响。
+ */
 export const EXAM_SCORE_BANDS: Record<Exam, SurveyOption[]> = {
   none: [],
   gaokao: [],
@@ -68,9 +72,9 @@ export const EXAM_SCORE_BANDS: Record<Exam, SurveyOption[]> = {
     { key: "ielts_lt6", label: "雅思 6 以下" },
     { key: "ielts_6_6_5", label: "雅思 6–6.5" },
     { key: "ielts_7plus", label: "雅思 7 以上" },
-    { key: "toefl_lt80", label: "托福 80 以下" },
-    { key: "toefl_80_99", label: "托福 80–99" },
-    { key: "toefl_100plus", label: "托福 100 以上" },
+    { key: "toefl_lt80", label: "托福 4 分及以下（旧版 85 及以下）" },
+    { key: "toefl_80_99", label: "托福 4.5–5 分（旧版 86–106）" },
+    { key: "toefl_100plus", label: "托福 5.5 分及以上（旧版 107 及以上）" },
     { key: "unknown", label: "不记得了" },
   ],
   tem: [
@@ -93,7 +97,10 @@ const TARGET_EXAM_OPTIONS: SurveyOption[] = [
 
 const UNDECIDED: SurveyOption = { key: "undecided", label: "还没定" };
 
-/** P39 Q3b 的目标分数档；「其他考试」不问分数 */
+/**
+ * P39 Q3b 的目标分数档；「其他考试」不问分数。
+ * 托福按 2026-01-21 起的新版 1–6 分，括号里是 ETS 对照表的旧版 0–120 分下限。
+ */
 export const TARGET_SCORE_BANDS: Record<TargetExam, SurveyOption[]> = {
   ielts: [
     { key: "ielts_5_5", label: "5.5 分" },
@@ -104,10 +111,11 @@ export const TARGET_SCORE_BANDS: Record<TargetExam, SurveyOption[]> = {
     UNDECIDED,
   ],
   toefl: [
-    { key: "toefl_80", label: "80 分" },
-    { key: "toefl_90", label: "90 分" },
-    { key: "toefl_100", label: "100 分" },
-    { key: "toefl_110plus", label: "110 分及以上" },
+    { key: "toefl_4", label: "4 分（旧版 72+）" },
+    { key: "toefl_4_5", label: "4.5 分（旧版 86+）" },
+    { key: "toefl_5", label: "5 分（旧版 95+）" },
+    { key: "toefl_5_5", label: "5.5 分（旧版 107+）" },
+    { key: "toefl_6", label: "6 分（旧版 114+）" },
     UNDECIDED,
   ],
   cet4: [
