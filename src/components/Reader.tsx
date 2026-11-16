@@ -1969,7 +1969,7 @@ function PickCard({
               {t.ask ? (
                 <>
                   <span className="duo-badge duo-badge-ai">💬 追问</span>
-                  <span className="rf-turn-ask">你问：{t.ask}</span>
+                  <span className="rf-turn-ask">{t.ask}</span>
                 </>
               ) : (
                 <span className="duo-badge duo-badge-green">AI 释义</span>
