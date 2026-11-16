@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectionKind, selectionSignals } from "../../src/lib/sentence";
+import { selectionKind, selectionSignals, splitSentences } from "../../src/lib/sentence";
 
 /**
  * 选区三分类（几何信号，纯函数）：
@@ -93,4 +93,119 @@ test("selectionSignals：确定性纯函数，越界与空段落不崩", () => {
   assert.equal(empty.selectionWords, 0);
   assert.equal(empty.sentence, "");
   assert.ok(empty.coverage >= 0 && empty.coverage <= 1);
+});
+
+/**
+ * 句子切分（返回字符区间）—— 锚点 prefix/suffix、「所在句」、AI 上下文都靠它。
+ *
+ * 回归背景：Intl.Segmenter 有两个方向的错，两个方向都必须锁死：
+ *   ① 句号 + 空格 + 小写词 → 一律当缩写不切（"harness. pi comes" 整段成一句）：
+ *      本 bug 的源头，comforts 的 prefix 混进上一句、整句提问解释了两句。
+ *   ② 真缩写 + 句号 + 空格 + 大写词 → 反而切开（"Mr. Brown" 被切成两句）：
+ *      会把人名/机构名拦腰截断。
+ * 所以实现必须同时「补切」和「防过度切」，不能只往一个方向修。
+ */
+
+/** 线上出问题的原句：两句之间是 ". "，第二句以冒号收尾、以小写 pi 开头 */
+const BUG_PARA =
+  "I don't need to explain what features you should expect from a coding agent harness. " +
+  "pi comes with most creature comforts you're used to from other tools:";
+
+test("splitSentences：回归原句必须切成两句，句号后小写 pi 不是缩写", () => {
+  const spans = splitSentences(BUG_PARA);
+  assert.equal(spans.length, 2, "原句必须切成两句");
+  assert.match(BUG_PARA.slice(spans[0].start, spans[0].end), /harness\.?\s*$/);
+  assert.match(BUG_PARA.slice(spans[1].start, spans[1].end), /^\s*pi comes/);
+});
+
+/** 几十个常见小写词，逐个控制变量：只换句号后的第一个词，其余完全相同 */
+const LOWER_START_WORDS =
+  "pi go it an is do to we my no so up us he she they the a next then this that " +
+  "abc foo bar baz one two three yes ok why how and but for from with are was were be been being";
+test("splitSentences：句号后跟任意小写词都要切句（逐个词覆盖，防止只修 pi）", () => {
+  for (const w of LOWER_START_WORDS.split(" ")) {
+    const text = `First sentence ends here. ${w} continues on.`;
+    const spans = splitSentences(text);
+    assert.equal(spans.length, 2, `小写词 "${w}" 在句号后必须起新句`);
+    const second = text.slice(spans[1].start, spans[1].end);
+    assert.ok(second.trimStart().startsWith(w), `"${w}" 必须是第二句开头，实际: ${second}`);
+  }
+});
+
+/** 真缩写：句号前的词是缩写，不构成句子边界（含缩写后跟大写人名） */
+const ABBREV_CASES: Array<[string, number]> = [
+  ["He saw Mr. Brown. Then he left.", 2],
+  ["Dr. Smith went home. He slept.", 2],
+  ["Mrs. Jones arrived. She smiled.", 2],
+  ["Prof. Chen spoke. We listened.", 2],
+  ["Use e.g. this one. Or that.", 2],
+  ["That is i.e. the same thing. Next.", 2],
+  ["We tried many things etc. Then stopped.", 2],
+  ["This is A vs. B. Choose one.", 2],
+  ["Kaplan et al. (2020) found a trend. We replicate it.", 2],
+  ["The U.S. President spoke. Then left.", 2],
+  ["She got a Ph.D. Then she left.", 2],
+  ["Meet me at 5 p.m. Tomorrow we leave.", 2],
+  ["No. 5 is the best. Take it.", 2],
+  ["Apple Inc. announced it. Shares rose.", 2],
+  ["It is on Main St. Then we went home.", 2],
+  ["J.R.R. Tolkien wrote it. Fans loved it.", 2],
+  ["Jan. 5 was cold. Feb. 6 was warmer.", 2],
+];
+test("splitSentences：真缩写（含后接大写词）不切断句子", () => {
+  for (const [text, expected] of ABBREV_CASES) {
+    const spans = splitSentences(text);
+    assert.equal(spans.length, expected, `缩写句被误切: ${text}\n实际: ${JSON.stringify(spans.map((s) => text.slice(s.start, s.end)))}`);
+  }
+});
+
+/** 数字小数点、URL、版本号的点不是句子边界；引号/括号可收尾；换行与省略号是边界 */
+const PUNCT_CASES: Array<[string, number]> = [
+  ["It costs $3.50. Too expensive.", 2],
+  ["Version 1.2.3 is out. Upgrade now.", 2],
+  ["Visit example.com today. It is useful.", 2],
+  ['He said "Hi." Then he left.', 2],
+  ["(see the previous post!) Next one.", 2],
+  ["Wait... what happened?", 2],
+  ["Really?! Yes.", 2],
+  ["Line one.\nLine two.", 2],
+  ["Line one.\n\nLine two.", 2],
+  ["One. Two. Three.", 3],
+  ["No punctuation here", 1],
+  ["   ", 1],
+];
+test("splitSentences：小数点/URL/引号括号/省略号/换行的边界都正确", () => {
+  for (const [text, expected] of PUNCT_CASES) {
+    const spans = splitSentences(text);
+    assert.equal(spans.length, expected, `标点句被误切: ${text}\n实际: ${JSON.stringify(spans.map((s) => text.slice(s.start, s.end)))}`);
+  }
+});
+
+test("splitSentences：区间连续、不重叠、覆盖全文；空文本不崩", () => {
+  const samples = [
+    BUG_PARA,
+    ...ABBREV_CASES.map(([t]) => t),
+    ...PUNCT_CASES.map(([t]) => t),
+    ...LOWER_START_WORDS.split(" ").map((w) => `First ends here. ${w} continues.`),
+    "",
+  ];
+  for (const text of samples) {
+    const spans = splitSentences(text);
+    assert.ok(spans.length >= 1, `至少要有一段: ${JSON.stringify(text)}`);
+    let cursor = 0;
+    for (const sp of spans) {
+      assert.ok(sp.end >= sp.start, `区间 end 必须 >= start: ${JSON.stringify(spans)}`);
+      assert.ok(sp.start >= cursor, `区间不能重叠: ${JSON.stringify(spans)}`);
+      cursor = sp.end;
+    }
+    assert.ok(cursor >= text.length, `区间必须覆盖全文: ${JSON.stringify(spans)}`);
+  }
+  assert.deepEqual(splitSentences(""), [{ start: 0, end: 0 }]);
+});
+
+test("selectionSignals：回归原句的所在句只含当前句，不含上一句", () => {
+  const at = BUG_PARA.indexOf("comforts");
+  const sig = selectionSignals(BUG_PARA, at, at + "comforts".length, "word");
+  assert.ok(!sig.sentence.includes("I don't need"), `所在句不该混进上一句: ${sig.sentence}`);
+  assert.ok(sig.sentence.startsWith("pi comes"), `所在句应从 pi 开头: ${sig.sentence}`);
 });

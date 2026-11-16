@@ -1700,9 +1700,14 @@ function PickCard({
     };
   }, [anchor.quote, initialGloss, recall]);
 
-  /** 选区所在的整句（「整句没看懂」用）：采集信号时已经算好；回看时由 AI 上下文拼回 */
+  /**
+   * 选区所在的整句（「整句没看懂」用）：采集信号时已经算好；回看时由锚点拼回。
+   * ⚠️ 回看时不能用 aiContext.prefix —— 它是「给 AI 的上下文」，生词密度高时
+   * 会故意把上一句带进来（理解指代用）；而这里要的是纯粹的「所在句」本体。
+   * anchor.prefix/suffix 由 buildAnchor 截到句子边界，正好符合语义。
+   */
   const sentence = (
-    pick.signals?.sentence || `${aiContext.prefix}${anchor.quote}${aiContext.suffix}`
+    pick.signals?.sentence || `${anchor.prefix}${anchor.quote}${anchor.suffix}`
   ).trim();
   const isWholeSentence = sentence.length > 0 && quote.length >= sentence.length - 2;
 

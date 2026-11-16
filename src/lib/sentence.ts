@@ -8,40 +8,105 @@
  *   或该句 ≥8 词且其中 ≥75% 是用户已收进词库的生词 —— 说明用户卡的是整句，
  *   前文额外带上上一句（跨段时取前一段最后一句），用于理解指代与句间衔接
  *
- * 句子切分用 Intl.Segmenter（正确处理 Mr. / e.g. / 引号等，替代手写正则）。
- * 仅在浏览器事件回调中调用（点词/划选时），不参与 SSR 渲染，无 hydration 风险。
+ * 句子切分用确定性的正则 + 缩写白名单，不用 Intl.Segmenter。
+ * Segmenter 在两个方向都错（实测 ICU）：
+ *   ① "harness. pi comes" → 把小写 pi 当缩写，整段不切（线上锚点混入上一句的根因）；
+ *   ② "Mr. Brown." / "The U.S. President." → 把真缩写后接的大写词切成新句，
+ *      人名/机构名被拦腰截断。
+ * 正则不依赖 ICU 版本，服务端与浏览器结果一致，也无 hydration 风险。
  */
 
 type Span = { start: number; end: number };
 
-/** 段落按句子切分，返回每句的字符区间。环境不支持时退化为简单正则。 */
+/**
+ * 句号跟在以下词后面时不算句子边界。只收「不带内部点」的缩写；
+ * 带内部点的（e.g. / U.S. / Ph.D. / J.R.R. / a.m.）由 isAbbreviation 的含点规则覆盖。
+ *
+ * 刻意不放高频普通词（us / in / he / it / the ...）：放进去会把真句子漏切。
+ * 缩写后接大写词（Mr. Smith / U.S. President）也必须靠这张表挡住，不能只看大小写。
+ */
+const ABBREVIATIONS = new Set([
+  // 称谓、头衔、人名前缀
+  "mr", "mrs", "ms", "miss", "dr", "prof", "sr", "jr", "st", "mt",
+  "hon", "rev", "gen", "col", "capt", "lt", "sgt", "gov", "sen", "rep",
+  "pres", "fr", "br", "pr", "bro", "supt", "dir", "asst", "assoc", "adm", "maj",
+  // 拉丁语与学术通用缩写
+  "etc", "vs", "v", "viz", "cf", "approx", "appr", "est", "et", "al",
+  "id", "ibid", "sc", "nl", "seq", "ca",
+  // 机构、地址、编号
+  "inc", "ltd", "co", "corp", "dept", "univ", "assn", "inst", "no", "nos",
+  "ave", "blvd", "rd", "pl", "bldg", "ste",
+  // 引用、计量、学位
+  "fig", "eq", "chap", "sec", "p", "pp", "vol", "ed", "eds", "trans",
+  "ref", "refs", "fn", "oz", "lb", "ft", "kg", "km", "hr", "min",
+  "phd", "md", "ba", "ma", "bs", "ms", "mba", "jd", "llm", "llb", "dds", "dvm", "edd",
+  // 月份、星期（常以缩写点出现）
+  "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+  "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
+]);
+
+/** 取标点前紧邻的一个词；允许内部点，以便识别 e.g / U.S / Ph.D / J.R.R */
+function wordBefore(text: string): string | null {
+  const m = text.match(/([A-Za-z]+(?:\.[A-Za-z]+)*)$/);
+  return m ? m[1] : null;
+}
+
+function isAbbreviation(token: string): boolean {
+  // 带内部点的几乎都是缩写（e.g / i.e / U.S / Ph.D / a.m / J.R.R）；
+  // 版本号、IP、小数点的点后面是数字，匹配不到 wordBefore 的字母模式
+  if (token.includes(".")) return true;
+  return ABBREVIATIONS.has(token.toLowerCase());
+}
+
+/**
+ * 缩写后的句号默认不是句子边界，但「缩写 + 大写句首词」是明确的新句：
+ *   "etc. Then stopped." / "Ph.D. Then she left." / "p.m. Tomorrow we leave."
+ * 而 "Mr. Brown" / "U.S. President" / "vs. B" 的大写词是名字或代号，不在表里，
+ * 因此仍被当作缩写的一部分不切开。
+ */
+const SENTENCE_STARTERS = new Set([
+  "then", "now", "later", "next", "after", "before", "finally", "first", "second",
+  "we", "he", "she", "it", "they", "i", "you",
+  "this", "that", "these", "those",
+  "but", "and", "so", "however", "therefore", "thus", "hence", "moreover",
+  "besides", "also", "still", "yet", "instead", "otherwise", "meanwhile",
+  "in", "on", "at", "for", "from", "with", "as", "if", "when", "while",
+  "because", "although", "though", "overall", "tomorrow", "yesterday", "today",
+  "one", "another", "the", "there", "here",
+]);
+
+/**
+ * 句末标点 + 可跟随的收尾引号/括号 + 空白（或全文结束）。
+ * 小数点后的数字不会被匹配，因为点后面不是空白；URL 中的点同理。
+ */
+const SENT_END_RE = /[.!?…]+["'”’)\]]*(?:\s+|$)/g;
+
+/** 段落按句子切分，返回每句的字符区间（连续、不重叠、覆盖全文）。 */
 export function splitSentences(text: string): Span[] {
   if (text.length === 0) return [{ start: 0, end: 0 }];
 
-  if (typeof Intl !== "undefined" && typeof Intl.Segmenter !== "undefined") {
-    const seg = new Intl.Segmenter("en", { granularity: "sentence" });
-    return [...seg.segment(text)].map((s) => ({
-      start: s.index,
-      end: s.index + s.segment.length,
-    }));
+  const out: Span[] = [];
+  let cursor = 0;
+  SENT_END_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = SENT_END_RE.exec(text)) !== null) {
+    // before 从 cursor 起算：缩写被跳过后 cursor 不动，末词判断仍然落在标点前那一个词
+    const before = text.slice(cursor, m.index);
+    if (!before.trim()) continue; // 连续标点（"?!..."）不单独成句
+    const end = m.index + m[0].length;
+    const word = wordBefore(before);
+    if (word && isAbbreviation(word)) {
+      // 缩写后跟「大写句首词」才是一条真新句；否则（Mr. Brown / U.S. President）不切
+      const next = text.slice(end).match(/^\s*([A-Z][A-Za-z]*)/);
+      if (!(next && SENTENCE_STARTERS.has(next[1].toLowerCase()))) continue;
+    }
+
+    out.push({ start: cursor, end });
+    cursor = end;
   }
 
-  // 兜底：老环境没有 Segmenter，用朴素句末标点切分（够用，但不识别缩写）
-  const out: Span[] = [];
-  let last = 0;
-  for (const m of text.matchAll(/[^\n]+/g)) {
-    const lineStart = m.index!;
-    let s = lineStart;
-    for (const sm of m[0].matchAll(/[^.!?…]*[.!?…]+["')\]]*\s*/g)) {
-      const segStart = lineStart + sm.index!;
-      if (segStart + sm[0].length > s) {
-        out.push({ start: s, end: segStart + sm[0].length });
-        s = segStart + sm[0].length;
-      }
-    }
-    if (s < lineStart + m[0].length) out.push({ start: s, end: lineStart + m[0].length });
-    last = lineStart + m[0].length;
-  }
+  if (cursor < text.length) out.push({ start: cursor, end: text.length });
   return out.length ? out : [{ start: 0, end: text.length }];
 }
 
