@@ -198,7 +198,7 @@ async function runGenerate(
 
   if (run.audio) {
     const texts = [...new Set(rows.flatMap((r) => audioTextsOf(r.spec)))];
-    const got = await ensureAudioAll(texts, AUDIO_BUDGET_MS);
+    const got = await ensureAudioAll(texts, AUDIO_BUDGET_MS, run.audio);
     if (got < texts.length) console.warn("[cards] 句子音频没有全部合成", { setId, total: texts.length, got });
   }
   const now = Date.now();
@@ -527,7 +527,7 @@ export async function regenerateCard(user: Who, cardId: string): Promise<RegenOu
       .run(now, card.set_id);
   })();
   // P35：新卡的句子音频在后台合成，不等结果；预览时没合成好会按需现场合成
-  if (run.audio) for (const t of audioTextsOf(next)) void ensureAudio(t);
+  if (run.audio) for (const t of audioTextsOf(next)) void ensureAudio(t, run.audio);
   return { ok: true };
 }
 

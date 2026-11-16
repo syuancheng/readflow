@@ -89,6 +89,8 @@ export const SETTINGS_KEYS = {
   cardsAudio: "cards.audio",
   /** 语音合成（阿里云百炼）专用 Key，站级，只有主账号能改；没填时回退环境变量和「通义千问」的 Key */
   ttsKey: "tts.dashscope.apiKey",
+  /** P38：卡片句子配音的音色（站级，只有主账号能改；只接受 cards/voices.ts 里的音色） */
+  ttsVoice: "tts.voice",
   /** P33：墨墨会员档位 basic / pro，**按账号**（决定每张卡的字数上限），不回退站级 */
   markjiMembership: "markji.membership",
   // 个人资料：按账号隔离（profile.* 不回退站级），见 lib/settings-store.ts

@@ -100,7 +100,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     .prepare("UPDATE cards SET spec = ?, content = ?, edited = 1, needs_review = NULL, updated_at = ? WHERE id = ?")
     .run(JSON.stringify(next), rendered.content, now, id);
   // P35：改过的句子在后台重新合成音频，不等结果
-  if (audio) for (const t of audioTextsOf(next)) void ensureAudio(t);
+  if (audio) for (const t of audioTextsOf(next)) void ensureAudio(t, audio);
   return NextResponse.json({ ok: true, content: rendered.content });
 }
 

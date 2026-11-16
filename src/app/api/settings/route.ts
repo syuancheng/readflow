@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { ttsKey, ttsKeyAvailable, ttsKeySource } from "@/lib/tts";
+import { currentVoice, ttsKey, ttsKeyAvailable, ttsKeySource } from "@/lib/tts";
+import { isVoiceId } from "@/lib/cards/voices";
 import {
   PROVIDERS,
   SETTINGS_KEYS,
@@ -102,7 +103,7 @@ export async function GET() {
     cardsAudio,
     ttsKeyReady: ttsKeyAvailable(),
     // 设置 → 模型 →「语音合成模型」：只给主账号；只回脱敏值和来源，不回 Key 本身
-    tts: { configured: ttsKeyAvailable(), maskedKey: maskSecret(ttsKey()), source: ttsKeySource() },
+    tts: { configured: ttsKeyAvailable(), maskedKey: maskSecret(ttsKey()), source: ttsKeySource(), voice: currentVoice().voice },
     markjiMembership,
     profile: profileFromSettings(settings),
   });
@@ -132,6 +133,7 @@ type PutBody = {
   /** 语音合成（阿里云百炼）专用 Key：只有主账号能改；ttsClear 清掉单独填的 Key */
   ttsApiKey?: string;
   ttsClear?: boolean;
+  ttsVoice?: string;
   /** P33：本人的墨墨会员档位 */
   markjiMembership?: "basic" | "pro";
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
@@ -194,6 +196,11 @@ export async function PUT(req: Request) {
   }
 
   // 语音合成 Key 属于站级配置（卡片配音是站级功能），只有主账号能改
+  if (body.ttsVoice !== undefined) {
+    if (!user.isOwner) return NextResponse.json({ error: "只有主账号能修改配音音色" }, { status: 403 });
+    if (!isVoiceId(body.ttsVoice)) return NextResponse.json({ error: "不认识这个音色" }, { status: 400 });
+    setSetting(SETTINGS_KEYS.ttsVoice, body.ttsVoice, GLOBAL_USER);
+  }
   if (body.ttsApiKey !== undefined || body.ttsClear !== undefined) {
     if (!user.isOwner) {
       return NextResponse.json({ error: "只有主账号能修改语音合成的 Key" }, { status: 403 });

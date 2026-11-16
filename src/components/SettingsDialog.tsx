@@ -15,6 +15,7 @@ import {
   type ProfileErrors,
 } from "@/lib/profile-form";
 import VoicePicker from "./VoicePicker";
+import { VOICE_OPTIONS } from "@/lib/cards/voices";
 import InvitePanel from "./InvitePanel";
 import LearnerPanel from "./LearnerPanel";
 import {
@@ -66,7 +67,7 @@ type SettingsPayload = {
   cardsAudio?: "on" | "off";
   ttsKeyReady?: boolean;
   /** P37：语音合成 Key 的状态（只有主账号能看到）；source = 正在用哪一个 Key */
-  tts?: { configured: boolean; maskedKey: string; source: "setting" | "env" | "qwen" | null };
+  tts?: { configured: boolean; maskedKey: string; source: "setting" | "env" | "qwen" | null; voice: string };
   markjiMembership?: "basic" | "pro";
   profile?: Profile;
 };
@@ -289,6 +290,8 @@ export default function SettingsDialog({
   const [showMarkji, setShowMarkji] = useState(false);
   const [ttsInput, setTtsInput] = useState("");
   const [showTts, setShowTts] = useState(false);
+  const [sampling, setSampling] = useState<string | null>(null);
+  const sampleRef = useRef<HTMLAudioElement | null>(null);
   const [notice, setNotice] = useState<Note | null>(null);
   /** 刚生成的插件 Token 明文：只在本次打开的弹窗里显示，关掉就再也看不到 */
   const [freshToken, setFreshToken] = useState<string | null>(null);
@@ -310,6 +313,9 @@ export default function SettingsDialog({
       setLoading(false);
     }
   }
+
+  // 关掉设置时停掉还在放的试听
+  useEffect(() => () => sampleRef.current?.pause(), []);
 
   useEffect(() => {
     void load();
@@ -543,6 +549,30 @@ export default function SettingsDialog({
     if (payload) {
       setTtsInput("");
       setNotice({ kind: "ok", text: "已保存语音合成的 Key" });
+    }
+  }
+
+  /** 试听：同时只放一段；再点正在放的那个就停 */
+  async function playSample(id: string) {
+    sampleRef.current?.pause();
+    if (sampling === id) {
+      setSampling(null);
+      return;
+    }
+    setSampling(id);
+    try {
+      const res = await fetch(`/api/tts/sample?voice=${encodeURIComponent(id)}`);
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+      const audio = new Audio(URL.createObjectURL(await res.blob()));
+      sampleRef.current = audio;
+      audio.onended = () => setSampling((cur) => (cur === id ? null : cur));
+      await audio.play();
+    } catch (err) {
+      setSampling(null);
+      setNotice({ kind: "err", text: `试听失败：${err instanceof Error ? err.message : String(err)}` });
     }
   }
 
@@ -1001,6 +1031,45 @@ export default function SettingsDialog({
                             </button>
                           )}
                         </div>
+                        <p className="st-label st-voice-label" id="st-voice-label">
+                          配音音色
+                        </p>
+                        <div className="st-providers" role="radiogroup" aria-labelledby="st-voice-label">
+                          {VOICE_OPTIONS.map((o) => {
+                            const selected = (data.tts?.voice ?? "Jennifer") === o.id;
+                            return (
+                              <div key={o.id} className={`st-provider ${selected ? "st-provider-on" : ""}`}>
+                                <span className="st-provider-name">
+                                  <b>
+                                    {o.name} · {o.id}
+                                  </b>
+                                  <span>{o.desc}</span>
+                                </span>
+                                <span className="st-provider-actions">
+                                  <button
+                                    className="st-mini-btn"
+                                    disabled={!data.tts?.configured}
+                                    onClick={() => void playSample(o.id)}
+                                    aria-label={`试听 ${o.name}`}
+                                  >
+                                    {sampling === o.id ? "停止" : "试听"}
+                                  </button>
+                                  <button
+                                    className={`st-use ${selected ? "st-use-on" : ""}`}
+                                    disabled={isBusy}
+                                    onClick={() => void (selected ? null : put({ ttsVoice: o.id }))}
+                                    role="radio"
+                                    aria-checked={selected}
+                                    aria-label={`使用 ${o.name}`}
+                                  >
+                                    {selected ? "使用中" : "设为使用"}
+                                  </button>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="st-help">换音色只影响之后新做的卡；已经做好的草稿和推送过的卡保持原来的声音。</p>
                       </div>
                     )}
 

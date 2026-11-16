@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { sqlite } from "@/db/sqlite";
 import { renderPreview } from "@/lib/cards/render";
+import { audioTextsOf } from "@/lib/cards/audio";
 import { previewVoiceOf } from "@/lib/cards/store";
 
 export const runtime = "nodejs";
@@ -53,7 +54,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       needsReview: c.needs_review,
       edited: c.edited === 1,
       spec,
-      preview: renderPreview(spec, { sourceTitle: text?.title ?? "", audio: previewVoiceOf(c.content) }),
+      preview: renderPreview(spec, { sourceTitle: text?.title ?? "", audio: previewVoiceOf(c.content, audioTextsOf(spec)) }),
       content: c.content,
     };
   });

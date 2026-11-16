@@ -14,7 +14,8 @@ import { getSetting } from "@/lib/settings-store";
 import { SETTINGS_KEYS } from "@/lib/config";
 import { isRetryableError } from "@/lib/retry";
 import { audioKey, normalizeAudioText, speakable } from "@/lib/cards/audio";
-import { VOICE } from "@/lib/cards/voices";
+import { voiceOf } from "@/lib/cards/voices";
+import type { Voice } from "@/lib/cards/audio";
 import { audioMimeOf, buildTtsRequest, parseTtsResponse, resolveTtsKeyWithSource, ttsBase, type TtsKeySource } from "@/lib/cards/tts-api";
 
 export const TTS_CONCURRENCY = 3;
@@ -82,8 +83,8 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
 }
 
 /** 合成一次：请求百炼 → 下载音频。出错抛异常，由调用方决定是否重试 */
-async function synthesizeOnce(text: string, apiKey: string): Promise<{ bytes: Buffer; mime: string; ext: string }> {
-  const req = buildTtsRequest(ttsBase(process.env), apiKey, text, VOICE);
+async function synthesizeOnce(text: string, apiKey: string, voice: Voice): Promise<{ bytes: Buffer; mime: string; ext: string }> {
+  const req = buildTtsRequest(ttsBase(process.env), apiKey, text, voice);
   const res = await fetchWithTimeout(req.url, req.init);
   const json = await res.json().catch(() => null);
   if (!res.ok) {
@@ -101,13 +102,13 @@ async function synthesizeOnce(text: string, apiKey: string): Promise<{ bytes: Bu
   return { bytes, ...audioMimeOf(audio.headers.get("content-type"), parsed.url) };
 }
 
-async function synthesizeAndStore(text: string, key: string): Promise<StoredAudio | null> {
+async function synthesizeAndStore(text: string, key: string, voice: Voice): Promise<StoredAudio | null> {
   const apiKey = ttsKey();
   if (!apiKey) return null;
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const { bytes, mime, ext } = await slot(() => synthesizeOnce(text, apiKey));
+      const { bytes, mime, ext } = await slot(() => synthesizeOnce(text, apiKey, voice));
       const dir = audioDir();
       fs.mkdirSync(dir, { recursive: true });
       const rel = path.join("tts", `${key}.${ext}`);
@@ -122,7 +123,7 @@ async function synthesizeAndStore(text: string, key: string): Promise<StoredAudi
            ON CONFLICT(key) DO UPDATE SET file_path = excluded.file_path, mime = excluded.mime,
              bytes = excluded.bytes, created_at = excluded.created_at`,
         )
-        .run(key, text, VOICE.model, VOICE.voice, rel, mime, bytes.length, Date.now());
+        .run(key, text, voice.model, voice.voice, rel, mime, bytes.length, Date.now());
       return { key, filePath: abs, mime };
     } catch (err) {
       lastErr = err;
@@ -138,16 +139,21 @@ async function synthesizeAndStore(text: string, key: string): Promise<StoredAudi
   return null;
 }
 
-/** 确保这句英文有音频：已有直接返回；没有就合成（同 key 的并发请求合并成一个） */
-export function ensureAudio(rawText: string): Promise<StoredAudio | null> {
+/** 站长在「模型 → 语音合成模型」里选的音色；没选过是默认音色 */
+export function currentVoice(): Voice {
+  return voiceOf(getSetting(SETTINGS_KEYS.ttsVoice));
+}
+
+/** 确保这句英文有音频：已有直接返回；没有就合成（同 key 的并发请求合并成一个）。音色默认用当前设置 */
+export function ensureAudio(rawText: string, voice: Voice = currentVoice()): Promise<StoredAudio | null> {
   const text = normalizeAudioText(rawText);
   if (!speakable(text)) return Promise.resolve(null);
-  const key = audioKey(text, VOICE);
+  const key = audioKey(text, voice);
   const have = storedAudio(key);
   if (have) return Promise.resolve(have);
   const pending = inflight.get(key);
   if (pending) return pending;
-  const job = synthesizeAndStore(text, key).finally(() => inflight.delete(key));
+  const job = synthesizeAndStore(text, key, voice).finally(() => inflight.delete(key));
   inflight.set(key, job);
   return job;
 }
@@ -156,10 +162,10 @@ export function ensureAudio(rawText: string): Promise<StoredAudio | null> {
  * 一组句子全部确保有音频，最多等 budgetMs；超时的部分在后台继续合成。
  * 返回在时限内拿到音频的句子数（日志用）。
  */
-export async function ensureAudioAll(texts: string[], budgetMs: number): Promise<number> {
+export async function ensureAudioAll(texts: string[], budgetMs: number, voice: Voice = currentVoice()): Promise<number> {
   if (texts.length === 0) return 0;
   let done = 0;
-  const all = Promise.all(texts.map((t) => ensureAudio(t).then((r) => { if (r) done++; })));
+  const all = Promise.all(texts.map((t) => ensureAudio(t, voice).then((r) => { if (r) done++; })));
   let timer: NodeJS.Timeout | undefined;
   await Promise.race([all, new Promise<void>((r) => { timer = setTimeout(r, budgetMs); })]);
   if (timer) clearTimeout(timer);
