@@ -170,6 +170,7 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
   let acc = "";
+  const abort = new AbortController();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -177,7 +178,7 @@ export async function POST(req: NextRequest) {
         for await (const chunk of streamSectionSummary({
           body: span.map((r) => r.content).join("\n\n"),
           paragraphCount: span.length,
-        }, ai)) {
+        }, ai, abort.signal)) {
           acc += chunk;
           controller.enqueue(encoder.encode(chunk));
         }
@@ -201,11 +202,16 @@ export async function POST(req: NextRequest) {
             .run();
         }
       } catch (err) {
+        if (abort.signal.aborted) return; // 主动取消不是错误，也别把半成品写回
         const msg = err instanceof Error ? err.message : "summary failed";
         controller.enqueue(encoder.encode(`\n\n[Error: ${msg}]`));
       } finally {
         controller.close();
       }
+    },
+    cancel() {
+      // 前端重新生成 / 切段时中止上游模型调用，别让这条流白占连接
+      abort.abort();
     },
   });
 

@@ -132,7 +132,7 @@ export default function ProfileMenu() {
   async function logout() {
     setOpen(false);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST" }).then((res) => res.arrayBuffer());
     } finally {
       // 服务端已吊销 session；清掉客户端可能缓存的页面再回登录页
       router.replace("/login");

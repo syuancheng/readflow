@@ -135,6 +135,7 @@ export default function TextManageDialog({
     try {
       const res = await fetch(`/api/texts/${meta.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
+      await res.arrayBuffer(); // 消费响应体，连接才能归还池子
       onDeleted(meta.id);
       onClose();
       router.refresh();

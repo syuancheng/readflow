@@ -90,7 +90,8 @@ async function* openaiStream(
     temperature: opts.temperature ?? 0.3,
     // null = 不带 max_tokens（讲解用：模型写到讲完为止，只受服务商自身上限约束）
     ...(opts.maxTokens === null ? {} : { max_tokens: opts.maxTokens ?? 1200 }),
-  });
+    // signal 属于 SDK 的 RequestOptions，不在请求体里；前端切词/关页时用它掐断上游流
+  }, { signal: opts.signal });
 
   let finish: string | null = null;
   for await (const chunk of stream) {

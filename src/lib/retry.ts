@@ -45,6 +45,7 @@ const NON_RETRYABLE_MESSAGE = [
   "permission_denied",
   "invalid_request_error",
   "unsupported",
+  "abort", // 用户主动取消（切词 / 关页面）不该再重试，否则流会继续占着连接
 ];
 type ErrorLike = {
   status?: number;

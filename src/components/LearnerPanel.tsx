@@ -162,6 +162,7 @@ export default function LearnerPanel() {
     try {
       const res = await fetch("/api/learner/reset", { method: "POST" });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "清空失败");
+      await res.arrayBuffer(); // 消费成功响应体，连接才能归还池子
       setEditing(false);
       setNoteSaved(false);
       await load();
@@ -218,10 +219,12 @@ export default function LearnerPanel() {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ showFeedback: next }),
-              }).then(() => {
-                // 让阅读页立刻重读开关，不用等下次打开文章
-                window.dispatchEvent(new Event(LEARNER_CHANGED_EVENT));
-              });
+              })
+                .then((res) => res.arrayBuffer()) // 消费响应体，避免连接占着不放
+                .then(() => {
+                  // 让阅读页立刻重读开关，不用等下次打开文章
+                  window.dispatchEvent(new Event(LEARNER_CHANGED_EVENT));
+                });
             }}
           >
             <span className="st-switch-knob" />

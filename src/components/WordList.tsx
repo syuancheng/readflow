@@ -201,7 +201,7 @@ export default function WordList({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ starred }),
-        }),
+        }).then((res) => res.arrayBuffer()), // 消费响应体，连接才能归还池子
       ),
     );
   }
@@ -214,7 +214,9 @@ export default function WordList({
       for (const id of ids) next.delete(id);
       return next;
     });
-    await Promise.allSettled(ids.map((id) => fetch(`/api/words/${id}`, { method: "DELETE" })));
+    await Promise.allSettled(
+      ids.map((id) => fetch(`/api/words/${id}`, { method: "DELETE" }).then((res) => res.arrayBuffer())),
+    );
   }
 
   async function batch(action: "star" | "unstar" | "delete") {

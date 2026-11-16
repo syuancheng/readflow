@@ -165,7 +165,8 @@ export async function handleExplain(
     domainBlock: narrowAskKind(params.askKind) === "domain" ? domainBlockFor(params.textId, user.id) : "",
   };
   const encoder = new TextEncoder();
-  const iter = streamExplain(enriched, ai)[Symbol.asyncIterator]();
+  const abort = new AbortController();
+  const iter = streamExplain(enriched, ai, abort.signal)[Symbol.asyncIterator]();
   let cancelled = false;
   let assistantText = ""; // P33：完整讲解全文（含建议行），缓存做卡用
   let streamDone = false; // 只缓存「完整成功」的结果（spec §7.2）
@@ -223,6 +224,8 @@ export async function handleExplain(
     // 前端切到别的词会 abort 请求：顺着 return() 关掉上游模型流，别继续烧 token
     cancel() {
       cancelled = true;
+      // 不 abort 的话，SDK 那次调用会继续跑到超时，连接也一直占着
+      abort.abort();
       void iter.return?.(undefined);
     },
   });

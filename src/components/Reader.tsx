@@ -696,6 +696,9 @@ export default function Reader({
   } | null>(null);
   const hoverAnnRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  // 分段小结的流：重新生成 / 切段时先中止上一条，避免多条 SSE 占满连接池
+  const summaryAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => summaryAbortRef.current?.abort(), []);
 
   // 用 ref 拿最新的批注列表，避免回看 / 复用释义时闭包停在弹层打开时的快照。
   const annotationsRef = useRef<Annotation[]>(annotations);
@@ -836,12 +839,16 @@ export default function Reader({
 
   /** 生成（或重新生成）某个区间的小结，流式回填 */
   async function runSummary(sec: Section, regenerate: boolean) {
+    summaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    summaryAbortRef.current = controller;
     setOpenSec(sec.endIdx);
     setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "loading", content: "" } }));
     try {
       const res = await fetch("/api/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           textId,
           startIdx: sec.startIdx,
@@ -873,6 +880,8 @@ export default function Reader({
       setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "done", content: text } }));
       setSummaries((prev) => ({ ...prev, [sec.endIdx]: text }));
     } catch (err) {
+      // 被新一次生成 / 卸载中止：不是失败，交给接管的那次流显示结果
+      if (controller.signal.aborted) return;
       setSecState((prev) => ({
         ...prev,
         [sec.endIdx]: {
@@ -1768,6 +1777,9 @@ function PickCard({
    * req 为空 = 默认讲解（点词自动触发的那次）。
    */
   async function triggerAI(req: AskReq = {}) {
+    // 同一条批注上连续追问时，先中止上一条流：否则多条 SSE 同时挂着，
+    // 每条都占一个连接，累积到 6 条就会让整页请求停在 Stalled。
+    aiAbortRef.current?.abort();
     const controller = new AbortController();
     aiAbortRef.current = controller;
 

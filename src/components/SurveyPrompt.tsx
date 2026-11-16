@@ -11,7 +11,7 @@ export default function SurveyPrompt() {
   async function dismiss() {
     setShow(false);
     try {
-      await fetch("/api/learner/dismiss", { method: "POST" });
+      await fetch("/api/learner/dismiss", { method: "POST" }).then((res) => res.arrayBuffer());
     } catch {
       // 关闭动作先生效，接口失败也不把卡片再弹回来骚扰用户
     }

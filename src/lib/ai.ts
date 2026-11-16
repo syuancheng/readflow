@@ -426,6 +426,7 @@ export function explainTurns(params: ExplainParams): ChatTurn[] {
 export async function* streamExplain(
   params: ExplainParams,
   ai?: AiConfig,
+  signal?: AbortSignal,
 ): AsyncGenerator<string, void, unknown> {
   const turns = explainTurns(params);
 
@@ -436,6 +437,7 @@ export async function* streamExplain(
       // 讲解不设输出上限（用户 2026-11-15 决定）：回答多长就完整显示，长度只由提示词控制。
       // 原来的 400 / 600 会让模型写到一半被迫停笔，页面停在半句话。
       maxTokens: null,
+      signal,
     },
     ai,
   );
@@ -453,7 +455,7 @@ export function hasModelConfigured(ai?: AiConfig): boolean {
  */
 async function* streamTurns(
   turns: ChatTurn[],
-  opts: { temperature: number; maxTokens: number | null },
+  opts: { temperature: number; maxTokens: number | null; signal?: AbortSignal },
   ai?: AiConfig,
 ): AsyncGenerator<string, void, unknown> {
   const provider = resolveProvider(ai?.settings ?? currentSettings(), ai?.env ?? process.env);
@@ -504,7 +506,7 @@ export async function* streamSectionSummary(params: {
   /** 区间原文，段落之间用空行分隔 */
   body: string;
   paragraphCount: number;
-}, ai?: AiConfig): AsyncGenerator<string, void, unknown> {
+}, ai?: AiConfig, signal?: AbortSignal): AsyncGenerator<string, void, unknown> {
   const turns: ChatTurn[] = [
     { role: "system", content: buildSummaryPrompt() },
     {
@@ -518,6 +520,7 @@ export async function* streamSectionSummary(params: {
     {
       temperature: 0.3,
       maxTokens: 400, // 120 字中文足够，留余量避免被截断
+      signal,
     },
     ai,
   );

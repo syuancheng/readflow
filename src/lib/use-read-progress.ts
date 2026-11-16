@@ -97,9 +97,14 @@ export function useReadProgress({
         headers: { "Content-Type": "application/json" },
         body,
         keepalive,
-      }).catch(() => {
-        dirtyRef.current = true; // 下个周期重试
-      });
+      })
+        // 必须消费响应体：Next 返回的是 keep-alive + chunked，body 不读完
+        // 这条连接就不会归还 Chrome 的每域名连接池。滚动时连续上报会攒够
+        // 6 条未释放连接，之后查词等所有请求都卡在 Stalled（实测可复现）。
+        .then((res) => res.arrayBuffer())
+        .catch(() => {
+          dirtyRef.current = true; // 下个周期重试
+        });
     };
 
     // 滚动停止 350ms 就立即上报，不再干等 2s 定时器 ——「滚完就退出」是
@@ -158,6 +163,7 @@ export function useReadProgress({
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await res.arrayBuffer(); // 消费响应体，连接才能归还池子
     } catch {
       setCompletedAt(previous); // 失败回滚，刷新页面由服务端值兜底
     } finally {
