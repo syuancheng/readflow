@@ -140,11 +140,16 @@ test("P36：开关关闭时是固定深度——没有任何按「同句第几�
   assert.ok(en.includes("never decides depth"));
 });
 
-test("P34：个性化深度指引写明怎么用「最近的反馈」；关闭时提示词不变", () => {
+test("P34：个性化深度指引只传反馈信号与三档的用意，不给分档操作手册；关闭时提示词不变", () => {
   const zh = buildSystemPrompt("en", false, "steer", { personalized: true });
-  assert.ok(zh.includes("「最近的反馈」") && zh.includes("向被评「刚好」的那次讲法靠拢") && zh.includes("以最近的为准"));
+  assert.ok(zh.includes("「最近的反馈」") && zh.includes("设这三档只为提醒你一件事") && zh.includes("以最近的为准"));
+  assert.ok(zh.includes("「太浅」是讲完他还是没懂") && zh.includes("「太深」是你讲得太透、他没机会自己想"));
+  assert.ok(!zh.includes("向被评「刚好」的那次讲法靠拢"), "不该再说向某次靠拢");
+  assert.ok(!zh.includes("避开被评「太深」"), "不该再说避开某次做法");
   const en = buildSystemPrompt("en", true, "steer", { personalized: true });
   assert.ok(en.includes("最近的反馈") && en.includes("follow the recent feedback"));
+  assert.ok(en.includes("not an instruction list"), "英文版同样明确这不是操作清单");
+  assert.ok(!en.includes("move toward the answer rated"), "英文版不该再说向某次靠拢");
   assert.ok(!buildSystemPrompt("en", false, "steer", { personalized: false }).includes("最近的反馈"));
 });
 
