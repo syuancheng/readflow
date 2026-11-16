@@ -6,11 +6,15 @@
  *
  * 表单控件（不是药丸）：单选题用下拉框，Q3 是唯一的多选题，用复选框。
  * 每题都可以跳过：下拉选回「请选择」就是清空；复选框全不勾也行。
+ * P39：Q3 勾了「考试备考」才追问「在备考哪个考试」「目标分数」；取消勾选时一并清掉。
  */
 import {
   SURVEY_QUESTIONS,
   EXAM_SCORE_BANDS,
+  TARGET_SCORE_BANDS,
   showScoreQuestion,
+  showTargetExamQuestion,
+  showTargetScoreQuestion,
   type SurveyAnswers,
   type SurveyOption,
 } from "@/lib/learner/survey";
@@ -43,6 +47,35 @@ export default function SurveyForm({
           );
         }
 
+        if (q.id === "targetExam") {
+          if (!showTargetExamQuestion(value.goals)) return null;
+          return (
+            <SelectQuestion
+              key={q.id}
+              id={`survey-${q.id}`}
+              title={q.title}
+              options={q.options}
+              value={value.targetExam}
+              // 换考试时清掉旧目标分，避免出现「托福 + 7 分」这种错档
+              onChange={(v) => set({ targetExam: v as SurveyAnswers["targetExam"], targetScore: undefined })}
+            />
+          );
+        }
+
+        if (q.id === "targetScore") {
+          if (!showTargetScoreQuestion(value)) return null;
+          return (
+            <SelectQuestion
+              key={q.id}
+              id={`survey-${q.id}`}
+              title={q.title}
+              options={TARGET_SCORE_BANDS[value.targetExam!]}
+              value={value.targetScore}
+              onChange={(v) => set({ targetScore: v })}
+            />
+          );
+        }
+
         if (q.id === "goals") {
           const cur = value.goals ?? [];
           return (
@@ -60,7 +93,13 @@ export default function SurveyForm({
                       <input
                         type="checkbox"
                         checked={on}
-                        onChange={() => set({ goals: on ? cur.filter((x) => x !== g) : [...cur, g] })}
+                        onChange={() =>
+                          set({
+                            goals: on ? cur.filter((x) => x !== g) : [...cur, g],
+                            // 取消「考试备考」时，追问的两题一起清掉
+                            ...(on && g === "exam" ? { targetExam: undefined, targetScore: undefined } : {}),
+                          })
+                        }
                       />
                       {o.label}
                     </label>

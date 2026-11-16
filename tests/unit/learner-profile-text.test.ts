@@ -160,3 +160,19 @@ test("P34 hasUsableProfile：最近 30 天反馈 ≥3 次也算有档案（2 次
   assert.equal(hasUsableProfile({ ...none, recentFeedbackCount: 3 }), true);
   assert.equal(hasUsableProfile({ ...none }), false);
 });
+
+test("P39 学生档案带「正在备考」一行，排在主要阅读之后、希望讲解之前", () => {
+  const text = buildLearnerBlock({
+    level: { vocab: 5000, cefr: "B2" },
+    survey: { goals: ["academic", "exam"], targetExam: "ielts", targetScore: "ielts_7", stylePref: "detailed" },
+    stats: null,
+    note: null,
+  });
+  const lines = text.split("\n");
+  const goals = lines.findIndex((l) => l.startsWith("- 主要阅读："));
+  const target = lines.indexOf("- 正在备考：雅思，目标 7 分");
+  const style = lines.findIndex((l) => l.startsWith("- 希望讲解："));
+  assert.ok(goals >= 0 && target === goals + 1 && style === target + 1, text);
+  const none = buildLearnerBlock({ level: null, survey: { goals: ["exam"] }, stats: null, note: null });
+  assert.ok(!none.includes("正在备考"), none);
+});

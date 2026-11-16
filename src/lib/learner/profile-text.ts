@@ -11,6 +11,7 @@ import {
   IDENTITY_LABEL,
   GOAL_LABEL,
   STYLE_LABEL,
+  targetExamText,
   type SurveyAnswers,
 } from "./survey";
 import type { BehaviorStats, LearnerLevel } from "./types";
@@ -43,6 +44,7 @@ const HEAD = "学生档案（供你判断讲多深、讲什么；回答里不要
 const P_LEVEL = "- 估计水平：";
 const P_IDENTITY = "- 身份：";
 const P_GOALS = "- 主要阅读：";
+const P_TARGET = "- 正在备考：";
 const P_STYLE = "- 希望讲解：";
 const P_DIFFICULTY = "- 常见难点：";
 const P_FEEDBACK = "- 以往反馈：";
@@ -116,6 +118,8 @@ export function buildLearnerBlock(input: {
       text: P_GOALS + survey.goals.map((g) => GOAL_LABEL.get(g) ?? "").filter(Boolean).join("、"),
     });
   }
+  const target = targetExamText(survey);
+  if (target) lines.push({ key: "target", text: P_TARGET + target });
   if (survey?.stylePref) lines.push({ key: "style", text: P_STYLE + (STYLE_LABEL.get(survey.stylePref) ?? "") });
   if (stats?.difficulties?.length) {
     lines.push({
