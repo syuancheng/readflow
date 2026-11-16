@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ttsKeyAvailable } from "@/lib/tts";
+import { ttsKey, ttsKeyAvailable, ttsKeySource } from "@/lib/tts";
 import {
   PROVIDERS,
   SETTINGS_KEYS,
@@ -101,6 +101,8 @@ export async function GET() {
     cardsListening,
     cardsAudio,
     ttsKeyReady: ttsKeyAvailable(),
+    // 设置 → 模型 →「语音合成模型」：只给主账号；只回脱敏值和来源，不回 Key 本身
+    tts: { configured: ttsKeyAvailable(), maskedKey: maskSecret(ttsKey()), source: ttsKeySource() },
     markjiMembership,
     profile: profileFromSettings(settings),
   });
@@ -127,6 +129,9 @@ type PutBody = {
   cardsListening?: "on" | "off";
   /** P35：站级卡片句子配音开关，只有主账号能改 */
   cardsAudio?: "on" | "off";
+  /** 语音合成（阿里云百炼）专用 Key：只有主账号能改；ttsClear 清掉单独填的 Key */
+  ttsApiKey?: string;
+  ttsClear?: boolean;
   /** P33：本人的墨墨会员档位 */
   markjiMembership?: "basic" | "pro";
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
@@ -186,6 +191,19 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "开关取值只能是 on 或 off" }, { status: 400 });
     }
     setSetting(key, v, GLOBAL_USER);
+  }
+
+  // 语音合成 Key 属于站级配置（卡片配音是站级功能），只有主账号能改
+  if (body.ttsApiKey !== undefined || body.ttsClear !== undefined) {
+    if (!user.isOwner) {
+      return NextResponse.json({ error: "只有主账号能修改语音合成的 Key" }, { status: 403 });
+    }
+    if (body.ttsClear === true) {
+      deleteSetting(SETTINGS_KEYS.ttsKey, GLOBAL_USER);
+    } else {
+      const key = str(body.ttsApiKey);
+      if (key && !isMaskedValue(key)) setSetting(SETTINGS_KEYS.ttsKey, key, GLOBAL_USER);
+    }
   }
 
   // P33：会员档位是个人的（决定自己卡片的字数上限），写到本人行

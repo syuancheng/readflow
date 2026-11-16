@@ -65,6 +65,8 @@ type SettingsPayload = {
   /** P35：卡片句子配音（站级）与百炼 Key 是否可用（只有主账号能看到） */
   cardsAudio?: "on" | "off";
   ttsKeyReady?: boolean;
+  /** P37：语音合成 Key 的状态（只有主账号能看到）；source = 正在用哪一个 Key */
+  tts?: { configured: boolean; maskedKey: string; source: "setting" | "env" | "qwen" | null };
   markjiMembership?: "basic" | "pro";
   profile?: Profile;
 };
@@ -248,6 +250,7 @@ const NAV_ICON: Record<NavId, string> = {
   invites: "user",
   models: "model",
   markji: "book",
+  features: "model",
   reading: "speaker",
   extension: "puzzle",
   storage: "shield",
@@ -284,6 +287,8 @@ export default function SettingsDialog({
   const [testNote, setTestNote] = useState<Note | null>(null);
   const [markjiInput, setMarkjiInput] = useState("");
   const [showMarkji, setShowMarkji] = useState(false);
+  const [ttsInput, setTtsInput] = useState("");
+  const [showTts, setShowTts] = useState(false);
   const [notice, setNotice] = useState<Note | null>(null);
   /** 刚生成的插件 Token 明文：只在本次打开的弹窗里显示，关掉就再也看不到 */
   const [freshToken, setFreshToken] = useState<string | null>(null);
@@ -527,6 +532,26 @@ export default function SettingsDialog({
     if (payload) setNotice({ kind: "ok", text: "已清除墨墨 Token" });
   }
 
+  // ---------- 语音合成（阿里云百炼） ----------
+
+  async function saveTts() {
+    if (!ttsInput.trim()) {
+      setNotice({ kind: "err", text: "请输入阿里云百炼的 API Key" });
+      return;
+    }
+    const payload = await put({ ttsApiKey: ttsInput.trim() });
+    if (payload) {
+      setTtsInput("");
+      setNotice({ kind: "ok", text: "已保存语音合成的 Key" });
+    }
+  }
+
+  async function clearTts() {
+    setTtsInput("");
+    const payload = await put({ ttsClear: true });
+    if (payload) setNotice({ kind: "ok", text: "已清除语音合成的 Key" });
+  }
+
   async function regenerateToken() {
     if (data?.extension.hasToken && !window.confirm("重新生成后，插件里旧的 Token 会立即失效，需要把新的填进去。继续吗？")) return;
     const payload = await put({ regenerateExtensionToken: true });
@@ -596,9 +621,12 @@ export default function SettingsDialog({
 
   const current = data?.providers.find((p) => p.id === active) ?? null;
   const isBusy = busy !== null;
-  // 「邀请朋友」只有主账号能用
+  // 「邀请朋友」「AI 功能」只有主账号能用
   const groups = filterNavGroups(query)
-    .map((g) => ({ ...g, items: g.items.filter((it) => it.id !== "invites" || data?.canEditSite === true) }))
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((it) => (it.id !== "invites" && it.id !== "features") || data?.canEditSite === true),
+    }))
     .filter((g) => g.items.length > 0);
   const options = editor ? modelOptionsFor(editor.id) : [];
 
@@ -909,74 +937,146 @@ export default function SettingsDialog({
                         })}
                       </div>
 
-                      {data?.canEditSite === true && (
-                        <div className="st-reading-row st-reading-row-static">
-                          <span className="st-reading-text">
-                            <b>个性化讲解</b>
-                            <span>关闭后按固定深度讲解，不参考学习档案；要讲整句或句子结构时点「问 AI」</span>
-                          </span>
-                          <button
-                            type="button"
-                            className={`st-switch ${data?.aiPersonalized !== "off" ? "on" : ""}`}
-                            role="switch"
-                            aria-checked={data?.aiPersonalized !== "off"}
-                            aria-label="个性化讲解"
-                            disabled={isBusy}
-                            onClick={() => void put({ aiPersonalized: data?.aiPersonalized === "off" ? "on" : "off" })}
-                          >
-                            <span className="st-switch-knob" />
-                          </button>
-                        </div>
-                      )}
-                      {data?.canEditSite === true && (
-                        <div className="st-reading-row st-reading-row-static">
-                          <span className="st-reading-text">
-                            <b>做卡</b>
-                            <span>关闭后隐藏阅读页的「＋ 做成卡片」和词库的「待推送」，已有草稿保留</span>
-                          </span>
-                          <button
-                            type="button"
-                            className={`st-switch ${data?.cardsEnabled !== "off" ? "on" : ""}`}
-                            role="switch"
-                            aria-checked={data?.cardsEnabled !== "off"}
-                            aria-label="做卡"
-                            disabled={isBusy}
-                            onClick={() => void put({ cardsEnabled: data?.cardsEnabled === "off" ? "on" : "off" })}
-                          >
-                            <span className="st-switch-knob" />
-                          </button>
-                        </div>
-                      )}
-                      {data?.canEditSite === true && (
-                        <div className="st-reading-row st-reading-row-static">
-                          <span className="st-reading-text">
-                            <b>卡片句子配音</b>
-                            <span>
-                              {data?.ttsKeyReady
-                                ? "用阿里云百炼合成，Key 和「通义千问」那一栏共用（北京地域）"
-                                : "还没有填阿里云百炼的 Key，卡片会先不带音频"}
-                            </span>
-                          </span>
-                          <button
-                            type="button"
-                            className={`st-switch ${data?.cardsAudio !== "off" ? "on" : ""}`}
-                            role="switch"
-                            aria-checked={data?.cardsAudio !== "off"}
-                            aria-label="卡片句子配音"
-                            aria-disabled={data?.cardsEnabled === "off"}
-                            disabled={isBusy || data?.cardsEnabled === "off"}
-                            onClick={() => void put({ cardsAudio: data?.cardsAudio === "off" ? "on" : "off" })}
-                          >
-                            <span className="st-switch-knob" />
-                          </button>
-                        </div>
-                      )}
                     </div>
+
+                    {data?.canEditSite === true && (
+                      <div className="st-panel">
+                        <div className="st-panel-row">
+                          <div>
+                            <h3 className="st-panel-title">语音合成模型</h3>
+                            <p className="st-panel-desc">
+                              阿里云百炼 · qwen3-tts-flash，给卡片上的英文句子配音。
+                            </p>
+                          </div>
+                        </div>
+                        <div className="st-current-line" data-testid="tts-status">
+                          当前使用
+                          <b>
+                            {data.tts?.configured
+                              ? data.tts.source === "setting"
+                                ? "本页填写的 Key"
+                                : data.tts.source === "env"
+                                  ? "环境变量 DASHSCOPE_API_KEY"
+                                  : "「通义千问」的 Key"
+                              : "还没有配置"}
+                          </b>
+                          {data.tts?.configured && <span>{data.tts.maskedKey}</span>}
+                        </div>
+                        <div className="st-field">
+                          <label className="st-label" htmlFor="st-tts-key">
+                            阿里云百炼 API Key
+                          </label>
+                          <div className="st-input-shell">
+                            <input
+                              id="st-tts-key"
+                              className="st-input"
+                              type={showTts ? "text" : "password"}
+                              autoComplete="off"
+                              placeholder={
+                                data.tts?.source === "setting" ? `已保存 ${data.tts.maskedKey}` : "sk-…"
+                              }
+                              value={ttsInput}
+                              onChange={(e) => setTtsInput(e.target.value)}
+                            />
+                            <button
+                              className="st-eye"
+                              onClick={() => setShowTts(!showTts)}
+                              aria-label={showTts ? "隐藏 Key" : "显示 Key"}
+                            >
+                              <SvgIcon name={showTts ? "eye-off" : "eye"} size={17} />
+                            </button>
+                          </div>
+                          <p className="st-help">
+                            在阿里云百炼控制台（北京地域）→ API Key 创建。这里不填时，
+                            依次使用环境变量 DASHSCOPE_API_KEY 和「通义千问」的 Key。
+                          </p>
+                        </div>
+                        <div className="st-card-actions">
+                          <button className="st-btn st-btn-primary" disabled={isBusy} onClick={() => void saveTts()}>
+                            保存
+                          </button>
+                          {data.tts?.source === "setting" && (
+                            <button className="st-btn st-btn-quiet" disabled={isBusy} onClick={() => void clearTts()}>
+                              清除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     <p className="st-security">
                       请妥善保管 API Key：它关联您的账户与额度。密钥只保存在本机数据库、接口返回时一律脱敏；
                       自定义模型产生的费用由您向服务商支付，接入前请确认服务商可信。
                     </p>
+                  </section>
+                )}
+
+                {tab === "features" && data?.canEditSite === true && (
+                  <section className="st-section">
+                    <div className="st-panel">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">AI 功能</h3>
+                          <p className="st-panel-desc">对所有账号生效，改动立即生效，不需要点保存。</p>
+                        </div>
+                      </div>
+                      <div className="st-reading-row st-reading-row-static">
+                        <span className="st-reading-text">
+                          <b>个性化讲解</b>
+                          <span>关闭后按固定深度讲解，不参考学习档案；要讲整句或句子结构时点「问 AI」</span>
+                        </span>
+                        <button
+                          type="button"
+                          className={`st-switch ${data?.aiPersonalized !== "off" ? "on" : ""}`}
+                          role="switch"
+                          aria-checked={data?.aiPersonalized !== "off"}
+                          aria-label="个性化讲解"
+                          disabled={isBusy}
+                          onClick={() => void put({ aiPersonalized: data?.aiPersonalized === "off" ? "on" : "off" })}
+                        >
+                          <span className="st-switch-knob" />
+                        </button>
+                      </div>
+                      <div className="st-reading-row st-reading-row-static">
+                        <span className="st-reading-text">
+                          <b>做卡</b>
+                          <span>关闭后隐藏阅读页的「＋ 做成卡片」和词库的「待推送」，已有草稿保留</span>
+                        </span>
+                        <button
+                          type="button"
+                          className={`st-switch ${data?.cardsEnabled !== "off" ? "on" : ""}`}
+                          role="switch"
+                          aria-checked={data?.cardsEnabled !== "off"}
+                          aria-label="做卡"
+                          disabled={isBusy}
+                          onClick={() => void put({ cardsEnabled: data?.cardsEnabled === "off" ? "on" : "off" })}
+                        >
+                          <span className="st-switch-knob" />
+                        </button>
+                      </div>
+                      <div className="st-reading-row st-reading-row-static">
+                        <span className="st-reading-text">
+                          <b>卡片句子配音</b>
+                          <span>
+                            {data?.ttsKeyReady
+                              ? "给卡片上的英文句子配音，用「模型」页里的语音合成模型"
+                              : "还没有配置语音合成模型，卡片会先不带音频；到「模型」页填阿里云百炼的 Key"}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          className={`st-switch ${data?.cardsAudio !== "off" ? "on" : ""}`}
+                          role="switch"
+                          aria-checked={data?.cardsAudio !== "off"}
+                          aria-label="卡片句子配音"
+                          aria-disabled={data?.cardsEnabled === "off"}
+                          disabled={isBusy || data?.cardsEnabled === "off"}
+                          onClick={() => void put({ cardsAudio: data?.cardsAudio === "off" ? "on" : "off" })}
+                        >
+                          <span className="st-switch-knob" />
+                        </button>
+                      </div>
+                    </div>
                   </section>
                 )}
 

@@ -415,6 +415,10 @@ try {
     `status=${offWelcome.status} personalized=${offWelcome.data?.personalized}`);
   const forbidden = await api("/api/settings", { cookie: friendCookie, method: "PUT", body: { aiPersonalized: "on" } });
   check("E3 非站长发送 aiPersonalized 返回 403", forbidden.status === 403, `status=${forbidden.status}`);
+  const ttsForbidden = await api("/api/settings", { cookie: friendCookie, method: "PUT", body: { ttsApiKey: "sk-not-allowed" } });
+  const friendView = await api("/api/settings", { cookie: friendCookie });
+  check("E3b 非站长不能改语音合成的 Key，也看不到它的状态", ttsForbidden.status === 403 && friendView.data?.tts === undefined,
+    `status=${ttsForbidden.status} tts=${JSON.stringify(friendView.data?.tts)}`);
   await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "on" } });
 
   // 环境变量强制关闭：重启太重，这里只断言纯函数（单测已覆盖），接口层保持设置值
