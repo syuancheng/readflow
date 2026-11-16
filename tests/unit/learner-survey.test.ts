@@ -25,6 +25,8 @@ test("题目文案逐字取自 PRD F1，Q1/Q2/Q3/Q4/Q5 的选项一个不少", (
       ["exam", "你考过的最高一级英语考试？"],
       ["examScore", "大概考了多少分？"],
       ["goals", "你读英文主要为了什么？"],
+      ["targetExam", "在备考哪个考试？"],
+      ["targetScore", "目标分数？"],
       ["readingFeel", "平时读英文文章的感觉？"],
       ["stylePref", "你希望 AI 老师怎么讲？"],
     ],
@@ -37,6 +39,9 @@ test("题目文案逐字取自 PRD F1，Q1/Q2/Q3/Q4/Q5 的选项一个不少", (
   ]);
   assert.deepEqual(labels("goals"), [
     "技术文档和编程", "学术论文", "新闻时事", "工作邮件和资料", "考试备考", "小说和兴趣阅读",
+  ]);
+  assert.deepEqual(labels("targetExam"), [
+    "雅思", "托福", "大学英语四级", "大学英语六级", "考研英语", "专四", "专八", "高考英语", "其他考试",
   ]);
   assert.deepEqual(labels("readingFeel"), [
     "几乎每句都要查", "每段查几个词", "偶尔查个生词", "基本无障碍",
@@ -159,4 +164,61 @@ test("全部未填时返回 null，不产生任何画像", () => {
   assert.deepEqual(surveyPrior({}), { vocab: null, cefr: null });
   assert.deepEqual(surveyPrior({ stylePref: "concise" }), { vocab: null, cefr: null }, "只填风格不足以估词汇量");
   assert.deepEqual(surveyPrior({ identity: "other" }), { vocab: null, cefr: null });
+});
+
+// ---------- P39：勾了「考试备考」追问备考考试和目标分 ----------
+import {
+  TARGET_SCORE_BANDS,
+  normalizeSurvey as p39Normalize,
+  showTargetExamQuestion,
+  showTargetScoreQuestion,
+  targetExamText,
+  targetScoreLabel,
+} from "../../src/lib/learner/survey";
+
+test("P39 追问只在勾了「考试备考」时出现；「其他考试」不问分数", () => {
+  assert.equal(showTargetExamQuestion(undefined), false);
+  assert.equal(showTargetExamQuestion(["tech"]), false);
+  assert.equal(showTargetExamQuestion(["tech", "exam"]), true);
+  assert.equal(showTargetScoreQuestion({ goals: ["exam"] }), false);
+  assert.equal(showTargetScoreQuestion({ goals: ["exam"], targetExam: "ielts" }), true);
+  assert.equal(showTargetScoreQuestion({ goals: ["exam"], targetExam: "other" }), false);
+  assert.equal(showTargetScoreQuestion({ goals: ["news"], targetExam: "ielts" }), false);
+  for (const [exam, bands] of Object.entries(TARGET_SCORE_BANDS)) {
+    if (exam === "other") assert.equal(bands.length, 0);
+    else assert.equal(bands.at(-1)?.key, "undecided", exam);
+  }
+});
+
+test("P39 normalizeSurvey：没勾备考就丢掉追问；目标分必须属于这门考试", () => {
+  assert.deepEqual(p39Normalize({ goals: ["exam"], targetExam: "ielts", targetScore: "ielts_7" }), {
+    goals: ["exam"],
+    targetExam: "ielts",
+    targetScore: "ielts_7",
+  });
+  assert.deepEqual(p39Normalize({ goals: ["tech"], targetExam: "ielts", targetScore: "ielts_7" }), { goals: ["tech"] });
+  assert.deepEqual(p39Normalize({ targetExam: "ielts" }), {});
+  assert.deepEqual(p39Normalize({ goals: ["exam"], targetExam: "toefl", targetScore: "ielts_7" }), {
+    goals: ["exam"],
+    targetExam: "toefl",
+  });
+  assert.deepEqual(p39Normalize({ goals: ["exam"], targetExam: "gre", targetScore: "x" }), { goals: ["exam"] });
+  assert.deepEqual(p39Normalize({ goals: ["exam"], targetExam: "other", targetScore: "undecided" }), {
+    goals: ["exam"],
+    targetExam: "other",
+  });
+  assert.equal(p39Normalize({ goals: ["exam"], targetExam: "cet6", targetScore: "cet_550" }).targetScore, "cet_550");
+});
+
+test("P39 targetExamText：一句话写清楚考什么、目标多少", () => {
+  assert.equal(targetExamText(null), null);
+  assert.equal(targetExamText({ goals: ["exam"] }), null);
+  assert.equal(targetExamText({ goals: ["tech"], targetExam: "ielts", targetScore: "ielts_7" }), null);
+  assert.equal(targetExamText({ goals: ["exam"], targetExam: "ielts", targetScore: "ielts_7" }), "雅思，目标 7 分");
+  assert.equal(targetExamText({ goals: ["exam"], targetExam: "toefl", targetScore: "toefl_110plus" }), "托福，目标 110 分及以上");
+  assert.equal(targetExamText({ goals: ["exam"], targetExam: "ielts", targetScore: "undecided" }), "雅思（目标分数还没定）");
+  assert.equal(targetExamText({ goals: ["exam"], targetExam: "kaoyan" }), "考研英语");
+  assert.equal(targetExamText({ goals: ["exam"], targetExam: "other" }), "其他考试");
+  assert.equal(targetScoreLabel("cet4", "cet_pass"), "过线（425 分）");
+  assert.equal(targetScoreLabel("cet4", "nope"), null);
 });

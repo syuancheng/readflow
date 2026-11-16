@@ -355,6 +355,28 @@ try {
   await ownerPage.locator("#survey-exam").selectOption({ label: "大学英语六级" });
   await ownerPage.locator("#survey-examScore").selectOption({ label: "550 以上" });
   await ownerPage.getByLabel("技术文档和编程").check();
+  // P39：勾「考试备考」才追问备考考试和目标分；换考试清掉目标分；取消勾选两题都消失
+  const followUpsBefore = await ownerPage.locator("#survey-targetExam, #survey-targetScore").count();
+  await ownerPage.getByLabel("考试备考").check();
+  const examShown = await ownerPage.locator("#survey-targetExam").isVisible();
+  const scoreHiddenUntilExam = (await ownerPage.locator("#survey-targetScore").count()) === 0;
+  await ownerPage.locator("#survey-targetExam").selectOption({ label: "托福" });
+  await ownerPage.locator("#survey-targetScore").selectOption({ label: "100 分" });
+  await ownerPage.locator("#survey-targetExam").selectOption({ label: "雅思" });
+  const scoreCleared = (await ownerPage.locator("#survey-targetScore").inputValue()) === "";
+  const ieltsBands = await ownerPage.locator("#survey-targetScore option").allTextContents();
+  await ownerPage.getByLabel("考试备考").uncheck();
+  const goneAfterUncheck = await ownerPage.locator("#survey-targetExam, #survey-targetScore").count();
+  await ownerPage.getByLabel("考试备考").check();
+  const resetAfterRecheck = (await ownerPage.locator("#survey-targetExam").inputValue()) === "";
+  await ownerPage.locator("#survey-targetExam").selectOption({ label: "雅思" });
+  await ownerPage.locator("#survey-targetScore").selectOption({ label: "7 分" });
+  check("D0 勾「考试备考」才出现「在备考哪个考试」「目标分数」；换考试清掉目标分；取消勾选两题消失、再勾是空的",
+    followUpsBefore === 0 && examShown && scoreHiddenUntilExam && scoreCleared &&
+    ieltsBands.includes("7 分") && !ieltsBands.includes("100 分") && goneAfterUncheck === 0 && resetAfterRecheck,
+    `before=${followUpsBefore} shown=${examShown} cleared=${scoreCleared} bands=${ieltsBands.join("/")} gone=${goneAfterUncheck} reset=${resetAfterRecheck}`);
+  await ownerPage.locator("#survey-targetScore").scrollIntoViewIfNeeded();
+  await ownerPage.screenshot({ path: path.join(SHOTS, "welcome-exam-target-1440.png") });
   await ownerPage.locator("#survey-readingFeel").selectOption({ label: "偶尔查个生词" });
   await ownerPage.locator("#survey-stylePref").selectOption({ label: "越简洁越好，点到为止" });
   await ownerPage.getByRole("button", { name: "开始阅读" }).click();
@@ -364,6 +386,7 @@ try {
     ownerLearner.data?.needsSurvey === false &&
     ownerLearner.data?.survey?.exam === "cet6" &&
     ownerLearner.data?.survey?.goals?.includes("tech") &&
+    ownerLearner.data?.survey?.targetExam === "ielts" && ownerLearner.data?.survey?.targetScore === "ielts_7" &&
     ownerLearner.data?.level?.cefr != null,
     `survey=${JSON.stringify(ownerLearner.data?.survey)} level=${JSON.stringify(ownerLearner.data?.level)}`);
 
@@ -374,6 +397,7 @@ try {
     sysOn.includes("L1 只给这句里的意思") &&
     userOn.startsWith("学生档案（") &&
     userOn.includes("主要阅读：技术文档和编程") &&
+    userOn.includes("正在备考：雅思，目标 7 分") &&
     userOn.includes("希望讲解：越简洁越好"),
     `sys=${sysOn.includes("L1")} user=${userOn.slice(0, 60)}`);
   // 六级 550+ = 7500 × 偶尔 1.15 × 工作 3–10 年+技术 1.1 = 9487 → C1

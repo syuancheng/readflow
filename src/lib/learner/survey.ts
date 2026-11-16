@@ -16,12 +16,16 @@ export type Exam = "none" | "gaokao" | "cet4" | "cet6" | "kaoyan" | "ielts_toefl
 export type Goal = "tech" | "academic" | "news" | "work" | "exam" | "novels";
 export type ReadingFeel = "every_sentence" | "few_per_paragraph" | "occasional" | "fluent";
 export type StylePref = "detailed" | "balanced" | "concise";
+/** P39：正在备考的考试（勾了「考试备考」才问）；和「考过的最高一级考试」不是一回事 */
+export type TargetExam = "ielts" | "toefl" | "cet4" | "cet6" | "kaoyan" | "tem4" | "tem8" | "gaokao" | "other";
 
 export type SurveyAnswers = {
   identity?: Identity;
   exam?: Exam;
   examScore?: string; // EXAM_SCORE_BANDS 里的 key，"unknown" 表示不记得了
   goals?: Goal[]; // Q3，唯一的多选题
+  targetExam?: TargetExam; // P39 Q3a：勾了「考试备考」才有
+  targetScore?: string; // P39 Q3b：TARGET_SCORE_BANDS 里的 key，"undecided" 表示还没定
   readingFeel?: ReadingFeel;
   stylePref?: StylePref;
 };
@@ -29,7 +33,7 @@ export type SurveyAnswers = {
 export type SurveyOption = { key: string; label: string };
 
 export type SurveyQuestion = {
-  id: "identity" | "exam" | "examScore" | "goals" | "readingFeel" | "stylePref";
+  id: "identity" | "exam" | "examScore" | "goals" | "targetExam" | "targetScore" | "readingFeel" | "stylePref";
   /** 中文题目（逐字取自 PRD） */
   title: string;
   options: SurveyOption[];
@@ -37,6 +41,8 @@ export type SurveyQuestion = {
   multi?: boolean;
   /** Q2a：高考 / 考研英语 / 还没考过不显示 */
   hideForExams?: Exam[];
+  /** P39 Q3a / Q3b：只有 Q3 勾了这一项才出现 */
+  showWhenGoal?: Goal;
 };
 
 /** Q2a 的分数段。四级/六级同档；雅思托福共用一道题但档位分开；专四专八选的是哪一种考试 */
@@ -71,6 +77,80 @@ export const EXAM_SCORE_BANDS: Record<Exam, SurveyOption[]> = {
     { key: "tem4", label: "专四" },
     { key: "tem8", label: "专八" },
   ],
+};
+
+const TARGET_EXAM_OPTIONS: SurveyOption[] = [
+  { key: "ielts", label: "雅思" },
+  { key: "toefl", label: "托福" },
+  { key: "cet4", label: "大学英语四级" },
+  { key: "cet6", label: "大学英语六级" },
+  { key: "kaoyan", label: "考研英语" },
+  { key: "tem4", label: "专四" },
+  { key: "tem8", label: "专八" },
+  { key: "gaokao", label: "高考英语" },
+  { key: "other", label: "其他考试" },
+];
+
+const UNDECIDED: SurveyOption = { key: "undecided", label: "还没定" };
+
+/** P39 Q3b 的目标分数档；「其他考试」不问分数 */
+export const TARGET_SCORE_BANDS: Record<TargetExam, SurveyOption[]> = {
+  ielts: [
+    { key: "ielts_5_5", label: "5.5 分" },
+    { key: "ielts_6", label: "6 分" },
+    { key: "ielts_6_5", label: "6.5 分" },
+    { key: "ielts_7", label: "7 分" },
+    { key: "ielts_7_5plus", label: "7.5 分及以上" },
+    UNDECIDED,
+  ],
+  toefl: [
+    { key: "toefl_80", label: "80 分" },
+    { key: "toefl_90", label: "90 分" },
+    { key: "toefl_100", label: "100 分" },
+    { key: "toefl_110plus", label: "110 分及以上" },
+    UNDECIDED,
+  ],
+  cet4: [
+    { key: "cet_pass", label: "过线（425 分）" },
+    { key: "cet_500", label: "500 分" },
+    { key: "cet_550", label: "550 分" },
+    { key: "cet_600plus", label: "600 分及以上" },
+    UNDECIDED,
+  ],
+  cet6: [
+    { key: "cet_pass", label: "过线（425 分）" },
+    { key: "cet_500", label: "500 分" },
+    { key: "cet_550", label: "550 分" },
+    { key: "cet_600plus", label: "600 分及以上" },
+    UNDECIDED,
+  ],
+  kaoyan: [
+    { key: "ky_pass", label: "过国家线" },
+    { key: "ky_60", label: "60 分" },
+    { key: "ky_70", label: "70 分" },
+    { key: "ky_80plus", label: "80 分及以上" },
+    UNDECIDED,
+  ],
+  tem4: [
+    { key: "tem_pass", label: "及格" },
+    { key: "tem_good", label: "良好" },
+    { key: "tem_excellent", label: "优秀" },
+    UNDECIDED,
+  ],
+  tem8: [
+    { key: "tem_pass", label: "及格" },
+    { key: "tem_good", label: "良好" },
+    { key: "tem_excellent", label: "优秀" },
+    UNDECIDED,
+  ],
+  gaokao: [
+    { key: "gk_110", label: "110 分" },
+    { key: "gk_120", label: "120 分" },
+    { key: "gk_130", label: "130 分" },
+    { key: "gk_140plus", label: "140 分及以上" },
+    UNDECIDED,
+  ],
+  other: [],
 };
 
 const IDENTITY_OPTIONS: SurveyOption[] = [
@@ -122,6 +202,13 @@ export const SURVEY_QUESTIONS: SurveyQuestion[] = [
     hideForExams: ["none", "gaokao", "kaoyan"],
   },
   { id: "goals", title: "你读英文主要为了什么？", options: GOAL_OPTIONS, multi: true },
+  { id: "targetExam", title: "在备考哪个考试？", options: TARGET_EXAM_OPTIONS, showWhenGoal: "exam" },
+  {
+    id: "targetScore",
+    title: "目标分数？",
+    options: TARGET_SCORE_BANDS.ielts, // 渲染时按 Q3a 用 TARGET_SCORE_BANDS 覆盖
+    showWhenGoal: "exam",
+  },
   { id: "readingFeel", title: "平时读英文文章的感觉？", options: FEEL_OPTIONS },
   { id: "stylePref", title: "你希望 AI 老师怎么讲？", options: STYLE_OPTIONS },
 ];
@@ -133,12 +220,42 @@ export function showScoreQuestion(exam: Exam | undefined): boolean {
   return !q?.hideForExams?.includes(exam);
 }
 
+/** P39 Q3a 该不该出现：Q3 勾了「考试备考」 */
+export function showTargetExamQuestion(goals: Goal[] | undefined): boolean {
+  return goals?.includes("exam") ?? false;
+}
+
+/** P39 Q3b 该不该出现：勾了「考试备考」、选了考试、这门考试有分数档 */
+export function showTargetScoreQuestion(a: Pick<SurveyAnswers, "goals" | "targetExam">): boolean {
+  return showTargetExamQuestion(a.goals) && Boolean(a.targetExam) && TARGET_SCORE_BANDS[a.targetExam!].length > 0;
+}
+
+/** 目标分数的中文标签；不认识返回 null */
+export function targetScoreLabel(exam: TargetExam, key: string | undefined): string | null {
+  return TARGET_SCORE_BANDS[exam].find((b) => b.key === key)?.label ?? null;
+}
+
+/**
+ * 备考目标的一句话（学生档案、做卡提示词共用）：「雅思，目标 7 分」「雅思（目标分数还没定）」「其他考试」。
+ * 没勾「考试备考」或没选考试返回 null。
+ */
+export function targetExamText(a: SurveyAnswers | null | undefined): string | null {
+  if (!a?.targetExam || !showTargetExamQuestion(a.goals)) return null;
+  const exam = TARGET_EXAM_OPTIONS.find((o) => o.key === a.targetExam)?.label ?? null;
+  if (!exam) return null;
+  if (TARGET_SCORE_BANDS[a.targetExam].length === 0) return exam;
+  if (a.targetScore === "undecided") return `${exam}（目标分数还没定）`;
+  const score = targetScoreLabel(a.targetExam, a.targetScore);
+  return score ? `${exam}，目标 ${score}` : exam;
+}
+
 const labelMap = (options: SurveyOption[]) => new Map(options.map((o) => [o.key, o.label]));
 export const IDENTITY_LABEL = labelMap(IDENTITY_OPTIONS);
 export const EXAM_LABEL = labelMap(EXAM_OPTIONS);
 export const GOAL_LABEL = labelMap(GOAL_OPTIONS);
 export const FEEL_LABEL = labelMap(FEEL_OPTIONS);
 export const STYLE_LABEL = labelMap(STYLE_OPTIONS);
+export const TARGET_EXAM_LABEL = labelMap(TARGET_EXAM_OPTIONS);
 
 /** 白名单校验：非法值和多余字段一律丢弃，绝不把客户端传来的怪值写进 DB */
 export function normalizeSurvey(input: unknown): SurveyAnswers {
@@ -163,6 +280,17 @@ export function normalizeSurvey(input: unknown): SurveyAnswers {
     );
     const unique = [...new Set(goals)];
     if (unique.length > 0) out.goals = unique;
+  }
+
+  // P39：没勾「考试备考」就不留备考考试和目标分；目标分必须属于这门考试
+  if (showTargetExamQuestion(out.goals)) {
+    const targetExam = pick<TargetExam>(o.targetExam, TARGET_EXAM_OPTIONS);
+    if (targetExam) {
+      out.targetExam = targetExam;
+      if (typeof o.targetScore === "string" && TARGET_SCORE_BANDS[targetExam].some((b) => b.key === o.targetScore)) {
+        out.targetScore = o.targetScore;
+      }
+    }
   }
 
   // 分数段必须属于当前这门考试，避免「改了 Q2 但旧分数段还留着」造成换算错档

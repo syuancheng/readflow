@@ -12,7 +12,7 @@ import {
   surveyOf,
   editNote,
 } from "@/lib/learner-store";
-import { SURVEY_QUESTIONS, EXAM_SCORE_BANDS } from "@/lib/learner/survey";
+import { SURVEY_QUESTIONS, EXAM_SCORE_BANDS, TARGET_SCORE_BANDS } from "@/lib/learner/survey";
 import { NIGHTLY_MIN_NEW_EVENTS } from "@/lib/learner/nightly";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,7 @@ export async function GET() {
     ok: true,
     questions: SURVEY_QUESTIONS,
     scoreBands: EXAM_SCORE_BANDS,
+    targetScoreBands: TARGET_SCORE_BANDS,
     survey: surveyOf(row),
     showFeedback: row.show_feedback === 1,
     needsSurvey: needsSurvey(row),

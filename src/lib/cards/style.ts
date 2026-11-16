@@ -3,17 +3,29 @@
  *
  * 卡面上的「考试风格」标签由系统决定，不交给 AI 自由发挥：
  * - 问卷里勾选了「考试备考」才显示这个标签（PRD：没有考试目标时不显示）；
- * - 风格族来自问卷里「考过的最高一级考试」：四六级 / 考研 / 雅思托福；
+ * - 风格族优先看 P39 的「在备考哪个考试」：雅思 / 托福 / 四六级 / 考研；
+ *   没选（或选了专四专八、高考、其他）再看「考过的最高一级考试」：四六级 / 考研 / 雅思托福；
  *   其它或没填，默认以托福和雅思为主（PRD）。
  * 单测把本目录编译成 CommonJS 直接运行，这里只能用相对路径 import。
  */
-import type { SurveyAnswers } from "../learner/survey";
+import { targetExamText, type SurveyAnswers } from "../learner/survey";
 
-export type ExamFamily = "toefl_ielts" | "cet" | "kaoyan";
+export type ExamFamily = "toefl_ielts" | "ielts" | "toefl" | "cet" | "kaoyan";
 
 /** 问卷 → 风格族；没有备考目标返回 null（不显示标签，提示词里也不强调考试风格） */
 export function examFamilyOf(survey: SurveyAnswers | null | undefined): ExamFamily | null {
   if (!survey?.goals?.includes("exam")) return null;
+  switch (survey.targetExam) {
+    case "ielts":
+      return "ielts";
+    case "toefl":
+      return "toefl";
+    case "cet4":
+    case "cet6":
+      return "cet";
+    case "kaoyan":
+      return "kaoyan";
+  }
   switch (survey.exam) {
     case "cet4":
     case "cet6":
@@ -41,6 +53,8 @@ const IELTS_KINDS = new Set(["paraphrase_fill", "true_false_ng"]);
 
 const FAMILY_NAME: Record<ExamFamily, string> = {
   toefl_ielts: "托福 / 雅思",
+  ielts: "雅思",
+  toefl: "托福",
   cet: "四六级",
   kaoyan: "考研",
 };
@@ -50,7 +64,8 @@ export function examStyleLabel(family: ExamFamily | null, kind: string): string 
   if (!family) return null;
   const q = KIND_QUESTION[kind];
   if (!q) return null;
-  const exam = family === "cet" ? "四六级" : family === "kaoyan" ? "考研" : IELTS_KINDS.has(kind) ? "雅思" : "托福";
+  const exam =
+    family === "toefl_ielts" ? (IELTS_KINDS.has(kind) ? "雅思" : "托福") : FAMILY_NAME[family];
   return `${exam} · ${q}`;
 }
 
@@ -62,6 +77,8 @@ export function stylePromptLines(
   const lines: string[] = ["因人而异（PRD F3）："];
   if (family) {
     lines.push(`- 学生在备考：在使用类卡之外，最后再加一张${FAMILY_NAME[family]}风格的考试题，题目指令的措辞和选项的设计向真实考试靠拢。`);
+    const target = targetExamText(survey);
+    if (target) lines.push(`- 备考目标：${target}。考试题的难度和用词向这个目标靠拢。`);
   } else {
     lines.push("- 学生没有考试目标：不出考试题型。");
   }
