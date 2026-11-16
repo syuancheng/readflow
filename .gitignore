@@ -77,3 +77,6 @@ nohup.out
 # 部署配置（含服务器地址）与本地下载的备份
 /deploy/deploy.conf
 /backups/
+/data/backups/
+# P35 卡片句子音频（百炼合成，可重新生成）
+/data/tts/
