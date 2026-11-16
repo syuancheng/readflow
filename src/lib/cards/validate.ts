@@ -219,11 +219,8 @@ export function validateCard(spec: CardSpec, ctx: ValidateCtx): ValidateResult {
       reasons.push(`参考说法要有 ${REFERENCE_MIN}～${REFERENCE_MAX} 句英文`);
     }
   }
-  if (spec.kind === "situation_say" || spec.kind === "rephrase") {
-    if (answerSentences.some((b) => !usesTarget(b.text, ctx.quote))) {
-      reasons.push("每一句参考说法都要用上目标词");
-    }
-  }
+  // 2026-11-16：建卡改为以句子为单位、考点由 AI 从句子里挑（优先用户问过的难点），
+  // 校验器无法准确判断「有没有考到句子里的表达」，这条改由出题提示词约束，不再硬校验。
   if (spec.kind === "rephrase") {
     const shown = englishSentences(spec.front);
     if (shown.length === 0) reasons.push("换个说法的正面要有一句英文");

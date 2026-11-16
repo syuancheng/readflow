@@ -185,16 +185,17 @@ test("P35 规则4：情景说一句 / 搭配与用法的参考说法 2～3 句",
   assert.ok(has(usageOne, "2～3 句"));
 });
 
-test("P35 规则5：情景说一句 / 换个说法的每句参考说法都要用上目标词（认词形变化和短语）", () => {
-  const missing = situationCard({
+test("规则5（2026-11-16）：建卡以句子为单位，不再强制参考说法含目标词", () => {
+  // 考点由 AI 从句子里挑、优先用户问过的难点，校验器无从判断是否跑题，靠提示词约束
+  const noTarget = situationCard({
     back: {
       answer: [
-        { t: "sentence", source: "paraphrase", text: "His excitement was ephemeral." },
+        { t: "sentence", source: "paraphrase", text: "His excitement was short-lived." },
         { t: "sentence", source: "paraphrase", text: "It did not last." },
       ],
     },
   });
-  assert.ok(has(missing, "都要用上目标词"));
+  assert.ok(!has(noTarget, "都要用上目标词"), "不再强制每句都含目标词");
   assert.equal(usesTarget("We fell behind schedule.", "fall behind"), true);
   assert.equal(usesTarget("They are falling behind on rent.", "fall behind on sth"), true);
   assert.equal(usesTarget("We stayed behind.", "fall behind"), false);

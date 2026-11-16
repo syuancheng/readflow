@@ -13,6 +13,7 @@ import { aiContextFor } from "@/lib/user-secrets";
 import { completeJson, type ChatTurn } from "@/lib/providers";
 import { explainTurns } from "@/lib/ai";
 import { inlineGloss } from "@/lib/gloss";
+import { parseThread } from "@/lib/ai-thread";
 import { learnerBlockFor, getLearner, surveyOf } from "@/lib/learner-store";
 import { parseCardGen, parseJsonLoose, type CardSpec } from "./spec";
 import { validateCard, type ValidateCtx } from "./validate";
@@ -274,13 +275,29 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
     learnerBlock = profile.block;
   }
 
+  // 学生针对这个句子问过、AI 已讲过的内容 = 「已掌握」。建卡时传进去，
+  // 让 AI 围绕这些难点出输出题，而不是重复讲解、或考他刚搞错的那个理解。
+  // ctx.ai_gloss 是整个对话串（【追问】分段），与是否命中讲解缓存无关。
+  const learnedContext = (() => {
+    const turns = parseThread(ctx.ai_gloss);
+    const lines: string[] = [];
+    for (const t of turns) {
+      const answer = t.text.trim();
+      if (!answer) continue;
+      lines.push(t.ask ? `学生问：${t.ask}\n老师答：${answer}` : `老师讲解：${answer}`);
+    }
+    return lines.join("\n\n");
+  })();
+
   const family = examFamilyOf(surveyFor(user.id));
   const audio = cardAudioVoice();
   const prompt = buildCardPrompt({
     learnerBlock,
     styleLines: stylePromptLines(family, surveyFor(user.id)),
     examFamily: family,
+    targetSentence: sentenceOf(ctx),
     sourceParagraph: paragraphOf(ctx),
+    learnedContext,
     otherTextLookups: otherTextLookups(user.id, ctx.lemma, ctx.text_id),
     cardedBefore: hasPushedCards(user.id, ctx.word_id),
   });
@@ -337,10 +354,26 @@ async function settleCard(
   let v = validateCard(spec, run.vctx);
   if (!v.ok) {
     const again = await redo(provider, run, spec, v.reasons.join("；"));
-    if (!again) return null;
+    if (!again) {
+      console.warn("[cards] 卡片重出失败/无合法 JSON，丢弃", {
+        kind: spec.kind,
+        target: spec.target,
+        reasons: v.reasons,
+      });
+      return null;
+    }
     spec = again;
     v = validateCard(spec, run.vctx);
-    if (!v.ok) return null;
+    if (!v.ok) {
+      // 排障盲点：此前校验失败静默丢卡，线上只留下「所有卡片都没有通过校验」。
+      // 把每张卡的具体原因打到日志，下次能直接定位是哪条规则卡住了模型。
+      console.warn("[cards] 卡片重出后仍不合格，丢弃", {
+        kind: spec.kind,
+        target: spec.target,
+        reasons: v.reasons,
+      });
+      return null;
+    }
   }
 
   if (!hasChoice(spec)) return { spec, needsReview: null };
