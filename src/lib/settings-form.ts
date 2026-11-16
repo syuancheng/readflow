@@ -85,7 +85,7 @@ export function validateForm(values: FormValues, opts: { editing: boolean }): Fo
  * 设置页导航（WorkBuddy 风格：搜索框 + 分组）
  * ------------------------------------------------------------------ */
 
-export type NavId = "profile" | "learner" | "invites" | "models" | "markji" | "reading" | "extension" | "storage";
+export type NavId = "profile" | "learner" | "invites" | "models" | "markji" | "features" | "reading" | "extension" | "storage";
 export type NavItem = { id: NavId; title: string; keywords: string[] };
 export type NavGroup = { title: string; items: NavItem[] };
 
@@ -110,13 +110,19 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "设置",
     items: [
-      { id: "models", title: "模型", keywords: ["模型", "model", "api key", "ai", "大模型"] },
+      {
+        id: "models",
+        title: "模型",
+        keywords: ["模型", "model", "api key", "ai", "大模型", "语音合成", "百炼", "dashscope", "配音"],
+      },
       { id: "markji", title: "墨墨记单词", keywords: ["墨墨", "markji", "token", "记忆卡"] },
     ],
   },
   {
     title: "功能",
     items: [
+      // 只有主账号看得到（SettingsDialog 按 canEditSite 过滤）
+      { id: "features", title: "AI 功能", keywords: ["个性化", "讲解", "做卡", "卡片", "配音", "开关"] },
       {
         id: "reading",
         title: "阅读设置",

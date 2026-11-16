@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { audioMimeOf, buildTtsRequest, parseTtsResponse, resolveTtsKey, ttsBase, TTS_DEFAULT_BASE } from "../../src/lib/cards/tts-api";
+import { audioMimeOf, buildTtsRequest, parseTtsResponse, resolveTtsKey, resolveTtsKeyWithSource, ttsBase, TTS_DEFAULT_BASE } from "../../src/lib/cards/tts-api";
 import { VOICE } from "../../src/lib/cards/voices";
 
 test("请求：北京地域地址、Bearer Key、language_type English，非流式不带 SSE 头", () => {
@@ -30,10 +30,16 @@ test("响应：取 output.audio.url；没有 url 时报错并带上服务商的�
 });
 
 test("Key 的读取顺序：环境变量 → 站级设置 → 都没有", () => {
-  assert.equal(resolveTtsKey({ DASHSCOPE_API_KEY: " env " }, "site"), "env");
-  assert.equal(resolveTtsKey({}, " site "), "site");
-  assert.equal(resolveTtsKey({ DASHSCOPE_API_KEY: "" }, "  "), null);
-  assert.equal(resolveTtsKey({}, null), null);
+  // 顺序：语音合成单独填的 Key → 环境变量 → 「通义千问」的 Key
+  assert.equal(resolveTtsKey({ DASHSCOPE_API_KEY: "env" }, " own ", "qwen"), "own");
+  assert.equal(resolveTtsKey({ DASHSCOPE_API_KEY: " env " }, null, "qwen"), "env");
+  assert.equal(resolveTtsKey({}, "  ", " qwen "), "qwen");
+  assert.equal(resolveTtsKey({ DASHSCOPE_API_KEY: "" }, null, "  "), null);
+  assert.equal(resolveTtsKey({}, null, null), null);
+  assert.deepEqual(resolveTtsKeyWithSource({ DASHSCOPE_API_KEY: "e" }, null, "q"), { key: "e", source: "env" });
+  assert.deepEqual(resolveTtsKeyWithSource({}, "o", "q"), { key: "o", source: "setting" });
+  assert.deepEqual(resolveTtsKeyWithSource({}, null, "q"), { key: "q", source: "qwen" });
+  assert.equal(resolveTtsKeyWithSource({}, null, null), null);
 });
 
 test("音频格式：响应头或扩展名是 mp3 就当 mp3，其余按 wav", () => {

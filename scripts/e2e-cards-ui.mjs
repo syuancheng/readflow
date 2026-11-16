@@ -59,11 +59,11 @@ const WAV = (() => {
   b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n, 40);
   return b;
 })();
-let ttsCalls = 0;
+let ttsCalls = 0, ttsAuth = "";
 const tts = http.createServer((req, res) => {
   let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => {
     if (req.method === "GET") { res.writeHead(200, { "content-type": "audio/wav" }); return res.end(WAV); }
-    ttsCalls++;
+    ttsCalls++; ttsAuth = req.headers.authorization ?? "";
     const text = JSON.parse(b || "{}").input?.text ?? "";
     res.writeHead(text.includes("never") ? 500 : 200, { "content-type": "application/json" });
     res.end(JSON.stringify(text.includes("never") ? { code: "InternalError", message: "boom" } : { output: { audio: { url: `http://127.0.0.1:${TTS}/a/${ttsCalls}.wav` } } }));
@@ -350,33 +350,50 @@ try {
     await cs.close();
   }
 
-  // 设置：卡片句子配音（主账号可见；Key 已就绪的说明；做卡关闭时禁用）
+  // 设置：「模型」页只放模型——语音合成模型和 Key 在这里；三个开关在「AI 功能」页（主账号可见）
   const c5 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await c5.addCookies([{ name: "readflow_session", value: cookie, domain: "127.0.0.1", path: "/" }]);
   const p5 = await c5.newPage();
   await p5.goto(BASE, { waitUntil: "networkidle" });
   await p5.click(".pm-trigger");
   await p5.getByRole("menuitem", { name: /设置/ }).click();
+  const ttsStatus = p5.getByTestId("tts-status");
+  await ttsStatus.waitFor();
+  const modelsSwitches = await p5.locator(".st-main [role=switch]").count();
+  const statusText = (await ttsStatus.innerText()).replace(/\n/g, " ");
+  check("P6 「模型」页没有开关，有「语音合成模型」，当前用环境变量的 Key", modelsSwitches === 0 && (await p5.getByRole("heading", { name: "语音合成模型" }).count()) === 1 && statusText.includes("DASHSCOPE_API_KEY"), `switches=${modelsSwitches} ${statusText}`);
+  await p5.locator(".st-main").screenshot({ path: shots("settings-models-1440.png") });
+
+  await p5.locator("#st-tts-key").fill("sk-p37-own-key-123456");
+  await p5.getByRole("button", { name: "保存", exact: true }).click();
+  await p5.waitForFunction(() => document.querySelector('[data-testid="tts-status"]')?.textContent?.includes("本页填写的 Key"));
+  const saved = await api("/api/settings", { cookie });
+  check("P6a 填 Key 保存后接口返回 source=setting、Key 已脱敏", saved.data.tts?.source === "setting" && saved.data.tts.maskedKey !== "sk-p37-own-key-123456" && saved.data.tts.configured === true, JSON.stringify(saved.data.tts));
+  await p5.getByRole("button", { name: "清除", exact: true }).click();
+  await p5.waitForFunction(() => document.querySelector('[data-testid="tts-status"]')?.textContent?.includes("DASHSCOPE_API_KEY"));
+  const cleared = await api("/api/settings", { cookie });
+  check("P6c 点「清除」后回退到环境变量的 Key；之前的配音请求带的是环境变量 Key", cleared.data.tts?.source === "env" && ttsCalls > 0 && ttsAuth === "Bearer fake-dashscope", `${JSON.stringify(cleared.data.tts)} calls=${ttsCalls} auth=${ttsAuth}`);
+
+  await p5.locator(".st-nav-item", { hasText: "AI 功能" }).click();
   const sw = p5.getByRole("switch", { name: "卡片句子配音" });
   await sw.waitFor();
-  const row = await sw.evaluate((b) => b.closest(".st-reading-row").innerText);
-  check("P6 设置：「卡片句子配音」开关默认开，说明 Key 和通义千问共用", (await sw.getAttribute("aria-checked")) === "true" && row.includes("通义千问"), row.replace(/\n/g, " "));
+  const featureSwitches = await p5.locator(".st-main [role=switch]").count();
+  check("P6b 「AI 功能」页有三个开关，配音开关默认开", featureSwitches === 3 && (await sw.getAttribute("aria-checked")) === "true", `switches=${featureSwitches}`);
   await sw.click();
   await p5.waitForFunction(() => document.querySelector('[aria-label="卡片句子配音"]')?.getAttribute("aria-checked") === "false");
   const after = await api("/api/settings", { cookie });
   await p5.getByRole("switch", { name: "做卡" }).click();
   await p5.waitForFunction(() => document.querySelector('[aria-label="卡片句子配音"]')?.disabled === true);
   check("P7 关掉配音后接口返回 off；关掉做卡时配音开关禁用", after.data.cardsAudio === "off" && (await sw.isDisabled()));
-  await p5.locator(".st-main").screenshot({ path: shots("settings-audio-on-key-1440.png") });
+  await p5.locator(".st-main").screenshot({ path: shots("settings-features-1440.png") });
   await api("/api/settings", { cookie, method: "PUT", body: { cardsEnabled: "on", cardsAudio: "on" } });
   await p5.setViewportSize({ width: 390, height: 844 });
   await p5.reload({ waitUntil: "networkidle" });
   await p5.click(".pm-trigger");
   await p5.getByRole("menuitem", { name: /设置/ }).click();
-  await p5.getByRole("switch", { name: "卡片句子配音" }).scrollIntoViewIfNeeded();
-  await p5.screenshot({ path: shots("settings-audio-on-key-390.png") });
+  await p5.getByTestId("tts-status").scrollIntoViewIfNeeded();
+  await p5.screenshot({ path: shots("settings-models-390.png") });
   check("P7b 390px 设置无横向溢出", await p5.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
-  await api("/api/settings", { cookie, method: "PUT", body: { cardsEnabled: "on", cardsAudio: "on" } });
   await c5.close();
 
   // 设置：会员档位 + 做卡开关

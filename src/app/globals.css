@@ -2005,7 +2005,8 @@ body {
   font-size: var(--rf-text-xs);
   color: var(--wb-muted);
 }
-.st-current-line b { color: var(--wb-ink); font-weight: 700; }
+.st-current-line { flex-wrap: wrap; } /* 窄屏时整段换行，不把「当前使用」挤成一字一行 */
+.st-current-line b { color: var(--wb-ink); font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
 .st-current-line span { font-size: var(--rf-text-xs); }
 
 .st-providers { display: flex; flex-direction: column; gap: 8px; }

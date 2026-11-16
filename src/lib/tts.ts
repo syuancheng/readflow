@@ -15,7 +15,7 @@ import { SETTINGS_KEYS } from "@/lib/config";
 import { isRetryableError } from "@/lib/retry";
 import { audioKey, normalizeAudioText, speakable } from "@/lib/cards/audio";
 import { VOICE } from "@/lib/cards/voices";
-import { audioMimeOf, buildTtsRequest, parseTtsResponse, resolveTtsKey, ttsBase } from "@/lib/cards/tts-api";
+import { audioMimeOf, buildTtsRequest, parseTtsResponse, resolveTtsKeyWithSource, ttsBase, type TtsKeySource } from "@/lib/cards/tts-api";
 
 export const TTS_CONCURRENCY = 3;
 export const TTS_TIMEOUT_MS = 20_000;
@@ -27,8 +27,17 @@ export function audioDir(): string {
   return path.join(path.dirname(dbPath), "tts");
 }
 
+function ttsKeyInfo(): { key: string; source: TtsKeySource } | null {
+  return resolveTtsKeyWithSource(process.env, getSetting(SETTINGS_KEYS.ttsKey), getSetting(SETTINGS_KEYS.providerKey("qwen")));
+}
+
 export function ttsKey(): string | null {
-  return resolveTtsKey(process.env, getSetting(SETTINGS_KEYS.providerKey("qwen")));
+  return ttsKeyInfo()?.key ?? null;
+}
+
+/** 设置页用：Key 从哪里来（不返回 Key 本身） */
+export function ttsKeySource(): TtsKeySource | null {
+  return ttsKeyInfo()?.source ?? null;
 }
 
 export function ttsKeyAvailable(): boolean {

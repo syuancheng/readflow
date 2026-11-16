@@ -82,6 +82,10 @@ test("导航搜索：空查询给全部分组，命中标题/关键字才保留"
 
   // 空分组必须被剔除，不留一个空标题
   assert.deepEqual(filterNavGroups("不存在的设置项"), []);
+  // P37：「模型」页只放模型（含语音合成）；开关在「功能」组的「AI 功能」
+  assert.deepEqual(filterNavGroups("百炼").flatMap((g) => g.items.map((i) => i.id)), ["models"]);
+  assert.deepEqual(filterNavGroups("做卡").flatMap((g) => g.items.map((i) => i.id)), ["features"]);
+  assert.ok(NAV_GROUPS.some((g) => g.title === "功能" && g.items.some((i) => i.id === "features" && i.title === "AI 功能")));
 });
 
 test("供应商下拉：每家都有展示名、文档链接与模型候选", () => {

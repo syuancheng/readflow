@@ -61,12 +61,34 @@ export function parseTtsResponse(json: unknown): TtsResult {
   };
 }
 
-/** Key：先读环境变量 DASHSCOPE_API_KEY，再读站级设置里「通义千问」那一栏；都没有返回 null */
-export function resolveTtsKey(env: Record<string, string | undefined>, siteQwenKey: string | null): string | null {
+export type TtsKeySource = "setting" | "env" | "qwen";
+
+/**
+ * 语音合成用哪个 Key，按顺序：
+ * 1. 设置 → 模型 →「语音合成模型」里单独填的 Key；
+ * 2. 环境变量 DASHSCOPE_API_KEY；
+ * 3. 「通义千问」那一栏的 Key（同一个百炼账号，旧部署这样配过）。
+ * 都没有返回 null。
+ */
+export function resolveTtsKeyWithSource(
+  env: Record<string, string | undefined>,
+  ownKey: string | null,
+  siteQwenKey: string | null,
+): { key: string; source: TtsKeySource } | null {
+  const own = ownKey?.trim();
+  if (own) return { key: own, source: "setting" };
   const fromEnv = env.DASHSCOPE_API_KEY?.trim();
-  if (fromEnv) return fromEnv;
-  const fromSite = siteQwenKey?.trim();
-  return fromSite ? fromSite : null;
+  if (fromEnv) return { key: fromEnv, source: "env" };
+  const qwen = siteQwenKey?.trim();
+  return qwen ? { key: qwen, source: "qwen" } : null;
+}
+
+export function resolveTtsKey(
+  env: Record<string, string | undefined>,
+  ownKey: string | null,
+  siteQwenKey: string | null,
+): string | null {
+  return resolveTtsKeyWithSource(env, ownKey, siteQwenKey)?.key ?? null;
 }
 
 /** 下载回来的音频是什么格式：优先看响应头，其次看地址的扩展名，默认 wav */
