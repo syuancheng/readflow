@@ -1235,37 +1235,72 @@ body {
 }
 .rf-ai-btn { color: var(--rf-ai-text); }
 
-/* 「问 AI」展开后的选项面板（P26）：一行一条，像选择题 */
+/* 「问 AI」展开后的面板（PR-04 重设计）：
+   亲密性——标签组与输入框分两组，组内 8px / 组间 12px + 一条线；
+   对齐——标签与输入框左边界都落在面板左线；对比——无嵌套框，焦点唯一。
+   全部数值走设计令牌，不新增色值。 */
 .rf-ask-menu {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px;
-  border: 1px solid var(--rf-border);
-  border-radius: var(--rf-radius-md);
-  background: var(--rf-bg-subtle);
-}
-.rf-ask-menu > div {
-  width: 100%;
+  gap: var(--rf-space-3);
+  margin-top: var(--rf-space-2);
 }
 
-/* 自定义提问：发送图标内嵌在输入框右端，不再有独立按钮 */
+/* 组 A：4 个快捷追问，横排紧凑标签，自动换行 */
+.rf-ask-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rf-space-2);
+}
+
+/* 组间的分隔线：全站统一 1px（C-09），靠留白而非加粗边框分区 */
+.rf-ask-sep {
+  height: var(--rf-border-width);
+  background: var(--rf-border);
+}
+
+.rf-ask-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--rf-space-2) var(--rf-space-3);
+  border-radius: var(--rf-radius-md);
+  border: var(--rf-border-width) solid var(--rf-border);
+  background: var(--rf-bg-surface);
+  font-size: var(--rf-text-sm);
+  font-weight: 600; /* = --rf-weight-medium；项目 check-tokens 只认字面字重 */
+  color: var(--rf-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
+}
+.rf-ask-chip:hover {
+  border-color: var(--rf-purple-500);
+  background: var(--rf-ai-soft);
+  color: var(--rf-ai-text);
+}
+
+/* 组 B：自定义提问。发送图标内嵌在输入框右下角，随内容增高 */
 .rf-ask-custom {
   position: relative;
   display: flex;
-  align-items: center;
-  margin-top: 2px;
+  align-items: flex-start;
 }
-.rf-ask-custom .duo-input {
+.rf-ask-input {
+  display: block;
   width: 100%;
-  padding: 8px 40px 8px 12px;
-  border-radius: var(--rf-radius-sm);
+  min-height: calc(var(--rf-leading-md) + var(--rf-space-3));
+  padding: var(--rf-space-2) var(--rf-space-10) var(--rf-space-2) var(--rf-space-3);
+  border-radius: var(--rf-radius-md);
   font-size: var(--rf-text-sm);
+  font-weight: 400; /* = --rf-weight-regular；项目 check-tokens 只认字面字重 */
+  line-height: var(--rf-leading-md);
+  resize: none;
+  overflow-y: auto;
 }
 .rf-ask-send {
   position: absolute;
-  right: 7px;
+  right: var(--rf-space-2);
+  bottom: var(--rf-space-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1277,7 +1312,7 @@ body {
   background: transparent;
   color: var(--rf-ai-text);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
 }
 .rf-ask-send svg {
   width: 16px;
@@ -1290,39 +1325,6 @@ body {
   color: var(--duo-ink-faint);
   opacity: 0.55;
   cursor: default;
-}
-.rf-ask-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: var(--rf-radius-sm);
-  border: 1px solid var(--rf-border);
-  background: var(--rf-bg-surface);
-  font-size: var(--rf-text-sm);
-  font-weight: 600;
-  color: var(--rf-text-primary);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
-}
-.rf-ask-chip::before {
-  content: "";
-  flex: none;
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--duo-border);
-  border-radius: 50%;
-  transition: border-color 120ms ease;
-}
-.rf-ask-chip:hover {
-  border-color: var(--rf-purple-500);
-  background: var(--rf-ai-soft);
-  color: var(--rf-ai-text);
-}
-.rf-ask-chip:hover::before {
-  border-color: var(--rf-purple-600);
 }
 
 /* 对话串里追问那一段的标题：你问：整句没看懂 */

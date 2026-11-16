@@ -10,7 +10,7 @@ import { ASK_KINDS, narrowAskKind } from "../../src/lib/learner/ask-kind";
 import { ASK_LABEL } from "../../src/lib/learner/note";
 
 /**
- * P40「从专业角度讲讲这句」：领域专家是第二个老师，不是改写第一个老师。
+ * P40「从内容角度讲讲这句」：领域专家是第二个老师，不是改写第一个老师。
  * 核心性质：默认讲解 / 其他追问的提示词必须逐字不变，领域人设只在 askKind=domain 生效。
  */
 
@@ -24,7 +24,7 @@ const BASE = {
 test("domain 已进白名单，有中文标签", () => {
   assert.ok(ASK_KINDS.includes("domain"));
   assert.equal(narrowAskKind("domain"), "domain");
-  assert.equal(ASK_LABEL.domain, "从专业角度讲讲");
+  assert.equal(ASK_LABEL.domain, "从内容角度讲讲");
 });
 
 test("领域人设与英语老师人设是两套，互不覆盖", () => {

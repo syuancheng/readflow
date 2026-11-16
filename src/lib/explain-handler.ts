@@ -22,7 +22,7 @@ import { lemma as lemmaOf } from "@/lib/dict";
 import { STREAM_RESET } from "@/lib/config";
 
 /**
- * P40：「从专业角度讲讲」需要知道文章属于哪个领域。标题 / 分类只从库里按 textId 取，
+ * P40：「从内容角度讲讲」需要知道文章属于哪个领域。标题 / 分类只从库里按 textId 取，
  * 且必须属于当前账号；前端传来的同名字段一律不信（explainParamsFromBody 白名单里没有）。
  * 查不到就返回空串：模型仍可凭选区上下文自己判断领域，不该因此报错。
  */

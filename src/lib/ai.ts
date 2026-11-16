@@ -145,7 +145,7 @@ After the answer, if you think this word is worth turning into a flashcard, outp
 - Output nothing when not worth it. Nothing may follow this line.`;
 
 /**
- * P40：领域专家人设（「从专业角度讲讲这句」专用）。
+ * P40：领域专家人设（「从内容角度讲讲这句」专用）。
  *
  * 与英语老师彻底分开：默认讲解的 system prompt 有逐字快照测试，这里一行都不碰。
  * 只在 askKind=domain 时由 explainTurns 选用；学生已经看过翻译和句法，这一轮
@@ -407,7 +407,7 @@ export function historyTurns(history: readonly ExplainHistoryTurn[] | undefined)
 export function explainTurns(params: ExplainParams): ChatTurn[] {
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
-  // P40：只有「从专业角度讲讲」这一轮换人设；其他所有 askKind 仍走逐字不变的英语老师。
+  // P40：只有「从内容角度讲讲」这一轮换人设；其他所有 askKind 仍走逐字不变的英语老师。
   const system =
     params.askKind === "domain"
       ? buildDomainSystemPrompt()

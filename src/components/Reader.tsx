@@ -1758,16 +1758,16 @@ function PickCard({
       },
     },
     {
-      label: "从专业角度讲讲",
+      label: "从内容角度讲讲",
       req: {
-        ask: "从专业角度讲讲",
+        ask: "从内容角度讲讲",
         askKind: "domain" as const,
-        // 整句提问：从专业角度讲的是这句话，不是划中的那个词
+        // 整句提问：讲的是这句话，不是划中的那个词
         word: sentence,
         wholeSentence: true,
         prompt:
-          "这句话我已经知道中文意思了。请从这篇文章所属的专业领域，讲讲这句话涉及的概念、做法或设计取舍，" +
-          "以及作者为什么这么写、它在文章的论证里起什么作用。",
+          "这句话我已经知道中文意思了。请先跳出英语学习本身，从这篇文章讲的内容出发，" +
+          "讲讲这句话涉及的概念、做法或设计取舍，以及作者为什么这么写、它在文章的论证里起什么作用。",
       },
     },
   ];
@@ -2058,26 +2058,43 @@ function PickCard({
         </div>
         {menuOpen && !busy && (
           <div className="rf-ask-menu">
-            {askOptions.map((o) => (
-              <button
-                key={o.label}
-                className="rf-ask-chip"
-                onClick={() => {
-                  setMenuOpen(false);
-                  void triggerAI(o.req);
-                }}
-              >
-                {o.label}
-              </button>
-            ))}
+            {/* 亲密性：4 个快捷追问同属一组，横排紧凑标签，组内 8px */}
+            <div className="rf-ask-chips">
+              {askOptions.map((o) => (
+                <button
+                  key={o.label}
+                  className="rf-ask-chip"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void triggerAI(o.req);
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {/* 用一条线分隔两组，而不是再套一层框（P-10 / TIP-15 / APX-12） */}
+            <div className="rf-ask-sep" role="separator" />
+            {/* 自定义提问：发送图标内嵌在输入框右下角；随输入行数自动增高 */}
             <div className="rf-ask-custom">
-              <input
-                className="duo-input"
+              <textarea
+                className="duo-input rf-ask-input"
                 placeholder="自己写个问题…"
+                rows={1}
                 value={askPrompt}
                 onChange={(e) => setAskPrompt(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") askCustom();
+                  // Enter 发送，Shift+Enter 换行——多行输入的标准约定
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    askCustom();
+                  }
+                }}
+                ref={(el) => {
+                  if (!el) return;
+                  // 先归零再按内容撑高，超过上限改为内部滚动，避免无限撑大弹层
+                  el.style.height = "auto";
+                  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
                 }}
               />
               <button
