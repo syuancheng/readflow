@@ -59,12 +59,13 @@ const WAV = (() => {
   b.writeUInt32LE(8000, 24); b.writeUInt32LE(16000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write("data", 36); b.writeUInt32LE(n, 40);
   return b;
 })();
-let ttsCalls = 0, ttsAuth = "";
+let ttsCalls = 0, ttsAuth = "", ttsVoice = "";
 const tts = http.createServer((req, res) => {
   let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => {
     if (req.method === "GET") { res.writeHead(200, { "content-type": "audio/wav" }); return res.end(WAV); }
     ttsCalls++; ttsAuth = req.headers.authorization ?? "";
     const text = JSON.parse(b || "{}").input?.text ?? "";
+    ttsVoice = JSON.parse(b || "{}").input?.voice ?? "";
     res.writeHead(text.includes("never") ? 500 : 200, { "content-type": "application/json" });
     res.end(JSON.stringify(text.includes("never") ? { code: "InternalError", message: "boom" } : { output: { audio: { url: `http://127.0.0.1:${TTS}/a/${ttsCalls}.wav` } } }));
   });
@@ -373,6 +374,27 @@ try {
   await p5.waitForFunction(() => document.querySelector('[data-testid="tts-status"]')?.textContent?.includes("DASHSCOPE_API_KEY"));
   const cleared = await api("/api/settings", { cookie });
   check("P6c 点「清除」后回退到环境变量的 Key；之前的配音请求带的是环境变量 Key", cleared.data.tts?.source === "env" && ttsCalls > 0 && ttsAuth === "Bearer fake-dashscope", `${JSON.stringify(cleared.data.tts)} calls=${ttsCalls} auth=${ttsAuth}`);
+
+  // P38：选音色 + 试听；换音色后已有草稿的音频 key 不变（仍是原来的声音）
+  const keysOf = (x) => [...new Set([...JSON.stringify(x).matchAll(/"audioKey":"([0-9a-f]{32})"/g)].map((m) => m[1]))].sort().join(",");
+  const keysBefore = keysOf((await api(`/api/cards/sets/${g.data.setId}`, { cookie })).data.cards);
+  const serena = p5.getByRole("radio", { name: "使用 苏瑶" });
+  await serena.scrollIntoViewIfNeeded();
+  check("P8 默认音色是詹妮弗（Jennifer），列表里有 5 个音色", (await p5.getByRole("radio", { name: "使用 詹妮弗" }).getAttribute("aria-checked")) === "true" && (await p5.locator('[role=radiogroup][aria-labelledby="st-voice-label"] [role=radio]').count()) === 5);
+  await serena.click();
+  await p5.waitForFunction(() => document.querySelector('[aria-label="使用 苏瑶"]')?.getAttribute("aria-checked") === "true");
+  const voiceSaved = await api("/api/settings", { cookie });
+  const callsBeforeSample = ttsCalls;
+  await p5.getByRole("button", { name: "试听 苏瑶" }).click();
+  for (let i = 0; i < 40 && ttsCalls === callsBeforeSample; i++) await new Promise((r) => setTimeout(r, 100));
+  await p5.locator(".st-main").screenshot({ path: shots("settings-voice-1440.png") });
+  check("P8a 点「设为使用」后接口返回 voice=Serena；试听按苏瑶合成", voiceSaved.data.tts?.voice === "Serena" && ttsVoice === "Serena", `voice=${voiceSaved.data.tts?.voice} synth=${ttsVoice}`);
+  const keysAfter = keysOf((await api(`/api/cards/sets/${g.data.setId}`, { cookie })).data.cards);
+  check("P8b 换音色后，已有草稿的音频 key 不变", keysBefore.length > 0 && keysBefore === keysAfter, `${keysBefore.slice(0, 40)}… vs ${keysAfter.slice(0, 40)}…`);
+  const badVoice = await api("/api/settings", { cookie, method: "PUT", body: { ttsVoice: "Cherry" } });
+  const badSample = await api("/api/tts/sample?voice=Cherry", { cookie });
+  check("P8c 列表外的音色：保存 400、试听 400", badVoice.status === 400 && badSample.status === 400, `${badVoice.status} ${badSample.status}`);
+  await api("/api/settings", { cookie, method: "PUT", body: { ttsVoice: "Jennifer" } });
 
   await p5.locator(".st-nav-item", { hasText: "AI 功能" }).click();
   const sw = p5.getByRole("switch", { name: "卡片句子配音" });

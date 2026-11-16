@@ -5,8 +5,8 @@
 import { sqlite } from "@/db/sqlite";
 import { GLOBAL_USER } from "@/db/ensure-auth";
 import { cardsEnabled, charLimitFor, listeningEnabled, sentenceAudioEnabled } from "./flags";
-import { ttsKeyAvailable } from "@/lib/tts";
-import { VOICE } from "./voices";
+import { currentVoice, ttsKeyAvailable } from "@/lib/tts";
+import { voiceInContent } from "./voices";
 import type { Voice } from "./audio";
 import { cardQuotaDay } from "./quota";
 import { addUsage, refundUsage, usedOn } from "@/lib/daily-usage";
@@ -46,12 +46,12 @@ export function listeningOn(): boolean {
 /** 一条批注 + 它所在的词、文章（按用户归属过滤） */
 /** P35：新生成 / 修改的卡要不要配句子音频——开关打开并且拿得到百炼 Key；要配就返回音色 */
 export function cardAudioVoice(): Voice | null {
-  return sentenceAudioEnabled(siteCardsSettings()) && ttsKeyAvailable() ? VOICE : null;
+  return sentenceAudioEnabled(siteCardsSettings()) && ttsKeyAvailable() ? currentVoice() : null;
 }
 
 /** 预览用：这张卡的草稿内容里有占位符才显示播放按钮（音色以写进占位符时的为准） */
-export function previewVoiceOf(content: string): Voice | null {
-  return content.includes("@AUDIO:") ? VOICE : null;
+export function previewVoiceOf(content: string, texts: readonly string[]): Voice | null {
+  return content.includes("@AUDIO:") ? voiceInContent(content, texts) : null;
 }
 
 export type CardContext = {

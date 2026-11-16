@@ -19,8 +19,9 @@ import { randomUUID } from "node:crypto";
 import { sqlite } from "@/db/sqlite";
 import fs from "node:fs";
 import { createCard, createChapter, getCard, listChapters, MarkjiError, uploadFile } from "@/lib/markji";
-import { audioKey, audioPlaceholderKeys, audioTextsOf, fillAudioIds } from "./audio";
-import { VOICE } from "./voices";
+import { audioPlaceholderKeys, audioTextsOf, fillAudioIds } from "./audio";
+import { matchAudioKey } from "./voices";
+import type { Voice } from "./audio";
 import type { CardSpec } from "./spec";
 import { ensureAudio, storedAudio } from "@/lib/tts";
 import { markjiTokenFor } from "@/lib/user-secrets";
@@ -343,8 +344,8 @@ async function fileIdFor(
   let audio = storedAudio(key);
   if (!audio) {
     // 本地还没有：从这张卡的 spec 里找回句子再合成一次
-    const text = textForKey(userId, key);
-    audio = text ? await ensureAudio(text) : null;
+    const hit = textForKey(userId, key);
+    audio = hit ? await ensureAudio(hit.text, hit.voice) : null;
   }
   if (!audio) return null;
 
@@ -365,13 +366,13 @@ async function fileIdFor(
   }
 }
 
-/** 按 key 找回句子：在这个用户内容里带这个占位符的卡的 spec 里找 */
-function textForKey(userId: string, key: string): string | null {
+/** 按 key 找回句子和当时的音色：在这个用户内容里带这个占位符的卡的 spec 里找 */
+function textForKey(userId: string, key: string): { text: string; voice: Voice } | null {
   const rows = sqlite
     .prepare("SELECT spec FROM cards WHERE user_id = ? AND content LIKE ? LIMIT 5")
     .all(userId, `%@AUDIO:${key}@%`) as { spec: string }[];
   for (const r of rows) {
-    const hit = audioTextsOf(JSON.parse(r.spec) as CardSpec).find((t) => audioKey(t, VOICE) === key);
+    const hit = matchAudioKey(audioTextsOf(JSON.parse(r.spec) as CardSpec), key);
     if (hit) return hit;
   }
   return null;

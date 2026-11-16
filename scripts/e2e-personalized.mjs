@@ -417,6 +417,10 @@ try {
   check("E3 非站长发送 aiPersonalized 返回 403", forbidden.status === 403, `status=${forbidden.status}`);
   const ttsForbidden = await api("/api/settings", { cookie: friendCookie, method: "PUT", body: { ttsApiKey: "sk-not-allowed" } });
   const friendView = await api("/api/settings", { cookie: friendCookie });
+  const voiceForbidden = await api("/api/settings", { cookie: friendCookie, method: "PUT", body: { ttsVoice: "Serena" } });
+  const sampleForbidden = await api("/api/tts/sample?voice=Serena", { cookie: friendCookie });
+  check("E3c 非站长不能换配音音色，也不能试听", voiceForbidden.status === 403 && sampleForbidden.status === 403,
+    `voice=${voiceForbidden.status} sample=${sampleForbidden.status}`);
   check("E3b 非站长不能改语音合成的 Key，也看不到它的状态", ttsForbidden.status === 403 && friendView.data?.tts === undefined,
     `status=${ttsForbidden.status} tts=${JSON.stringify(friendView.data?.tts)}`);
   await api("/api/settings", { cookie: owner, method: "PUT", body: { aiPersonalized: "on" } });

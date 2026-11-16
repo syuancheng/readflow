@@ -2,8 +2,8 @@ import fs from "node:fs";
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { sqlite } from "@/db/sqlite";
-import { audioKey, audioTextsOf, isAudioKey } from "@/lib/cards/audio";
-import { VOICE } from "@/lib/cards/voices";
+import { audioTextsOf, isAudioKey } from "@/lib/cards/audio";
+import { matchAudioKey } from "@/lib/cards/voices";
 import type { CardSpec } from "@/lib/cards/spec";
 import { ensureAudio, storedAudio } from "@/lib/tts";
 
@@ -29,10 +29,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ key: string }>
 
   let audio = storedAudio(key);
   if (!audio) {
-    const text = rows
-      .flatMap((r) => audioTextsOf(JSON.parse(r.spec) as CardSpec))
-      .find((t) => audioKey(t, VOICE) === key);
-    audio = text ? await ensureAudio(text) : null;
+    // 按写进占位符时的音色找回句子（换过音色的旧草稿仍用旧音色）
+    const hit = matchAudioKey(rows.flatMap((r) => audioTextsOf(JSON.parse(r.spec) as CardSpec)), key);
+    audio = hit ? await ensureAudio(hit.text, hit.voice) : null;
   }
   if (!audio) return NextResponse.json({ error: "音频暂时没生成" }, { status: 503 });
 
