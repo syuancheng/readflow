@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CHAR_LIMITS, cardsEnabled, charLimitFor, listeningEnabled } from "../../src/lib/cards/flags";
+import { CHAR_LIMITS, cardsEnabled, charLimitFor, listeningEnabled, sentenceAudioEnabled } from "../../src/lib/cards/flags";
 
 function withEnv<T>(value: string | undefined, fn: () => T): T {
   const old = process.env.READFLOW_CARDS;
@@ -38,4 +38,13 @@ test("字数上限：普通 1800，专业 4000；档位缺失按普通", () => {
   assert.equal(charLimitFor(null), 1800);
   assert.equal(charLimitFor(undefined), 1800);
   assert.equal(charLimitFor("weird"), 1800);
+});
+
+test("P35 句子配音默认开；站点设置 off 关闭；环境变量 off 一票否决", () => {
+  withEnv(undefined, () => {
+    assert.equal(sentenceAudioEnabled({}), true);
+    assert.equal(sentenceAudioEnabled({ "cards.audio": "on" }), true);
+    assert.equal(sentenceAudioEnabled({ "cards.audio": "off" }), false);
+  });
+  withEnv("off", () => assert.equal(sentenceAudioEnabled({ "cards.audio": "on" }), false));
 });

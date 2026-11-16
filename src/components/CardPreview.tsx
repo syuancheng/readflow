@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { SECTIONS, type PreviewModel, type PreviewSide } from "@/lib/cards/render";
+import { SECTIONS, groupReference, type PreviewModel, type PreviewSide } from "@/lib/cards/render";
+import AudioButton from "./AudioButton";
 
 /**
  * 卡片预览（P33 §8.2）：按墨墨里的样子显示标签行、正面、提示层、背面分区。
@@ -9,6 +10,62 @@ import { SECTIONS, type PreviewModel, type PreviewSide } from "@/lib/cards/rende
  * 挖空显示成下划线；选择题显示选项，翻到背面时标出正确答案。
  */
 type Side = "front" | "hint" | "back";
+
+type Line = PreviewSide["lines"][number];
+
+/**
+ * 一行英文句子：句末跟「（AI 补充）」和 ▶（P35）。
+ * ▶ 不能单独掉到下一行开头：把最后一个词（或 AI 标记）和按钮包进不换行的 span（设计简报 §9.8）。
+ */
+function SentenceText({ line }: { line: Line }) {
+  const tail = (
+    <>
+      {line.ai && <span className="cp-ai">（AI 补充）</span>}
+      {line.audioKey && <AudioButton audioKey={line.audioKey} text={line.text} />}
+    </>
+  );
+  if (!line.ai && !line.audioKey) return <>{line.text}</>;
+  if (line.ai) {
+    return (
+      <>
+        {line.text} <span className="rf-say-tail">{tail}</span>
+      </>
+    );
+  }
+  const cut = line.text.lastIndexOf(" ");
+  return (
+    <>
+      {cut > 0 ? line.text.slice(0, cut + 1) : ""}
+      <span className="rf-say-tail">
+        {cut > 0 ? line.text.slice(cut + 1) : line.text}
+        {tail}
+      </span>
+    </>
+  );
+}
+
+/** 使用类卡的参考说法：按组排版，英文主文字色、中文次要灰 */
+function ReferenceGroups({ side }: { side: PreviewSide }) {
+  return (
+    <div className="rf-ref-list">
+      {groupReference(side.lines).map((g, i) => (
+        <div className="rf-ref-group" key={i}>
+          {g.map((l, j) =>
+            l.sentence || (/[A-Za-z]/.test(l.text) && !/[\u3400-\u9fff]/.test(l.text)) ? (
+              <p className="cp-line" key={j}>
+                <SentenceText line={l} />
+              </p>
+            ) : (
+              <p className="rf-ref-zh" key={j}>
+                {l.text}
+              </p>
+            ),
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function Lines({ side, answers }: { side: PreviewSide; answers: boolean }) {
   return (
@@ -39,7 +96,7 @@ function Lines({ side, answers }: { side: PreviewSide; answers: boolean }) {
         }
         return (
           <p className="cp-line" key={i}>
-            {l.text}
+            <SentenceText line={l} />
           </p>
         );
       })}
@@ -77,9 +134,18 @@ export default function CardPreview({ preview, notice }: { preview: PreviewModel
         )}
         {side === "back" && (
           <>
-            <p className="cp-title">{SECTIONS.answer}</p>
-            <Lines side={frontChoices} answers />
-            <Lines side={b.answer} answers />
+            <p className="cp-title">{b.answerTitle}</p>
+            {b.referenceNote ? (
+              <>
+                <p className="rf-ref-note">{b.referenceNote}</p>
+                <ReferenceGroups side={b.answer} />
+              </>
+            ) : (
+              <>
+                <Lines side={frontChoices} answers />
+                <Lines side={b.answer} answers />
+              </>
+            )}
             {b.explanation && (
               <>
                 <p className="cp-title">{SECTIONS.explanation}</p>
@@ -102,7 +168,11 @@ export default function CardPreview({ preview, notice }: { preview: PreviewModel
               <>
                 <p className="cp-title">{SECTIONS.example}</p>
                 <p className="cp-line">
-                  {b.example.en} <span className="cp-ai">（AI 补充）</span>
+                  {b.example.en}{" "}
+                  <span className="rf-say-tail">
+                    <span className="cp-ai">（AI 补充）</span>
+                    {b.example.audioKey && <AudioButton audioKey={b.example.audioKey} text={b.example.en} />}
+                  </span>
                 </p>
                 <p className="cp-line">{b.example.zh}</p>
               </>

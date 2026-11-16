@@ -22,7 +22,11 @@ import { explainCache } from "./explain-cache";
 import { cardsEnabled } from "./flags";
 import { CARD_DAILY_LIMIT, cardQuotaDay, cardQuotaMessage } from "./quota";
 import { examFamilyOf, examStyleLabel, stylePromptLines, type ExamFamily } from "./style";
+import { checkComposition, NEED_PRODUCTIVE_REASON } from "./compose";
+import { audioTextsOf, type Voice } from "./audio";
+import { ensureAudio, ensureAudioAll } from "@/lib/tts";
 import {
+  cardAudioVoice,
   cardsUsedToday,
   charLimitOfUser,
   hasPushedCards,
@@ -42,6 +46,8 @@ export const NO_MODEL_MESSAGE = "做卡需要可用的 AI 模型：在 设置 �
 export const MAX_REGEN = 5;
 /** generating 超过这么久还没结束（进程重启 / 卡死）就当失败，不能让它永远挡住去重 */
 export const STALE_GENERATING_MS = 5 * 60 * 1000;
+/** P35：一组卡的句子音频最多等这么久再把组标成 ready；没合成完的在后台继续 */
+export const AUDIO_BUDGET_MS = 45_000;
 
 export type GenerateOutcome =
   | { ok: true; setId: string; reused: boolean }
@@ -52,8 +58,8 @@ type Provider = ResolvedProvider;
 type Usage = { promptTokens?: number; completionTokens?: number; cacheHitTokens?: number };
 
 /**
- * 出题不设输出上限（2026-11-15）：JSON 被上限截断就整个作废（报「模型没有返回合法的 JSON」），
- * 长度由出题指令（1~3 张卡）控制。正常一组约 700–800 token。
+ * 出题不设输出上限（2026-11-15）：JSON 被上限截断就整个作废（报「模型没有返回合法的 JSON」）。
+ * 张数由 AI 按这个词决定（P35），正常一组约 700–1500 token。
  */
 const GEN_OPTS = { temperature: 0.4, maxTokens: null } as const;
 
@@ -158,23 +164,44 @@ async function runGenerate(
   if (!parsed.ok) {
     return { ok: false, reason: finish === "length" ? "模型的输出到了长度上限，JSON 没写完" : parsed.reason };
   }
+  if (parsed.dropped) console.warn("[cards] 卡片超过保险上限，丢掉后面的", { setId, dropped: parsed.dropped });
 
-  // 2) 校验 → 重出 → 选择题复核
+  // 2) 组卡检查（P35）：一张使用类卡都没有 → 整组重出一次；仍没有就照常保存
+  let cards = parsed.cards;
+  if (checkComposition(cards, run.family !== null).needsRedo) {
+    const again = await redoSet(provider, run, cards);
+    if (again && !checkComposition(again, run.family !== null).needsRedo) cards = again;
+  }
+  if (checkComposition(cards, run.family !== null).missingExam) {
+    console.warn("[cards] 学生有考试目标，但这一组没有考试风格的卡", { setId });
+  }
+
+  // 3) 校验 → 重出 → 选择题复核
   const settled: { spec: CardSpec; needsReview: string | null }[] = [];
-  for (const raw of parsed.cards) {
+  for (const raw of cards) {
     const out = await settleCard(provider, run, raw);
     if (out) settled.push(out);
   }
   if (settled.length === 0) return { ok: false, reason: "所有卡片都没有通过校验" };
 
-  // 3) 渲染 + 落库
-  const now = Date.now();
+  // 4) 渲染（开了配音就带占位符）→ 合成句子音频（最多等 AUDIO_BUDGET_MS，失败不影响）→ 落库
   const rows: { spec: CardSpec; content: string; needsReview: string | null }[] = [];
   for (const { spec, needsReview } of settled) {
-    const rendered = renderCardChecked(spec, { sourceTitle: ctx.text_title ?? "" }, { charLimit: run.vctx.charLimit });
+    const rendered = renderCardChecked(
+      spec,
+      { sourceTitle: ctx.text_title ?? "", audio: run.audio },
+      { charLimit: run.vctx.charLimit },
+    );
     if (rendered.ok) rows.push({ spec, content: rendered.content, needsReview });
   }
   if (rows.length === 0) return { ok: false, reason: "所有卡片渲染失败" };
+
+  if (run.audio) {
+    const texts = [...new Set(rows.flatMap((r) => audioTextsOf(r.spec)))];
+    const got = await ensureAudioAll(texts, AUDIO_BUDGET_MS);
+    if (got < texts.length) console.warn("[cards] 句子音频没有全部合成", { setId, total: texts.length, got });
+  }
+  const now = Date.now();
 
   sqlite.transaction(() => {
     const insert = sqlite.prepare(
@@ -202,6 +229,8 @@ type Run = {
   vctx: ValidateCtx;
   family: ExamFamily | null;
   cacheHit: boolean;
+  /** P35：要配句子音频时的音色；null 不配 */
+  audio: Voice | null;
 };
 
 /**
@@ -247,9 +276,11 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
 
   const family = examFamilyOf(surveyFor(user.id));
   const listening = listeningOn();
+  const audio = cardAudioVoice();
   const prompt = buildCardPrompt({
     learnerBlock,
     styleLines: stylePromptLines(family, surveyFor(user.id)),
+    examFamily: family,
     listeningEnabled: listening,
     otherTextLookups: otherTextLookups(user.id, ctx.lemma, ctx.text_id),
     cardedBefore: hasPushedCards(user.id, ctx.word_id),
@@ -264,9 +295,11 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
       listeningEnabled: listening,
       charLimit: charLimitOfUser(user.id),
       sourceTitle: ctx.text_title ?? "",
+      audio,
     },
     family,
     cacheHit: cached !== null,
+    audio,
   };
 }
 
@@ -348,6 +381,26 @@ async function redo(provider: Provider, run: Run, prev: CardSpec, reason: string
     return parsed.ok ? withStyle(parsed.cards[0], run.family) : null;
   } catch (err) {
     console.error("[cards] 重出失败:", err);
+    return null;
+  }
+}
+
+/** P35：整组没有使用类卡时重出一次整组；拿不到合法结果返回 null */
+async function redoSet(provider: Provider, run: Run, prev: CardSpec[]): Promise<CardSpec[] | null> {
+  const turns: ChatTurn[] = [
+    ...run.messages,
+    { role: "assistant", content: JSON.stringify({ cards: prev }) },
+    {
+      role: "user",
+      content: `这一组不合格：${NEED_PRODUCTIVE_REASON}。请按组卡规则重新出这一组，返回 { "cards": CardSpec[] }。`,
+    },
+  ];
+  try {
+    const res = await completeJson(provider, turns, GEN_OPTS);
+    const parsed = parseCardGen(res.text);
+    return parsed.ok ? parsed.cards : null;
+  } catch (err) {
+    console.error("[cards] 整组重出失败:", err);
     return null;
   }
 }
@@ -446,7 +499,11 @@ export async function regenerateCard(user: Who, cardId: string): Promise<RegenOu
   if (!v.ok) return { ok: false, status: 400, error: `新卡片不合格：${v.reasons.join("；")}，再试一次` };
 
   const review = hasChoice(next) ? await reviewChoice(provider, run.vctx.originalSentence, next) : "ok";
-  const rendered = renderCardChecked(next, { sourceTitle: ctx.text_title ?? "" }, { charLimit: run.vctx.charLimit });
+  const rendered = renderCardChecked(
+    next,
+    { sourceTitle: ctx.text_title ?? "", audio: run.audio },
+    { charLimit: run.vctx.charLimit },
+  );
   if (!rendered.ok) return { ok: false, status: 400, error: rendered.problems.join("；") };
 
   const now = Date.now();
@@ -469,6 +526,8 @@ export async function regenerateCard(user: Who, cardId: string): Promise<RegenOu
       .prepare("UPDATE card_sets SET regen_count = regen_count + 1, updated_at = ? WHERE id = ?")
       .run(now, card.set_id);
   })();
+  // P35：新卡的句子音频在后台合成，不等结果；预览时没合成好会按需现场合成
+  if (run.audio) for (const t of audioTextsOf(next)) void ensureAudio(t);
   return { ok: true };
 }
 

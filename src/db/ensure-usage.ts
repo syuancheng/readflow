@@ -3,10 +3,10 @@ import type Database from "better-sqlite3";
 /**
  * 表结构整理（2026-11-14）：
  * 1. 合并 ai_usage + card_usage → daily_usage(user_id, day, kind, count)，kind = 'ai' | 'card'；
- * 2. 删掉阶段二才用、现在为空的 tts_audio / markji_media（阶段二再建）。
+ * 2. （原来这里删掉空的 tts_audio / markji_media；P35 改由 ensure-audio.ts 按新结构建表，
+ *    旧结构的空表也在那里删。）
  *
  * 启动时执行，全部在一个事务里，要么全做成要么全不做；可以重复执行（旧表不在了就什么也不做）。
- * 语音两张表只在为空时删除；万一有数据就保留并打日志，不冒丢数据的险。
  */
 export function ensureDailyUsage(sqlite: Database.Database): void {
   const exists = (name: string) =>
@@ -39,11 +39,5 @@ export function ensureDailyUsage(sqlite: Database.Database): void {
       sqlite.exec(`DROP TABLE ${table}`);
     }
 
-    for (const table of ["tts_audio", "markji_media"]) {
-      if (!exists(table)) continue;
-      const n = (sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
-      if (n === 0) sqlite.exec(`DROP TABLE ${table}`);
-      else console.warn(`[db] ${table} 里有 ${n} 行数据，保留不删`);
-    }
   })();
 }

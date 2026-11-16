@@ -11,10 +11,18 @@
  *   选这个办法而不是在卡面里塞隐藏标记：不污染用户看到的卡片。
  * - 429 / 5xx / 网络错误：等 5 秒、10 秒、20 秒，最多重试 3 次；其它 4xx：这张卡标失败，继续下一张。
  * - 每天最多创建 600 条（按墨墨文档保守估算），到了就暂停任务并提示。
+ * - P35 句子音频：建卡前把草稿里的 @AUDIO 占位符换成墨墨的 file.id（没有就先合成、上传）。
+ *   合成或上传失败的那段音频直接去掉，这张卡照常推送，计入任务的 audio_missing（PRD F3）。
+ *   上传也走限速器。
  */
 import { randomUUID } from "node:crypto";
 import { sqlite } from "@/db/sqlite";
-import { createCard, createChapter, getCard, listChapters, MarkjiError } from "@/lib/markji";
+import fs from "node:fs";
+import { createCard, createChapter, getCard, listChapters, MarkjiError, uploadFile } from "@/lib/markji";
+import { audioKey, audioPlaceholderKeys, audioTextsOf, fillAudioIds } from "./audio";
+import { VOICE } from "./voices";
+import type { CardSpec } from "./spec";
+import { ensureAudio, storedAudio } from "@/lib/tts";
 import { markjiTokenFor } from "@/lib/user-secrets";
 import { setSetting } from "@/lib/settings-store";
 import { createRateLimiter, type RateLimiter } from "./rate-limit";
@@ -120,11 +128,14 @@ export type JobStatus = {
   total: number;
   error: string | null;
   failures: { cardId: string; error: string }[];
+  /** P35：推送成功但没配上音频的卡数 */
+  audioMissing: number;
 };
 
 type JobRow = {
   id: string; user_id: string; deck_id: string; chapter_mode: ChapterMode; chapter_id: string | null;
   card_ids: string; done: number; failed: number; status: JobStatus["status"]; error: string | null;
+  audio_missing?: number | null;
 };
 
 export function getJobStatus(user: Who, jobId: string, deps: Deps = realDeps): JobStatus | null {
@@ -153,6 +164,7 @@ export function getJobStatus(user: Who, jobId: string, deps: Deps = realDeps): J
     total: ids.length,
     error: job.error,
     failures,
+    audioMissing: job.audio_missing ?? 0,
   };
 }
 
@@ -249,18 +261,19 @@ async function runJob(jobId: string, user: Who, token: string, deps: Deps): Prom
       finishJob(jobId, "paused", `今天已经推送 ${MARKJI_DAILY_CREATE_CAP} 张卡片，到墨墨的每日上限了，明天再继续`);
       return;
     }
-    if (card.content.includes("@AUDIO:")) {
-      failCard(jobId, id, "这张卡的音频还没有生成，暂时不能推送");
-      continue;
-    }
-
     sqlite.prepare("UPDATE cards SET status = 'pushing', push_error = NULL, updated_at = ? WHERE id = ?").run(Date.now(), id);
     const resumed = card.status === "pushing";
     try {
+      // 音频占位符 → file.id。cards.content 里保留占位符不改（预览接口靠它判断归属）
+      const audio = await resolveAudio(user.id, deps, job.deck_id, card.content, token);
+      if (audio.content.includes("@AUDIO:")) {
+        failCard(jobId, id, "这张卡的音频占位符无法识别，暂时不能推送");
+        continue;
+      }
       const chapterId = await chapterFor(card);
-      let cardId: string | null = resumed ? await findExisting(user.id, deps, job.deck_id, chapterId, card.content, token) : null;
-      if (!cardId) cardId = await createWithRetry(user.id, deps, job.deck_id, chapterId, card.content, token);
-      markPushed(jobId, card, job.deck_id, chapterId, cardId);
+      let cardId: string | null = resumed ? await findExisting(user.id, deps, job.deck_id, chapterId, audio.content, token) : null;
+      if (!cardId) cardId = await createWithRetry(user.id, deps, job.deck_id, chapterId, audio.content, token);
+      markPushed(jobId, card, job.deck_id, chapterId, cardId, audio.missing);
     } catch (err) {
       const msg = err instanceof MarkjiError ? `${err.code ?? ""} ${err.message}`.trim() : String(err instanceof Error ? err.message : err);
       failCard(jobId, id, msg.slice(0, 300));
@@ -276,7 +289,9 @@ function failCard(jobId: string, cardId: string, error: string): void {
   })();
 }
 
-function markPushed(jobId: string, card: CardRow, deckId: string, chapterId: string, markjiCardId: string): void {
+function markPushed(
+  jobId: string, card: CardRow, deckId: string, chapterId: string, markjiCardId: string, audioMissing = false,
+): void {
   const now = Date.now();
   sqlite.transaction(() => {
     sqlite
@@ -294,8 +309,72 @@ function markPushed(jobId: string, card: CardRow, deckId: string, chapterId: str
            chapter_id = excluded.chapter_id, card_id = excluded.card_id, status = 'done', error = NULL, pushed_at = excluded.pushed_at`,
       )
       .run(randomUUID(), card.user_word_id, deckId, chapterId, markjiCardId, `exam:${card.id}`, now);
-    sqlite.prepare("UPDATE push_jobs SET done = done + 1, updated_at = ? WHERE id = ?").run(now, jobId);
+    sqlite
+      .prepare("UPDATE push_jobs SET done = done + 1, audio_missing = audio_missing + ?, updated_at = ? WHERE id = ?")
+      .run(audioMissing ? 1 : 0, now, jobId);
   })();
+}
+
+// ---------- 句子音频（P35 spec §7） ----------
+
+/**
+ * 把草稿里的每个音频占位符换成墨墨 file.id：
+ * 先查 markji_media（这个用户上传过）；没有就确保本地有音频（必要时再合成一次）→ 限速上传 → 记下 file.id。
+ * 任何一步失败，这段音频就去掉（missing = true），卡照常推送。
+ */
+async function resolveAudio(
+  userId: string, deps: Deps, deckId: string, content: string, token: string,
+): Promise<{ content: string; missing: boolean }> {
+  const keys = audioPlaceholderKeys(content);
+  if (keys.length === 0) return { content, missing: false };
+  const ids: Record<string, string | null> = {};
+  for (const key of keys) ids[key] = await fileIdFor(userId, deps, deckId, key, token);
+  return { content: fillAudioIds(content, ids), missing: Object.values(ids).some((v) => v === null) };
+}
+
+async function fileIdFor(
+  userId: string, deps: Deps, deckId: string, key: string, token: string,
+): Promise<string | null> {
+  const known = sqlite
+    .prepare("SELECT file_id FROM markji_media WHERE user_id = ? AND audio_key = ?")
+    .get(userId, key) as { file_id: string } | undefined;
+  if (known) return known.file_id;
+
+  let audio = storedAudio(key);
+  if (!audio) {
+    // 本地还没有：从这张卡的 spec 里找回句子再合成一次
+    const text = textForKey(userId, key);
+    audio = text ? await ensureAudio(text) : null;
+  }
+  if (!audio) return null;
+
+  try {
+    const bytes = fs.readFileSync(audio.filePath);
+    const ext = audio.mime === "audio/mpeg" ? "mp3" : "wav";
+    const fileId = await withRetry(userId, deps, () => uploadFile(deckId, bytes, `${key}.${ext}`, audio.mime, token));
+    sqlite
+      .prepare(
+        `INSERT INTO markji_media (user_id, audio_key, file_id, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id, audio_key) DO UPDATE SET file_id = excluded.file_id`,
+      )
+      .run(userId, key, fileId, Date.now());
+    return fileId;
+  } catch (err) {
+    console.error("[cards] 上传音频失败", { key, reason: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+/** 按 key 找回句子：在这个用户内容里带这个占位符的卡的 spec 里找 */
+function textForKey(userId: string, key: string): string | null {
+  const rows = sqlite
+    .prepare("SELECT spec FROM cards WHERE user_id = ? AND content LIKE ? LIMIT 5")
+    .all(userId, `%@AUDIO:${key}@%`) as { spec: string }[];
+  for (const r of rows) {
+    const hit = audioTextsOf(JSON.parse(r.spec) as CardSpec).find((t) => audioKey(t, VOICE) === key);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 // ---------- 墨墨请求：限速 + 重试 + 防重复 ----------

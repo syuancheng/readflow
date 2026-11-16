@@ -1,6 +1,6 @@
 # ReadFlow 数据存储总览
 
-> 整理时间：2026-11-14（P34 起新增 `explain_answers` 表、`learner_profiles.note_update_kind` 列、站级设置 `learner.nightlyRunDay`，以及讲解 / 查词记录的过期删除，见各节标注）。字段以本机真实数据库 `data/readflow.db` 的实际表结构为准（`PRAGMA table_info`），不是照抄代码。
+> 整理时间：2026-11-14；2026-11-16 补 P35（新增 `tts_audio`、`markji_media` 两张表、`push_jobs.audio_missing` 列、站级设置 `cards.audio`、音频文件目录 `data/tts/`，见各节标注）。P34 起新增 `explain_answers` 表、`learner_profiles.note_update_kind` 列、站级设置 `learner.nightlyRunDay`，以及讲解 / 查词记录的过期删除，见各节标注）。字段以本机真实数据库 `data/readflow.db` 的实际表结构为准（`PRAGMA table_info`），不是照抄代码。
 > 示例行取自本机真实数据，**密钥、密码哈希、手机号、Token 已脱敏**；很长的文字截断后用 `…` 表示。
 > 时间字段都是**毫秒时间戳**（例如 `1794619336977` = 2026-11-14 09:22）。
 > 布尔值用整数 `0 / 1` 存。
@@ -9,11 +9,12 @@
 
 | 存储 | 类型 | 位置 | 说明 |
 |---|---|---|---|
-| 主库 `readflow.db` | 关系型（SQLite） | `data/readflow.db` | 18 张表，见第 1 部分（2026-11-14 从 20 张整理为 17 张；P34 新增 `explain_answers`） |
+| 主库 `readflow.db` | 关系型（SQLite） | `data/readflow.db` | 20 张表，见第 1 部分（2026-11-14 从 20 张整理为 17 张；P34 新增 `explain_answers`；P35 新增 `tts_audio`、`markji_media`） |
 | 词典库 `ecdict.db` | 关系型（SQLite），只读 | `data/dict/ecdict.db` | 1 张表，见第 2 部分 |
 | `settings` 表 | 关系型表，但用法是 KV | 主库内 | 见第 3.1 节 |
 | 服务端进程内存 | KV（JavaScript `Map`），重启即清空 | Node 进程 | 见第 3.2 节 |
 | 图片缓存 | KV（文件） | `data/img-cache/` | 见第 3.3 节 |
+| 句子音频 | KV（文件） | `data/tts/` | P35，见第 3.6 节 |
 | 浏览器 localStorage | KV | 用户浏览器 | 见第 3.4 节 |
 | 浏览器插件存储 | KV（`chrome.storage`） | 用户浏览器插件 | 见第 3.5 节 |
 
@@ -361,13 +362,42 @@
 | chapter_id | TEXT | | | 固定章节的 id |
 | card_ids | TEXT | 是 | | 这次要推的卡（JSON 数组，按顺序） |
 | done / failed | INTEGER | 是 | 0 | 已成功 / 已失败的张数 |
+| audio_missing | INTEGER | 是 | 0 | P35：推送成功、但至少有一段音频没配上的卡的张数（界面显示「有 N 张卡没配上音频」） |
 | status | TEXT | 是 | | `running` / `paused` / `done` / `error` |
 | error | TEXT | | | 任务级错误（例如到了每日 600 条上限） |
 | created_at / updated_at | INTEGER | 是 | | |
 
 示例（构造）：`b7c1… | f6905e4a-… | mkjd_… | fixed | mkjch_… | ["6233a8ab-…","9f2e…"] | 2 | 0 | done | （空） | 1794620000000 | 1794620003000`
 
-> 阶段二的 `tts_audio`（语音合成结果）和 `markji_media`（音频在墨墨里的 file.id）原本提前建好了，但一直为空、代码也不读写，2026-11-14 已删除，做阶段二时再建。
+#### `tts_audio` 句子音频（P35 新增）
+
+卡片背面英文句子的合成结果。同一句话（规范化后的文字 + 模型 + 音色相同）只合成一次，所有账号共用；不按用户区分，所以没有 `user_id`。
+
+| 列 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| key | TEXT 主键 | | | `sha256(规范化文字 + "\n" + 模型 + "\n" + 音色)` 的前 32 位十六进制；卡片草稿里的占位符 `@AUDIO:<key>@` 就是它 |
+| text | TEXT | 是 | | 规范化后的英文句子 |
+| model / voice | TEXT | 是 | | `qwen3-tts-flash` / `Jennifer` |
+| file_path | TEXT | 是 | | 相对数据库目录的路径，如 `tts/3f9a….wav` |
+| mime | TEXT | 是 | | `audio/wav` |
+| bytes | INTEGER | 是 | | 文件大小 |
+| created_at | INTEGER | 是 | | |
+
+示例（构造）：`3f9a0c…（32 位） | The ephemeral joy faded quickly. | qwen3-tts-flash | Jennifer | tts/3f9a0c….wav | audio/wav | 98348 | 1794800000000`
+
+#### `markji_media` 音频在墨墨里的 file.id（P35 新增）
+
+同一段音频上传到同一个墨墨账号只传一次。墨墨的文件按账号归属，所以按 `user_id` 区分。
+
+| 列 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| user_id | TEXT | 是 | | 账号 id（与 audio_key 一起组成主键） |
+| audio_key | TEXT | 是 | | 对应 `tts_audio.key` |
+| file_id | TEXT | 是 | | 墨墨返回的 `file.id`（区分大小写），推送时写进 `[Audio#M,ID/<file_id>#]` |
+| created_at | INTEGER | 是 | | |
+
+> 卡片草稿 `cards.content` 里保存的是占位符 `[Audio#M,ID/@AUDIO:<key>@#]`，只在发给墨墨的那份内容里换成真实 file.id；预览接口 `/api/tts/<key>` 靠「这个账号的卡里有这个占位符」判断能不能听。
+> 2026-11-14 删掉的是旧结构的同名空表；P35 启动时如果发现旧结构（列名 `hash` / `audio_hash`）：空表直接删除，有数据就改名为 `*_p33` 保留并在日志里提示。
 
 ### 1.6 每日次数
 
@@ -430,6 +460,7 @@
 | `ai.personalized` | 站级 | `on` / `off` | 个性化讲解总开关，默认 on |
 | `cards.enabled` | 站级 | `on` / `off` | 做卡总开关，默认 on |
 | `cards.listening` | 站级 | `on` / `off` | 听力卡开关，默认 off（阶段二） |
+| `cards.audio` | 站级 | `on` / `off` | P35：卡片句子配音开关，默认 on；需要阿里云百炼 Key（环境变量 `DASHSCOPE_API_KEY`，或「通义千问」那一栏的 Key）才会真正合成 |
 | `markji.token` | 都可以 | （脱敏） | 墨墨开放 API Token |
 | `markji.membership` | 个人 | `basic` / `pro` | 墨墨会员等级，决定每张卡字数上限 1800 / 4000 |
 | `markji.cardsDeck` | 个人 | `mkjd_…` | 上次推送选的牌组 |
@@ -476,6 +507,13 @@
 | local（只在本机） | `words` | `[{ id, lemma, displayForm, phonetic, pos, translation, gloss, isPhrase, example }]` | 从服务器同步下来的词表，用来在网页上标生词、悬停显示中文 |
 | local | `syncedAt` | `1794619000000` | 上次同步时间 |
 | local | `syncError` | `""` / `还没填插件 Token` | 上次同步的错误 |
+
+### 3.6 句子音频 `data/tts/`（文件，P35）
+
+- **Key** = `tts_audio.key`（32 位十六进制），作为文件名，如 `3f9a0c….wav`
+- **Value** = 阿里云百炼 `qwen3-tts-flash` 合成的 wav。百炼返回的下载地址 24 小时内有效，所以拿到就下载保存，不保存地址
+- 目录跟着数据库走（数据库所在目录下的 `tts/`），测试用隔离库时也落在临时目录里
+- 不清理：每句一个文件，一句约 100KB
 
 ---
 

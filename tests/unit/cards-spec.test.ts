@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCardGen, parseJsonLoose } from "../../src/lib/cards/spec";
-import { baseChoiceCard, baseClozeCard } from "./cards-fixtures";
+import { CARDS_SAFETY_MAX, isProductive, parseCardGen, parseJsonLoose, PRODUCTIVE_KINDS } from "../../src/lib/cards/spec";
+import { baseChoiceCard, baseClozeCard, backTranslateCard, rephraseCard, situationCard, usageCard } from "./cards-fixtures";
 
 const wrap = (...cards: unknown[]) => JSON.stringify({ cards });
 
@@ -12,14 +12,31 @@ test("合法输出：1 张和 3 张都能解析", () => {
   assert.equal(three.ok && three.cards.length, 3);
 });
 
-test("不是 JSON / 顶层不是对象 / 没有卡片 / 超过 3 张 → 失败并给中文原因", () => {
+test("不是 JSON / 顶层不是对象 / 没有卡片 → 失败并给中文原因", () => {
   for (const raw of ["not json", "[]", "null", JSON.stringify({ cards: [] }), JSON.stringify({})]) {
     const r = parseCardGen(raw);
     assert.equal(r.ok, false, raw);
     if (!r.ok) assert.ok(r.reason.length > 0);
   }
-  const four = parseCardGen(wrap(baseClozeCard(), baseClozeCard(), baseClozeCard(), baseClozeCard()));
-  assert.equal(four.ok, false);
+});
+
+test("P35：张数由 AI 决定——6 张照常解析，超过保险上限 8 张只保留前 8 张", () => {
+  const six = parseCardGen(wrap(...Array.from({ length: 6 }, () => baseClozeCard())));
+  assert.equal(six.ok && six.cards.length, 6);
+  assert.equal(six.ok && six.dropped, undefined);
+  assert.equal(CARDS_SAFETY_MAX, 8);
+  const many = parseCardGen(wrap(...Array.from({ length: 11 }, () => baseClozeCard())));
+  assert.equal(many.ok && many.cards.length, 8);
+  assert.equal(many.ok && many.dropped, 3);
+});
+
+test("P35：四种使用类题型都能解析，PRODUCTIVE_KINDS 只含这四种", () => {
+  const r = parseCardGen(wrap(backTranslateCard(), situationCard(), rephraseCard(), usageCard()));
+  assert.equal(r.ok, true);
+  if (r.ok) assert.deepEqual(r.cards.map((c) => c.kind), ["back_translate", "situation_say", "rephrase", "usage"]);
+  assert.deepEqual([...PRODUCTIVE_KINDS].sort(), ["back_translate", "rephrase", "situation_say", "usage"]);
+  assert.equal(isProductive("rephrase"), true);
+  assert.equal(isProductive("context_meaning"), false);
 });
 
 test("未知字段被丢弃，卡片本身保留", () => {

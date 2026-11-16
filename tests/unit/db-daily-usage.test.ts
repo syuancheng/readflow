@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ensureDailyUsage } from "../../src/db/ensure-usage";
+import { ensureAudioTables } from "../../src/db/ensure-audio";
 
 // 用真实 SQLite 内存库模拟老库；不碰 data/readflow.db
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -37,7 +38,7 @@ test("老库迁移：两张计数表的每一行原样搬进 daily_usage（按 k
     { user_id: "u2", day: "2026-11-14", kind: "ai", count: 2 },
   ]);
   const t = tables(db);
-  for (const gone of ["ai_usage", "card_usage", "tts_audio", "markji_media"]) assert.ok(!t.includes(gone), gone);
+  for (const gone of ["ai_usage", "card_usage"]) assert.ok(!t.includes(gone), gone);
   assert.ok(t.includes("daily_usage"));
   db.close();
 });
@@ -58,22 +59,36 @@ test("全新空库：只建 daily_usage，不报错", () => {
   db.close();
 });
 
-test("语音表里万一有数据：保留不删；计数表照常迁移", () => {
+test("P35：旧结构的空语音表被换成新结构；push_jobs 加上 audio_missing；可重复执行", () => {
+  const db = oldDb();
+  db.exec("CREATE TABLE push_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL)");
+  ensureDailyUsage(db);
+  ensureAudioTables(db);
+  ensureAudioTables(db);
+  const cols = (t: string) => (db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+  assert.ok(cols("tts_audio").includes("key") && !cols("tts_audio").includes("hash"));
+  assert.ok(cols("markji_media").includes("audio_key"));
+  assert.ok(cols("push_jobs").includes("audio_missing"));
+  db.close();
+});
+
+test("P35：旧结构的语音表万一有数据——改名保留成 *_p33，再建新表", () => {
   const db = oldDb();
   db.exec("INSERT INTO tts_audio VALUES ('h', 't', 'v', '1', 'data/tts/h.mp3', 10, 1)");
   const warn = console.warn;
   const warned: string[] = [];
   console.warn = (m: string) => warned.push(m);
   try {
-    ensureDailyUsage(db);
+    ensureAudioTables(db);
   } finally {
     console.warn = warn;
   }
   const t = tables(db);
-  assert.ok(t.includes("tts_audio"), "有数据的语音表保留");
-  assert.ok(!t.includes("markji_media"), "空的照常删");
-  assert.ok(!t.includes("ai_usage") && !t.includes("card_usage"));
+  assert.ok(t.includes("tts_audio_p33") && t.includes("tts_audio") && t.includes("markji_media"));
+  assert.ok(!t.includes("markji_media_p33"), "空的旧表直接删");
   assert.ok(warned.some((m) => m.includes("tts_audio")));
+  // 没有 push_jobs 表的库也不报错
+  assert.ok(!t.includes("push_jobs"));
   db.close();
 });
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ttsKeyAvailable } from "@/lib/tts";
 import {
   PROVIDERS,
   SETTINGS_KEYS,
@@ -52,6 +53,8 @@ export async function GET() {
   // P33：站级做卡开关 + 本人的会员档位（只读自己的行，不回退站级）
   const cardsEnabled = settings[SETTINGS_KEYS.cardsEnabled] === "off" ? "off" : "on";
   const cardsListening = settings[SETTINGS_KEYS.cardsListening] === "on" ? "on" : "off";
+  // P35：卡片句子配音（默认 on）；ttsKeyReady 只给主账号看（Key 状态属于站级配置）
+  const cardsAudio = settings[SETTINGS_KEYS.cardsAudio] === "off" ? "off" : "on";
   const markjiMembership = userMembership(user.id) === "pro" ? "pro" : "basic";
 
   // P28：普通账号只看到、只改自己的模型 Key 和墨墨 Token（主账号的站级密钥一概不露），
@@ -96,6 +99,8 @@ export async function GET() {
     aiPersonalized,
     cardsEnabled,
     cardsListening,
+    cardsAudio,
+    ttsKeyReady: ttsKeyAvailable(),
     markjiMembership,
     profile: profileFromSettings(settings),
   });
@@ -120,6 +125,8 @@ type PutBody = {
   /** P33：站级做卡 / 听力开关，只有主账号能改 */
   cardsEnabled?: "on" | "off";
   cardsListening?: "on" | "off";
+  /** P35：站级卡片句子配音开关，只有主账号能改 */
+  cardsAudio?: "on" | "off";
   /** P33：本人的墨墨会员档位 */
   markjiMembership?: "basic" | "pro";
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
@@ -168,6 +175,7 @@ export async function PUT(req: Request) {
   for (const [field, key] of [
     ["cardsEnabled", SETTINGS_KEYS.cardsEnabled],
     ["cardsListening", SETTINGS_KEYS.cardsListening],
+    ["cardsAudio", SETTINGS_KEYS.cardsAudio],
   ] as const) {
     const v = body[field];
     if (v === undefined) continue;

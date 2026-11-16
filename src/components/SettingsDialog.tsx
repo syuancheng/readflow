@@ -62,6 +62,9 @@ type SettingsPayload = {
   aiPersonalized?: "on" | "off";
   /** P33：站级做卡开关（站长改）、本人的墨墨会员档位 */
   cardsEnabled?: "on" | "off";
+  /** P35：卡片句子配音（站级）与百炼 Key 是否可用（只有主账号能看到） */
+  cardsAudio?: "on" | "off";
+  ttsKeyReady?: boolean;
   markjiMembership?: "basic" | "pro";
   profile?: Profile;
 };
@@ -939,6 +942,30 @@ export default function SettingsDialog({
                             aria-label="做卡"
                             disabled={isBusy}
                             onClick={() => void put({ cardsEnabled: data?.cardsEnabled === "off" ? "on" : "off" })}
+                          >
+                            <span className="st-switch-knob" />
+                          </button>
+                        </div>
+                      )}
+                      {data?.canEditSite === true && (
+                        <div className="st-reading-row st-reading-row-static">
+                          <span className="st-reading-text">
+                            <b>卡片句子配音</b>
+                            <span>
+                              {data?.ttsKeyReady
+                                ? "用阿里云百炼合成，Key 和「通义千问」那一栏共用（北京地域）"
+                                : "还没有填阿里云百炼的 Key，卡片会先不带音频"}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className={`st-switch ${data?.cardsAudio !== "off" ? "on" : ""}`}
+                            role="switch"
+                            aria-checked={data?.cardsAudio !== "off"}
+                            aria-label="卡片句子配音"
+                            aria-disabled={data?.cardsEnabled === "off"}
+                            disabled={isBusy || data?.cardsEnabled === "off"}
+                            onClick={() => void put({ cardsAudio: data?.cardsAudio === "off" ? "on" : "off" })}
                           >
                             <span className="st-switch-knob" />
                           </button>

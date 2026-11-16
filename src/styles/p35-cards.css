@@ -1,0 +1,100 @@
+/*
+ * P35：卡片预览里的句子播放按钮、「🗣 参考说法」说明行，以及推送结果里的音频缺失说明。
+ * 设计简报：docs/specs/P35-sentence-speaking-cards.md §9；验收：docs/design/P35-DESIGN.md。
+ *
+ * - 亲密性：▶ 紧跟它要读的那句英文（句末 4px），一句英文和它的中文是一组，句与句之间 12px。
+ * - 对齐：全部左对齐到预览内容区左边缘；▶ 跟在句末，不单独成列（不产生第二条竖线）。
+ * - 重复：一张卡里所有 ▶ 尺寸 / 颜色 / 位置完全一致；说明行沿用 .cp-ai 的次要说明形态。
+ * - 对比：▶ 用次要灰，权重低于句子（主文字色）；播放中换 ■ + 主文字色。
+ */
+
+/* 一句英文 + ▶：▶ 不能单独掉到下一行开头，最后一个词和 ▶ 包在不换行的 span 里 */
+.rf-say-tail {
+  white-space: nowrap;
+}
+
+/* 播放按钮：32×32 点击区，图标 14px，没有边框和阴影，中性灰 */
+.rf-audio-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  /* 点击区仍是 32×32，但不把这一行撑高：英文句和它的中文保持组内 4px 的亲密性（P-05） */
+  margin-block: -8px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--rf-radius-full);
+  background: transparent;
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-sm);
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+  transition:
+    background var(--rf-duration-fast) var(--rf-ease),
+    color var(--rf-duration-fast) var(--rf-ease);
+}
+
+/* 悬停：次要灰压浅灰底（4.97 : 1） */
+.rf-audio-btn:hover:not(:disabled) {
+  background: var(--rf-bg-hover);
+}
+
+/* 播放中：■ + 主文字色（对白底 10.30 : 1 以上） */
+.rf-audio-btn.rf-audio-on {
+  color: var(--rf-text-primary);
+}
+
+/* 失败：不靠变淡表达，形状换成 ⊘ 并禁用，颜色保持次要灰（5.33 : 1） */
+.rf-audio-btn:disabled {
+  cursor: not-allowed;
+}
+
+.rf-audio-btn .rf-audio-spin {
+  width: 12px;
+  height: 12px;
+}
+
+/* 减少动效：转圈不转，靠 aria-busy 和形状说明「加载中」 */
+@media (prefers-reduced-motion: reduce) {
+  .rf-audio-btn .rf-audio-spin {
+    animation: none;
+  }
+}
+
+/* 「🗣 参考说法」下面的说明行：小一级、次要灰；与标题、与参考说法列表之间沿用 .cp-body 的 8px */
+.rf-ref-note {
+  margin: 0;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+  text-wrap: pretty;
+}
+
+/* 参考说法列表：组与组之间 12px，大于组内的 4px（P-05） */
+.rf-ref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 一组参考说法：搭配（如有）/ 英文句（主文字色 16px）/ 中文（次要灰 14px），组内 4px */
+.rf-ref-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rf-ref-zh {
+  margin: 0;
+  font-size: var(--rf-text-sm);
+  color: var(--rf-text-secondary);
+}
+
+/* 推送结果里的「有 N 张卡没配上音频」：次要说明，没有按钮 */
+.rf-audio-missing {
+  font-size: var(--rf-text-xs);
+  font-weight: 400;
+  color: var(--rf-text-secondary);
+}
