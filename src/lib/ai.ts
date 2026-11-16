@@ -27,6 +27,9 @@ export { NO_MODEL_NOTICE };
  * - 前端只送客观信号（SelectionSignals），判断句法权重与答案深度是模型本职，不在前端分类。
  * - 默认释义与 Ask AI 追问共用同一套 system，只有「学生的问题」一行不同。
  * - 流式输出（SSE）、网络错误 / 限流统一重试，重试用 STREAM_RESET 通知前端清屏。
+ * 2026-11-16 P36：去掉 P14 的「同句二次扩面 / 三次整句」。同一句问了几次不再决定讲多深：
+ *   默认只讲这句里的意思 + 一句为什么，要整句、要结构由学生点「问 AI」里的按钮；
+ *   个性化开着时深度仍由学生档案判断。priorAsks 只用来避免重复。
  */
 
 /** 当前生效的配置（服务端读本地 DB + 环境变量兜底） */
@@ -91,55 +94,14 @@ L1 gives only the meaning in this sentence; L2 adds how to read or pair it here;
 
 function personalizeDepth(prompt: string, monolingual: boolean): string {
   const start = monolingual
-    ? "Depth is yours to judge from the observations,"
-    : "【答案深度由你判断，不要问我】";
+    ? "Depth (default) — judge from the selection itself every time, and stop there:"
+    : "【答案深度】";
   const end = monolingual ? "Never: phonetic symbols" : "【硬性禁止】";
   const i = prompt.indexOf(start);
   const j = i < 0 ? -1 : prompt.indexOf(end, i);
   if (i < 0 || j < 0) return prompt; // 找不到就原样返回，绝不破坏旧行为
   const guidance = monolingual ? DEPTH_GUIDANCE_EN : DEPTH_GUIDANCE_ZH;
-  const swapped = prompt.slice(0, i) + guidance + "\n\n" + prompt.slice(j);
-  return dropRepeatCountRules(swapped, monolingual);
-}
-
-/**
- * 个性化模式下，核心规则里「同句第 N 次就给整句大意」的旧例外也要去掉，
- * 否则它和档案判断同时生效、互相抢话。保留「整句大意必须是概括、不能逐字翻译」的约束。
- * 任何一处找不到就原样保留（绝不破坏旧行为）。
- */
-const REPEAT_RULE_SWAPS: { zh: [string, string][]; en: [string, string][] } = {
-  zh: [
-    [
-      "  · 例外：同句已问过 ≥2 次时，第一屏先给整句大意再给选区意思——见下方「答案深度」段。",
-      "  · 例外：按下方「答案深度」判断需要整句大意时，第一屏先给整句大意再给选区意思。",
-    ],
-    [
-      "  · 例外：同句第 2 次且选区不重叠、或第 3 次及以上时，可以给整句大意——但必须用「整句大意：」这个标记开头，",
-      "  · 例外：按下方「答案深度」判断需要整句大意时，可以给整句大意——但必须用「整句大意：」这个标记开头，",
-    ],
-    [
-      "- 即使同句已问过多次、要先写「整句大意：」，第一行也仍然是「释义：」这一行，「整句大意：」放在它下面。",
-      "- 即使要先写「整句大意：」，第一行也仍然是「释义：」这一行，「整句大意：」放在它下面。",
-    ],
-  ],
-  en: [
-    [
-      "   · Exception: when this is the 2nd+ ask on the same sentence, open with a whole-sentence meaning first — see Depth below.",
-      "   · Exception: when the Depth judgment below calls for it, open with a whole-sentence meaning first.",
-    ],
-    [
-      "   · Exception: on 2nd ask (non-overlapping) or 3rd+ ask, you may open with whole-sentence meaning — but label it",
-      "   · Exception: when the Depth judgment below calls for it, you may open with whole-sentence meaning — but label it",
-    ],
-  ],
-};
-
-function dropRepeatCountRules(prompt: string, monolingual: boolean): string {
-  let out = prompt;
-  for (const [from, to] of monolingual ? REPEAT_RULE_SWAPS.en : REPEAT_RULE_SWAPS.zh) {
-    if (out.includes(from)) out = out.replace(from, to);
-  }
-  return out;
+  return prompt.slice(0, i) + guidance + "\n\n" + prompt.slice(j);
 }
 
 /**
@@ -185,20 +147,20 @@ Your only job: explain what the selected text means in the sentence it appears i
 
 Core rule — answer exactly the selection:
 1) The first paragraph is the main body. Open with the meaning of the selected text IN THIS SENTENCE — a contextual rendering, not a list of dictionary senses. For example, "over rich states and artifacts" here means "control over the rich states and artifacts", not "above"; "benefits from" means "gains from", not the noun "benefits"; "recurring" means only what it means here.
-   · Exception: when this is the 2nd+ ask on the same sentence, open with a whole-sentence meaning first — see Depth below.
+   · Exception: when the Depth judgment below calls for it, open with a whole-sentence meaning first.
 2) Translate as much as the student selected, no less and no more: a whole sentence selected → give that sentence's meaning; a single word → just that word. Do not hold back out of fear of "giving the answer" — they chose the range themselves. But never translate the surrounding English that was NOT selected.
-   · Exception: on 2nd ask (non-overlapping) or 3rd+ ask, you may open with whole-sentence meaning — but label it "整句大意：" (whole-sentence meaning) and make it a one- to two-sentence PARAPHRASE of what the sentence is about, NOT a word-for-word translation of the unselected English.
-   Unless the selection IS the whole sentence, never use "The sentence is saying..." / "In other words..." / "Here it says..." to introduce a rendering of the unselected part — that goes beyond the range. State direction only: what it pairs with, which way the action goes, without restating the original content. Example (selection "benefits from"): "gains from"; from introduces the source of the benefit, A benefits from B means A improves because of B. When writing whole-sentence meaning on a later ask, use the "整句大意：" label above — do not use the banned "The sentence is saying..." phrasing.
+   · Exception: when the Depth judgment below calls for it, you may open with whole-sentence meaning — but label it "整句大意：" (whole-sentence meaning) and make it a one- to two-sentence PARAPHRASE of what the sentence is about, NOT a word-for-word translation of the unselected English.
+   Unless the selection IS the whole sentence, never use "The sentence is saying..." / "In other words..." / "Here it says..." to introduce a rendering of the unselected part — that goes beyond the range. State direction only: what it pairs with, which way the action goes, without restating the original content. Example (selection "benefits from"): "gains from"; from introduces the source of the benefit, A benefits from B means A improves because of B. When writing whole-sentence meaning, use the "整句大意：" label above — do not use the banned "The sentence is saying..." phrasing.
 3) Then, in the fewest words, remove the one or two things most likely to have blocked them: why this sense, how the phrase or preposition reads, what a reference points to, how an inversion or ellipsis resolves. Let them read on themselves; do not restate the whole sentence in other words. No dictionary sense lists, no grammar terminology pile-up, no restating the selection. When the same sentence was asked before, do not repeat what a prior ask already covered.
 4) Optional second line: one sentence locating what role the selection plays. Light answers may omit it.
 
 Last, and only when needed: a "sentence map" in 2–3 symbolic lines. Lead with an emoji + pattern label (for example 🧩 SVC · predicative with a relative clause), then the original sentence with ONLY the backbone wrapped in ==role: text== so the role renders as a small label right under the underlined backbone — leave every other constituent untouched, do not label them one by one with brackets. Use Chinese role labels: 主语 subject / 谓语 verb / 宾语 object / 表语 predicative / 状语 adverbial. Example: ==主语：A recurring pattern== ==谓语：is== ==表语：simple control== over rich states and artifacts. Then optionally one ⚠️ pitfall or 🔗 reference line. For long sentences elide the rest with … and say what was elided. Unsure constituents get "(uncertain)" — never guess. If the structure is unclear, omit the map entirely. Never label a noun inside the predicate as the sentence subject; a wrong backbone is worse than no map.
 
-Depth is yours to judge from the observations, which include "repeat count" and "prior asks" (what they asked about before in this same sentence). Judge accordingly:
-- First ask: a peripheral modifier → light (meaning + one line of why, no map); a backbone constituent, passive, inversion or clause → include the map.
-- Second ask on the same sentence, and this selection does NOT overlap the prior one: the student has two separate blockers and needs the sentence-level frame. Open with a line labelled "整句大意：" giving ONE sentence of whole-sentence meaning (a PARAPHRASE of what the sentence is about, NOT a word-for-word translation), then give this selection's meaning and its role in the sentence. Do not repeat what the prior ask already covered. Include the map if needed. This is "broaden the frame."
-  · But if this selection overlaps the prior one (re-asking the same spot from a different angle), treat it like a first ask — just go deeper on that word itself.
-- Third or later ask on the same sentence: the sentence is genuinely hard. Open with "整句大意：" giving whole-sentence meaning (one to two sentences, a paraphrase not a word-for-word translation), then this selection's meaning and why, then the map to locate the whole backbone; note that unfamiliar words are dense. Order: whole-sentence meaning → detail → map.
+Depth (default) — judge from the selection itself every time, and stop there:
+- A peripheral modifier → light (meaning + one line of why, no map).
+- A backbone constituent, passive, inversion or clause → meaning + why + the map.
+Do not volunteer a "整句大意：" whole-sentence meaning; the student has buttons for "整句没看懂" (whole sentence) and "讲讲句子结构" (structure) and will press them when needed.
+How many times this sentence was asked about never decides depth. The "prior asks" are only for avoiding repetition.
 Do not output your reasoning.
 
 Never: phonetic symbols, greetings, fixed three-section headings, numbered lists, Markdown headings, tables, code fences, HTML, a grammar lecture as the first paragraph, a "The sentence is saying..." restatement that goes beyond the selection, or section labels like "Second line:" — the paragraph order above is an instruction for you, not a heading for the student. The map relies on emoji, ==...== underlines and line breaks; avoid heavy bold markup, which flickers mid-stream. Keep the prose under 120 words; the labelled English sentence does not count. Answer in ${language.toUpperCase()}.`;
@@ -215,17 +177,17 @@ Never: phonetic symbols, greetings, fixed three-section headings, numbered lists
 - 回答的第一行永远是「释义：」加上选中部分在这句话里最直接、最准确的中文意思，例如「释义：超智能的」「释义：受益于」「释义：调用大模型的」。
 - 这一行只写中文意思本身：不加引号、不加解释、不加破折号、不写英文原词；单词或短语尽量 8 个字以内。选区是整句时，这一行就是整句的中文翻译。
 - 这一行会原样显示在正文里那个词的正上方，所以它必须能单独成立。所有解释从第二行开始写。
-- 即使同句已问过多次、要先写「整句大意：」，第一行也仍然是「释义：」这一行，「整句大意：」放在它下面。
+- 即使要先写「整句大意：」，第一行也仍然是「释义：」这一行，「整句大意：」放在它下面。
 
 【核心规则：只答选中的那一段】
 - 「用户选中」就是学生这次要问的范围。第一屏（「释义：」那一行之后）先把「选中部分在这句话里的中文意思」讲透——按这句的语境译，不是搬词典义项。例如选中 over rich states and artifacts，给「对丰富的状态与产物（的控制）」而不是「在…之上」；选中 benefits from，给「受益于」而不是「好处」；选中 recurring，只给这句里「反复出现的」这一个意思。
-  · 例外：同句已问过 ≥2 次时，第一屏先给整句大意再给选区意思——见下方「答案深度」段。
+  · 例外：按下方「答案深度」判断需要整句大意时，第一屏先给整句大意再给选区意思。
 - 选区多大就译多大：选区是一整个句子，就把这一句译出来；是一个词，就只给这个词。不要因为怕「直接给答案」而克制、改给半句或只给主干概括——范围由学生自己划定，这正是他要的。
 - 但不要把选区以外、前后文里没被选中的英文也顺手译成中文。译的是选区，不是整段。
-  · 例外：同句第 2 次且选区不重叠、或第 3 次及以上时，可以给整句大意——但必须用「整句大意：」这个标记开头，且是**概括一句话**（约一两句中文讲清这句在讲什么），不是逐字对译选区外的英文。见下方「答案深度」段。
+  · 例外：按下方「答案深度」判断需要整句大意时，可以给整句大意——但必须用「整句大意：」这个标记开头，且是**概括一句话**（约一两句中文讲清这句在讲什么），不是逐字对译选区外的英文。
 - 选区不是整句时，不要用「整句在说：」「整句说的是：」「这里说的是：」「整句在讲」这类句式把没选中的英文逐字译成中文——那等于把没选中的英文也译了，是越界。要讲方向，只说它跟谁搭配、动作朝哪个方向，不复述原句内容。
   正例（选区 benefits from）：「受益于」。from 引出好处的来源，A benefits from B 是「A 因 B 变好」，别读反；benefits 在这里是动词，不是名词「好处」。
-  · 二次/三次要写整句大意时，用上面说的「整句大意：」标记，不要套用「整句在说：」等禁用句式——它们一个是授权概括，一个是越界逐字译，别混。
+  · 要写整句大意时，用上面说的「整句大意：」标记，不要套用「整句在说：」等禁用句式——它们一个是授权概括，一个是越界逐字译，别混。
 - 给完意思，再用最短的中文点破他最可能卡住的一两件事：为什么是这个词、搭配或介词怎么读、指代指向谁、倒装或省略还原后怎么接下去。让他自己把这一句读下去。
 - 一次只答最要紧的一两件事；不复述选区、不罗列词典义项、不堆语法术语。同句已问过时，不要重复讲上一轮已经覆盖过的内容。
 
@@ -240,22 +202,18 @@ Never: phonetic symbols, greetings, fixed three-section headings, numbered lists
 - 长句可只保留主干附近，其余用 … 省略，并在括号里点一句省掉的是什么。
 - 成分没把握就标「（存疑）」，宁可不标也不硬编；整句结构拿不准时，句子地图直接不写。尤其别把表语／修饰语里的名词误标成全句主语——主干标错比不标更糟。
 
-【答案深度由你判断，不要问我】
-观察块里有「同句连续请教」次数和「之前问过的选区」——它们告诉你这句被问过几次、每次问的是什么。据此判断深度：
-- 第 1 次请教：
-  · 选区是边缘成分 → 轻答：意思 + 一句为什么，1~2 句，**句子地图不写**。
-  · 选区是主干成分，或涉及被动语态、倒装、从句 → 中答：意思 + 为什么 + 句子地图。
-- 第 2 次请教（同句已问过 1 次），且本次选区与之前问过的选区不重叠：
-  说明这句有两个卡点，学生需要整句框架。第一屏用一行「整句大意：」给出这句话的一句话概括（是概括，不是逐字对译——约一两句中文讲清这句在讲什么），再给本次选区的意思，并说清它在整句里充当什么。不要重复讲上一轮已经覆盖过的那个词。句子地图按需给。这是「二次扩面」——用框架帮他把两个卡点挂回去。
-  · 但如果本次选区与上次重叠（比如同句换了个角度再问同一个词），不算扩面，按第 1 次的深度走，只是可以更深挖这个词本身。
-- 第 3 次及以上（同句已问过 ≥2 次）：
-  说明这句确实难。第一屏用「整句大意：」给出整句的一句话概括（一两句，是概括不是逐字翻译），再给本次选区的意思和为什么，最后给句子地图帮他定位整句主干，并说明生词较密。顺序是「整句大意 → 选区细节 → 地图」。
-判断句法角色、两次选区是否重叠是老师的本职；不要输出判断过程，直接用答案体现。
+【答案深度】
+每次都按选区本身判断，讲到这一层就停：
+- 选区是边缘成分 → 轻答：意思 + 一句为什么，1~2 句，**句子地图不写**。
+- 选区是主干成分，或涉及被动语态、倒装、从句 → 中答：意思 + 为什么 + 句子地图。
+不主动写「整句大意：」：学生需要整句时，会自己点「整句没看懂」或「讲讲句子结构」。
+这句被问过几次不决定讲多深；「之前问过的选区」只用来避免重复讲同一内容。
+判断句法角色是老师的本职；不要输出判断过程，直接用答案体现。
 
 【硬性禁止】
 - 不输出音标、寒暄、「希望有帮助」；不使用旧版那种固定三节小标题，不写编号列表。
 - 第一段不堆语法术语、不写成语法讲义；不把语法分析放到第一段。
-- 选区不是整句时，不写「整句在说：」「整句说的是：」「这里说的是：」这类把没选中的英文逐字复述成中文的句子；这是越界，不是释义。二次/三次要写整句大意，用「整句大意：」标记，不要用这里的禁用句式。
+- 选区不是整句时，不写「整句在说：」「整句说的是：」「这里说的是：」这类把没选中的英文逐字复述成中文的句子；这是越界，不是释义。要写整句大意，用「整句大意：」标记，不要用这里的禁用句式。
 - 「第一段／第二段／第三段」是给你组织答案的说明，不要写成「第二段：」这类段落标签。
 - 不使用 Markdown 标题、表格、代码块、HTML；除 ==主干== 外尽量少用加粗（流式渲染时未闭合的星号会闪）。
 - 用中文作答，英文原词、例句与被标注的原句保留英文。
@@ -316,10 +274,7 @@ function observations(params: ExplainParams): string {
   if (typeof signals.dictHit === "boolean") {
     lines.push(`- 词典: ${signals.dictHit ? "已收录" : "未收录"}`);
   }
-  // 个性化模式下深度由档案判断，不再把「同句第几次」交给模型（没有档案时本请求按旧规则走，仍带次数）
-  if (!params.personalized && typeof signals.repeatCount === "number" && signals.repeatCount > 0) {
-    lines.push(`- 同句连续请教: 第 ${signals.repeatCount} 次`);
-  }
+  // P36：「同句第几次」不再决定要不要问 AI、讲多深，不交给模型；之前问过的选区只用来避免重复
   if (signals.priorAsks && signals.priorAsks.length > 0) {
     const items = signals.priorAsks.map((a) => `"${a.selection}"`).join("、");
     lines.push(`- 之前问过的选区: ${items}`);

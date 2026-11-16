@@ -239,7 +239,6 @@ export function recordFromWeb(userId: string, input: RecordInput): ExtensionPayl
     dictHit: Boolean(dict.entry),
     hasInitialGloss: Boolean(aiGloss),
     fromAnnotation: false,
-    repeatCount: input.repeatCount,
   });
 
   // 5. 信号（同阅读页）与发给 AI 的前后文

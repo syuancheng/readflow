@@ -769,15 +769,15 @@ try {
     );
 
     // D6 「问 AI」的选项文案与网站阅读页一字不差。
-    // 这里同一句里已经问过两次（先 rehearse 再这个短语），所以会多出「只讲这个词」一项，
-    // 最后三项与状态无关，顺序固定。
-    const ASK_LABELS = ["这个短语在这句里什么意思", "这个词在这句里什么意思", "只讲这个词，不讲整句", "整句没看懂", "讲讲句子结构", "再给个例句"];
+    // P36：同一句问了几次不再影响选项，「只讲这个词，不讲整句」已去掉；最后三项与状态无关，顺序固定。
+    const ASK_LABELS = ["这个短语在这句里什么意思", "这个词在这句里什么意思", "整句没看懂", "讲讲句子结构", "再给个例句"];
     const TAIL_LABELS = ["整句没看懂", "讲讲句子结构", "再给个例句"];
     const readerSrc = fs.readFileSync(path.join(ROOT, "src/components/Reader.tsx"), "utf8");
     const sameAsReader = d5b.options.every((l) => ASK_LABELS.includes(l)) && ASK_LABELS.every((l) => readerSrc.includes(`"${l}"`));
     check(
       "D6 「问 AI」选项与阅读页一致（文案逐字相同、顺序一致）",
-      sameAsReader && JSON.stringify(d5b.options.slice(-3)) === JSON.stringify(TAIL_LABELS) && d5b.options.length >= 3,
+      sameAsReader && !d5b.options.some((l) => l.includes("只讲这个词")) && !readerSrc.includes("只讲这个词，不讲整句") &&
+        JSON.stringify(d5b.options.slice(-3)) === JSON.stringify(TAIL_LABELS) && d5b.options.length >= 3,
       d5b.options.join(" / "),
     );
 

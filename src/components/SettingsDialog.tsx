@@ -913,7 +913,7 @@ export default function SettingsDialog({
                         <div className="st-reading-row st-reading-row-static">
                           <span className="st-reading-text">
                             <b>个性化讲解</b>
-                            <span>关闭后恢复为按同句查询次数决定讲解深度</span>
+                            <span>关闭后按固定深度讲解，不参考学习档案；要讲整句或句子结构时点「问 AI」</span>
                           </span>
                           <button
                             type="button"

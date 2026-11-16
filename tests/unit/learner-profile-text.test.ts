@@ -27,7 +27,7 @@ const full = {
 test("格式固定：标题行 + 每一行都按文档写", () => {
   const lines = buildLearnerBlock(full).split("\n");
   assert.equal(lines[0], "学生档案（供你判断讲多深、讲什么；回答里不要提到这些信息）：");
-  assert.equal(lines[1], "- 估计水平：B2，词汇量约 4900–6600（依据：最近 186 次查词 + 问卷）");
+  assert.equal(lines[1], "- 估计水平：B2，词汇量约 4900–6600（依据：最近 186 次提问 + 问卷）");
   assert.equal(lines[2], "- 身份：已工作 3–10 年");
   assert.equal(lines[3], "- 主要阅读：技术文档和编程");
   assert.equal(lines[4], "- 希望讲解：越简洁越好，点到为止");

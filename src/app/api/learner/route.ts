@@ -42,7 +42,7 @@ export async function GET() {
           basis: profile.level.basis ?? null,
           basisText:
             [
-              (profile.stats?.lookups ?? 0) >= 30 ? `最近 ${profile.stats?.lookups} 次查词` : null,
+              (profile.stats?.lookups ?? 0) >= 30 ? `最近 ${profile.stats?.lookups} 次提问` : null,
               profile.survey ? "问卷" : null,
             ]
               .filter(Boolean)

@@ -80,7 +80,7 @@ export const SETTINGS_KEYS = {
   providerBaseUrl: (id: string) => `ai.${id}.baseUrl`,
   markjiToken: "markji.token",
   extensionToken: "extension.token",
-  /** P32：站级「个性化讲解」开关，默认 on；关掉后讲解规则回退到旧的按同句次数 */
+  /** P32：站级「个性化讲解」开关，默认 on；关掉后按固定深度讲解（只讲这句里的意思 + 一句为什么），不参考学习档案 */
   aiPersonalized: "ai.personalized",
   /** P33：站级做卡开关（默认 on）与听力零件开关（默认 off），只有主账号能改 */
   cardsEnabled: "cards.enabled",

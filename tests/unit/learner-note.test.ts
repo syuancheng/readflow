@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   NOTE_MAX_CHARS,
   buildNotePrompt,
+  groupQuestions,
   validateNote,
+  type NoteEventRow,
 } from "../../src/lib/learner/note";
 import { EMPTY_BEHAVIOR_STATS, type BehaviorStats } from "../../src/lib/learner/types";
 
@@ -128,9 +130,9 @@ test("buildNotePrompt：统计数据进入 user 消息，具体英文词不进�
       difficulties: ["long_sentence"],
       feedback: { shallow: 1, right: 2, deep: 3 },
     }),
-    recent: [{ word: "artifact", askKind: "structure", feedback: "deep", repeatCount: 3 }],
+    recent: [{ word: "artifact", ai: true, asks: ["structure"], feedback: ["deep"] }],
   });
-  assert.match(user, /最近 42 次查词/);
+  assert.match(user, /最近 42 次提问/);
   assert.match(user, /B2/);
   assert.match(user, /长句结构/);
   assert.match(user, /太深 3 次/);
@@ -174,8 +176,8 @@ test("buildNotePrompt：未知问法 / 反馈 / 难点安全降级，追问率�
       feedback: { shallow: 0, right: 0, deep: 0 },
     }),
     recent: [
-      { word: "alpha beta", askKind: "unknown_kind", feedback: "unknown_feedback", repeatCount: 1 },
-      ...Array.from({ length: 25 }, (_, i) => ({ word: `w${i}` })),
+      { word: "alpha beta", ai: false, asks: ["unknown_kind"], feedback: ["unknown_feedback"] },
+      ...Array.from({ length: 25 }, (_, i) => ({ word: `w${i}`, ai: false, asks: [], feedback: [] })),
     ],
   });
   assert.match(user, /unknown_kind/, "未知问法原样保留，不抛错");
@@ -183,7 +185,7 @@ test("buildNotePrompt：未知问法 / 反馈 / 难点安全降级，追问率�
   assert.match(user, /mystery/, "未知难点原样保留");
   assert.match(user, /42%/, "追问率换算成百分比");
   assert.match(user, /短语/, "带空格的选区判为短语");
-  assert.ok(!user.includes("同句第 1 次"), "第 1 次不输出重复次数");
+  assert.ok(!user.includes("同句第"), "P36：不再输出同句第几次");
   const bullets = user.split("\n").filter((l) => l.startsWith("- "));
   assert.ok(bullets.length <= 20, `摘要最多 20 条，实际 ${bullets.length}`);
 });
@@ -191,4 +193,55 @@ test("buildNotePrompt：未知问法 / 反馈 / 难点安全降级，追问率�
 test("buildNotePrompt：没有旧笔记时提示这是第一份", () => {
   const { user } = buildNotePrompt({ oldNote: null, userEdited: false, stats: stats(), recent: [] });
   assert.match(user, /第一份/);
+});
+
+test("P36 groupQuestions：一次划选 = 一次提问；自动讲解、默认那一问挂在同一次提问上，不另算", () => {
+  const ev = (kind: "lookup" | "explain", at: number, extra: Partial<NoteEventRow> = {}): NoteEventRow => ({
+    kind, word: "w", contextId: null, askKind: null, feedback: null, createdAt: at, ...extra,
+  });
+  const qs = groupQuestions([
+    // 1. 只看了词典
+    ev("lookup", 1000, { word: "alpha", contextId: "c1" }),
+    // 2. 划了短语，自动讲解（讲解比查词先落库），评了太深，又点了整句没看懂
+    ev("explain", 1990, { word: "beta gamma", contextId: "c2", askKind: "auto", feedback: "deep" }),
+    ev("lookup", 2000, { word: "beta gamma", contextId: "c2" }),
+    ev("explain", 2500, { word: "beta gamma", contextId: "c2", askKind: "whole_sentence" }),
+    // 3. 查了词典，自己点了「这个词在这句里什么意思」
+    ev("lookup", 3000, { word: "delta", contextId: "c3" }),
+    ev("explain", 3100, { word: "delta", contextId: "c3", askKind: "default", feedback: "right" }),
+    // 4. 回看旧批注时追问（找不到所属的查词）：单独算一次
+    ev("explain", 4000, { word: "eps", contextId: "c-old", askKind: "example" }),
+  ]);
+  assert.equal(qs.length, 4, JSON.stringify(qs));
+  assert.deepEqual(qs.map((q) => q.word), ["eps", "delta", "beta gamma", "alpha"], "从新到旧");
+  assert.deepEqual(qs[3], { word: "alpha", ai: false, asks: [], feedback: [] });
+  assert.deepEqual(qs[2], { word: "beta gamma", ai: true, asks: ["whole_sentence"], feedback: ["deep"] });
+  assert.deepEqual(qs[1], { word: "delta", ai: true, asks: [], feedback: ["right"] });
+  assert.deepEqual(qs[0], { word: "eps", ai: false, asks: ["example"], feedback: [] });
+
+  // 同一个批注被划过两次：讲解挂到时间最近的那一次
+  const twice = groupQuestions([
+    ev("lookup", 100, { contextId: "c" }),
+    ev("lookup", 900, { contextId: "c" }),
+    ev("explain", 950, { contextId: "c", askKind: "auto" }),
+  ]);
+  assert.deepEqual(twice.map((q) => q.ai), [true, false]);
+  // 没有 ask_kind 的旧讲解按自动讲解算
+  assert.equal(groupQuestions([ev("explain", 1, { askKind: null })])[0].ai, true);
+});
+
+test("P36 buildNotePrompt：每行是一次提问，写明只看了词典 / 问了 AI / 又问了什么", () => {
+  const { user } = buildNotePrompt({
+    oldNote: null,
+    userEdited: false,
+    stats: stats(),
+    recent: [
+      { word: "a b", ai: true, asks: ["whole_sentence", "example"], feedback: ["deep"] },
+      { word: "c", ai: false, asks: [], feedback: [] },
+      { word: "d", ai: false, asks: ["structure"], feedback: [] },
+    ],
+  });
+  assert.ok(user.includes("- 短语，问了 AI，又问了「整句没看懂」「再给个例句」，反馈「太深」"), user);
+  assert.ok(user.includes("- 单词，只看了词典"));
+  assert.ok(user.includes("- 单词，看了词典，又问了「讲讲句子结构」"));
 });

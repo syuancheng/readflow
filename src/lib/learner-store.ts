@@ -15,7 +15,7 @@ import { buildLearnerBlock, hasUsableProfile } from "./learner/profile-text";
 import { computeBehaviorStats, mergeProfile } from "./learner/model";
 import type { AskKind, BehaviorStats, Feedback, LearnerEvent, LearnerLevel } from "./learner/types";
 import { EMPTY_BEHAVIOR_STATS } from "./learner/types";
-import { validateNote, type NotePromptInput } from "./learner/note";
+import { groupQuestions, validateNote, type NotePromptInput } from "./learner/note";
 import { formatRecentFeedback, RECENT_FEEDBACK_DAYS } from "./learner/recent-feedback";
 
 export type LearnerRow = {
@@ -172,7 +172,7 @@ export function learnerBlockFor(userId: string): { block: string; detailed: bool
   const p = getProfileForPrompt(userId);
   if (!p.personalized) return { block: "", detailed: false, personalized: false };
   const recent = recentFeedbackFor(userId);
-  // 没有可依据的档案：按个性化关闭处理，用旧的「同句第几次」规则兜底
+  // 没有可依据的档案：按个性化关闭处理，按固定深度讲解
   if (!hasUsableProfile({ survey: p.survey, stats: p.stats, note: p.note, recentFeedbackCount: recent.count })) {
     return { block: "", detailed: false, personalized: false };
   }
@@ -507,8 +507,13 @@ export function saveNote(userId: string, note: string, kind: "nightly" = "nightl
 }
 
 /**
- * P34 F3：自上次整理以来的新动静（不限文章）：新的查词、新的讲解，
- * 以及上次整理之后才点的（或改选的）反馈。从没整理过时从「清空记忆」算起。
+ * P34 F3：自上次整理以来的新动静（不限文章）：新的提问，以及上次整理之后才点的（或改选的）反馈。
+ * 从没整理过时从「清空记忆」算起。
+ *
+ * P36：学生划一个词或一段（点词、拖选都算）就是一次提问，不管最后只看了词典还是也问了 AI——
+ * 每次划选都会记一条查词事件，所以「一次提问」= 一条 lookup。同一处的自动讲解（auto）和
+ * 「这个词在这句里什么意思」（default）属于同一次提问，不再另算；在「问 AI」里点的
+ * 整句没看懂、句子结构、例句和自己写的问题是新的提问，单独算。
  */
 export function newEventsSinceNote(userId: string): number {
   const row = getLearner(userId);
@@ -516,7 +521,8 @@ export function newEventsSinceNote(userId: string): number {
   const r = sqlite
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM explain_events WHERE user_id = ? AND created_at > ?) +
+         (SELECT COUNT(*) FROM explain_events WHERE user_id = ? AND created_at > ?
+            AND (kind = 'lookup' OR COALESCE(ask_kind, '') NOT IN ('auto', 'default'))) +
          (SELECT COUNT(*) FROM explain_events WHERE user_id = ? AND created_at <= ? AND feedback_at > ?) AS n`,
     )
     .get(userId, base, userId, base, base) as { n: number };
@@ -614,24 +620,31 @@ export function resetMemory(userId: string): void {
 export function notePromptInputFor(userId: string): NotePromptInput {
   const row = getLearner(userId);
   const stats = getProfileForPrompt(userId).stats ?? EMPTY_BEHAVIOR_STATS;
+  // P36：一次划选算一次提问——多取一些事件，按批注把讲解挂回它所属的那次查词，再取最近 20 次提问
   const rows = sqlite
     .prepare(
-      `SELECT word, ask_kind, feedback, repeat_count FROM explain_events
+      `SELECT kind, word, context_id, ask_kind, feedback, created_at FROM explain_events
        WHERE user_id = ? AND created_at > ?
-       ORDER BY created_at DESC LIMIT 30`,
+       ORDER BY created_at DESC LIMIT 120`,
     )
     .all(userId, row.memory_reset_at) as {
+    kind: string;
     word: string | null;
+    context_id: string | null;
     ask_kind: string | null;
     feedback: string | null;
-    repeat_count: number | null;
+    created_at: number;
   }[];
-  const recent = rows.map((r) => ({
-    word: String(r.word ?? ""),
-    ...(r.ask_kind ? { askKind: String(r.ask_kind) } : {}),
-    ...(r.feedback ? { feedback: String(r.feedback) } : {}),
-    ...(typeof r.repeat_count === "number" ? { repeatCount: r.repeat_count } : {}),
-  }));
+  const recent = groupQuestions(
+    rows.map((r) => ({
+      kind: r.kind === "explain" ? ("explain" as const) : ("lookup" as const),
+      word: String(r.word ?? ""),
+      contextId: r.context_id,
+      askKind: r.ask_kind,
+      feedback: r.feedback,
+      createdAt: Number(r.created_at),
+    })),
+  ).slice(0, 20);
   return {
     oldNote: row.note,
     userEdited: row.note_user_edited === 1,

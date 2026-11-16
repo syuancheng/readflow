@@ -114,56 +114,39 @@ test("篇幅：用中文字数约束主体，被标注的英文原句不计入",
   assert.ok(p.includes("宁可少说一件事"));
 });
 
-test("深度判断交给模型，且只依据客观信号，不向用户提问", () => {
+test("深度判断交给模型，按选区本身判断，不向用户提问", () => {
   const p = buildSystemPrompt("en", false, "steer");
   assert.ok(p.includes("边缘成分") && p.includes("主干成分"));
-  assert.ok(p.includes("同句连续"));
-  // P14：二次不重叠扩面 + 三次整句，取代旧版「≥3」单一阈值
-  assert.ok(p.includes("第 2 次请教") && p.includes("不重叠"));
-  assert.ok(p.includes("第 3 次及以上"));
-  assert.ok(p.includes("不要问我"));
+  assert.ok(p.includes("每次都按选区本身判断"));
   assert.ok(p.includes("不要输出判断过程"));
 });
 
-test("P14 二次扩面：不重叠时先整句大意、不重复上轮", () => {
+test("P36：同一句问了几次不再决定讲多深（去掉 P14 的二次扩面 / 三次整句），整句和结构交给「问 AI」按钮", () => {
   const zh = buildSystemPrompt("en", false, "routine");
-  assert.ok(zh.includes("第 2 次请教") && zh.includes("本次选区与之前问过的选区不重叠"));
-  assert.ok(zh.includes("整句大意"), "二次扩面要先给整句大意");
-  assert.ok(zh.includes("不要重复讲上一轮已经覆盖过的"));
-  assert.ok(zh.includes("二次扩面"));
-  // 重叠（同词换个角度）不算扩面，按第 1 次深度走
-  assert.ok(zh.includes("本次选区与上次重叠") && zh.includes("按第 1 次的深度走"));
-
-  const en = buildSystemPrompt("en", true, "routine");
-  assert.ok(en.includes("Second ask on the same sentence") && en.includes("does NOT overlap"));
-  assert.ok(en.includes("whole-sentence meaning"), "英文人设同样先给整句大意");
-  assert.ok(en.includes("Do not repeat what the prior ask already covered"));
-  assert.ok(en.includes("broaden the frame"));
-});
-
-test("P14 三次整句：先整句大意，再细节，再地图", () => {
-  const zh = buildSystemPrompt("en", false, "routine");
-  assert.ok(zh.includes("第 3 次及以上"));
-  assert.ok(zh.includes("先给整句大意"));
-  assert.ok(zh.includes("顺序是「整句大意 → 选区细节 → 地图」"), "顺序明确为 整句大意→细节→地图");
-
-  const en = buildSystemPrompt("en", true, "routine");
-  assert.ok(en.includes("Third or later ask"));
-  assert.ok(en.includes("Open with") && en.includes("whole-sentence meaning"), "英文人设同样先给整句大意");
-  assert.ok(en.includes("Order: whole-sentence meaning → detail → map"));
-});
-
-test("P14 核心规则例外：二次/三次可以给整句大意，不算越界", () => {
-  const zh = buildSystemPrompt("en", false, "routine");
-  // 核心规则段的「选区范围」和「只译选区」都要给二次/三次的例外，否则模型仍会卡在只译选区
-  assert.ok(zh.includes("同句已问过 ≥2 次时") && zh.includes("第一屏先给整句大意"));
-  assert.ok(zh.includes("讲清这句在讲什么") && zh.includes("不是逐字对译选区外的英文"));
-  // 关键：整句大意必须用专属标记，不能套用 P13 禁用的「整句在说：」——否则授权和越界混淆
-  assert.ok(zh.includes("整句大意：") && zh.includes("不要套用") && zh.includes("禁用句式"), "整句大意用专属标记，与越界句式区分");
+  for (const banned of ["同句连续", "第 2 次请教", "第 3 次及以上", "二次扩面", "同句已问过 ≥2 次时", "按第 1 次的深度走"]) {
+    assert.ok(!zh.includes(banned), banned);
+  }
+  assert.ok(zh.includes("这句被问过几次不决定讲多深"));
+  assert.ok(zh.includes("不主动写「整句大意：」") && zh.includes("「整句没看懂」") && zh.includes("「讲讲句子结构」"));
+  // 「之前问过的选区」仍用来避免重复
+  assert.ok(zh.includes("「之前问过的选区」只用来避免重复讲同一内容"));
   assert.ok(zh.includes("不要重复讲上一轮已经覆盖过的内容"));
 
   const en = buildSystemPrompt("en", true, "routine");
-  assert.ok(en.includes("2nd+ ask") && en.includes("whole-sentence meaning"));
+  for (const banned of ["Second ask on the same sentence", "Third or later ask", "2nd+ ask", "repeat count", "broaden the frame"]) {
+    assert.ok(!en.includes(banned), banned);
+  }
+  assert.ok(en.includes("never decides depth") && en.includes("Do not volunteer"));
+});
+
+test("整句大意仍可用（按钮触发或深度判断需要时），但必须是概括、用专属标记，不能套用越界句式", () => {
+  const zh = buildSystemPrompt("en", false, "routine");
+  assert.ok(zh.includes("按下方「答案深度」判断需要整句大意时") && zh.includes("第一屏先给整句大意"));
+  assert.ok(zh.includes("讲清这句在讲什么") && zh.includes("不是逐字对译选区外的英文"));
+  assert.ok(zh.includes("整句大意：") && zh.includes("不要套用") && zh.includes("禁用句式"), "整句大意用专属标记，与越界句式区分");
+
+  const en = buildSystemPrompt("en", true, "routine");
+  assert.ok(en.includes("when the Depth judgment below calls for it") && en.includes("whole-sentence meaning"));
   assert.ok(en.includes("PARAPHRASE of what the sentence is about") && en.includes("word-for-word translation of the unselected English"));
 });
 
@@ -268,7 +251,7 @@ test("观察块只摆客观证据，不下结论；不带 signals 时与旧调�
   const withSignals = buildUserMessage({ ...BASE, signals: SIG });
   assert.ok(withSignals.includes("观察（客观信号，不是结论）"));
   assert.ok(withSignals.includes("所在句子原文"));
-  assert.ok(withSignals.includes("同句连续请教: 第 3 次"));
+  assert.ok(!withSignals.includes("同句连续请教"), "P36：同一句第几次不再交给模型");
   assert.ok(withSignals.includes("词典: 已收录"));
   assert.ok(withSignals.includes("覆盖约 20%"));
   assert.ok(!withSignals.includes("这是主干"), "不能把结论写进观察");

@@ -75,8 +75,6 @@ type AskReq = {
   /** 整句提问时送给模型的选区（整句原文） */
   word?: string;
   wholeSentence?: boolean;
-  /** 把同句加深清零，只讲这个词 */
-  forceWord?: boolean;
   /** P32：这次讲解的种类，随 /api/explain 送给服务端记事件 */
   askKind?: AskKind;
 };
@@ -1094,9 +1092,9 @@ export default function Reader({
 
     // 与点词一致（P23 起不再有开关）：拖选的句子/短语也自动入库。
     // 关掉批注后仍能点正文的绿色标记翻回去看，不用重新选中。
-    if (/\s/.test(pickData.anchor.quote.trim())) {
-      void ensureAnnotation(pickData);
-    }
+    // P36：拖选一个单词也一样入库——不管点词还是拖选、一个词还是一段，都算学生的一次提问
+    // （入库时服务端记一条查词事件）。以前只有含空格的选区才入库，拖选单词就漏记了。
+    void ensureAnnotation(pickData);
   }
 
   // 原生事件监听只挂一次，闭包里的 pick 会过期：每次渲染后把最新的处理函数放进 ref
@@ -1622,7 +1620,6 @@ function PickCard({
     dictHit: Boolean(dict?.entry),
     hasInitialGloss: Boolean(initialGloss),
     fromAnnotation: Boolean(pick.fromAnnotation),
-    repeatCount: pick.signals?.repeatCount,
   });
 
   /** 回看（P25）：点的是「以前查过的那一条」，不是新选区 —— 词典和 AI 都不再请求，
@@ -1687,7 +1684,6 @@ function PickCard({
             dictHit: Boolean(data?.entry),
             hasInitialGloss: Boolean(initialGloss),
             fromAnnotation: Boolean(pick.fromAnnotation),
-            repeatCount: pick.signals?.repeatCount,
           })
         ) {
           // 词典给不出答案：用户已经停下来请教了，别再让他多点一次按钮。
@@ -1714,9 +1710,7 @@ function PickCard({
   const askOptions: { label: string; req: AskReq }[] = [
     ...(!hasDefault
       ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: { askKind: "default" as const } }]
-      : (pick.signals?.repeatCount ?? 1) >= 2
-        ? [{ label: "只讲这个词，不讲整句", req: { ask: "只讲这个词", forceWord: true, askKind: "word_only" as const } }]
-        : []),
+      : []),
     ...(!isWholeSentence
       ? [
           {
@@ -1753,7 +1747,7 @@ function PickCard({
 
   /**
    * 向 AI 提一个问题（流式），回答追加在对话串末尾。
-   * req 为空 = 默认讲解（点词自动触发的那次）；forceWord = 把同句加深清零，只讲这个词。
+   * req 为空 = 默认讲解（点词自动触发的那次）。
    */
   async function triggerAI(req: AskReq = {}) {
     const controller = new AbortController();
@@ -1769,7 +1763,6 @@ function PickCard({
         ? {
             ...pick.signals,
             dictHit: Boolean(dict?.entry),
-            ...(req.forceWord ? { repeatCount: 0, priorAsks: undefined } : {}),
           }
         : undefined;
 

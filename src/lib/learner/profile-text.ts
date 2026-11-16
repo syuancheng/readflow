@@ -24,7 +24,7 @@ export const LEARNER_BLOCK_MAX_CHARS = 720;
  * 有没有「可依据的档案」：填过问卷，或最近查词够 30 次，或有老师笔记，
  * 或（P34）最近 30 天有 3 次以上反馈，任一即可。
  * 有 → 个性化讲解（深度只看档案 / 选区 / 反馈，不再看「同句第几次」）；
- * 没有 → 这次请求按个性化关闭处理，退回旧的「同句第 1/2/3 次」规则兜底。
+ * 没有 → 这次请求按个性化关闭处理，按固定深度讲解（P36 起不再有「同句第 1/2/3 次」规则）。
  */
 export function hasUsableProfile(input: {
   survey: SurveyAnswers | null;
@@ -102,7 +102,7 @@ export function buildLearnerBlock(input: {
       .filter(Boolean)
       .join("，");
     const basis: string[] = [];
-    if (stats && stats.lookups >= 30) basis.push(`最近 ${stats.lookups} 次查词`);
+    if (stats && stats.lookups >= 30) basis.push(`最近 ${stats.lookups} 次提问`);
     if (hasSurvey) basis.push("问卷");
     lines.push({
       key: "level",
