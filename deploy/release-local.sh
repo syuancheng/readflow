@@ -54,12 +54,18 @@ else
 fi
 ok "构建完成"
 
-# ---- 2. 打包（.next/cache 是 76MB 构建缓存，运行时不需要）----
+# ---- 2. 打包 ----
+# 排除的都是运行不需要、但体积巨大的目录：
+#   .next/cache       构建缓存（约 76MB+）
+#   .next/dev         next dev 的开发产物（可达 180MB+）。本机跑过 dev server 就会生成，
+#                     若打进去会让 8MB 的产物暴涨到 128MB（2026-11-16 踩过）。
+#   .next/trace       构建追踪
 TGZ="$(mktemp -t rf-prebuilt).tgz"
 info "打包产物…"
 # COPYFILE_DISABLE / --no-mac-metadata：不带 macOS 扩展属性，服务器解压时就不会刷 LIBARCHIVE.xattr 警告
 COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$TGZ" \
   --exclude '.next/cache' \
+  --exclude '.next/dev' \
   --exclude '.next/trace' \
   .next package.json package-lock.json next.config.ts public src
 ok "产物 $(du -h "$TGZ" | cut -f1)"
