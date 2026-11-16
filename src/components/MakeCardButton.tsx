@@ -139,7 +139,13 @@ export default function MakeCardButton({
       )}
       {state === "ready" && (
         <>
-          <a className={cls} href={`/words?status=pending&word=${encodeURIComponent(st?.wordId ?? "")}`}>
+          <a
+            className={cls}
+            href={`/words?status=pending&word=${encodeURIComponent(st?.wordId ?? "")}`}
+            target="_blank"
+            rel="noreferrer"
+            title="在新标签页打开卡片，读完可以继续在这里阅读"
+          >
             ✓ 已做成 {st?.count} 张卡 · 查看
           </a>
           <button type="button" className="rf-card-again" onClick={again}>
