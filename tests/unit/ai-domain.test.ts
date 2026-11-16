@@ -69,6 +69,13 @@ test("领域信息注入只在给了 domainBlock 时发生，且放在最前面"
   assert.equal(empty, plain, "空领域块不能插入任何字符");
 });
 
+test("领域专家的人设讲的是整句，不再围着选区词打转", () => {
+  const p = buildDomainSystemPrompt();
+  assert.ok(p.includes("那是一整个句子，也就是你要讲的对象"));
+  assert.ok(!p.includes("从选区里的术语推断"), "判断领域也按整句，不再按选区");
+  assert.ok(p.includes("从这句话里的术语推断"));
+});
+
 test("领域追问的 user 消息保留学生问题与选区上下文", () => {
   const msg = buildUserMessage({
     ...BASE,
