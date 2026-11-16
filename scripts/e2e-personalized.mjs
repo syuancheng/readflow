@@ -361,7 +361,7 @@ try {
   const examShown = await ownerPage.locator("#survey-targetExam").isVisible();
   const scoreHiddenUntilExam = (await ownerPage.locator("#survey-targetScore").count()) === 0;
   await ownerPage.locator("#survey-targetExam").selectOption({ label: "托福" });
-  await ownerPage.locator("#survey-targetScore").selectOption({ label: "100 分" });
+  await ownerPage.locator("#survey-targetScore").selectOption({ label: "5 分（旧版 95+）" });
   await ownerPage.locator("#survey-targetExam").selectOption({ label: "雅思" });
   const scoreCleared = (await ownerPage.locator("#survey-targetScore").inputValue()) === "";
   const ieltsBands = await ownerPage.locator("#survey-targetScore option").allTextContents();
@@ -373,7 +373,7 @@ try {
   await ownerPage.locator("#survey-targetScore").selectOption({ label: "7 分" });
   check("D0 勾「考试备考」才出现「在备考哪个考试」「目标分数」；换考试清掉目标分；取消勾选两题消失、再勾是空的",
     followUpsBefore === 0 && examShown && scoreHiddenUntilExam && scoreCleared &&
-    ieltsBands.includes("7 分") && !ieltsBands.includes("100 分") && goneAfterUncheck === 0 && resetAfterRecheck,
+    ieltsBands.includes("7 分") && !ieltsBands.some((b) => b.includes("旧版")) && goneAfterUncheck === 0 && resetAfterRecheck,
     `before=${followUpsBefore} shown=${examShown} cleared=${scoreCleared} bands=${ieltsBands.join("/")} gone=${goneAfterUncheck} reset=${resetAfterRecheck}`);
   await ownerPage.locator("#survey-targetScore").scrollIntoViewIfNeeded();
   await ownerPage.screenshot({ path: path.join(SHOTS, "welcome-exam-target-1440.png") });

@@ -61,7 +61,7 @@ test("Q2a：高考、考研英语、还没考过不显示；其余按产品确�
   assert.deepEqual(EXAM_SCORE_BANDS.cet4.map((b) => b.label), cet);
   assert.deepEqual(EXAM_SCORE_BANDS.cet6.map((b) => b.label), cet);
   assert.deepEqual(EXAM_SCORE_BANDS.ielts_toefl.map((b) => b.label), [
-    "雅思 6 以下", "雅思 6–6.5", "雅思 7 以上", "托福 80 以下", "托福 80–99", "托福 100 以上", "不记得了",
+    "雅思 6 以下", "雅思 6–6.5", "雅思 7 以上", "托福 4 分及以下（旧版 85 及以下）", "托福 4.5–5 分（旧版 86–106）", "托福 5.5 分及以上（旧版 107 及以上）", "不记得了",
   ]);
   assert.deepEqual(EXAM_SCORE_BANDS.tem.map((b) => b.label), ["专四", "专八"]);
   assert.equal(showScoreQuestion("ielts_toefl"), true);
@@ -215,7 +215,10 @@ test("P39 targetExamText：一句话写清楚考什么、目标多少", () => {
   assert.equal(targetExamText({ goals: ["exam"] }), null);
   assert.equal(targetExamText({ goals: ["tech"], targetExam: "ielts", targetScore: "ielts_7" }), null);
   assert.equal(targetExamText({ goals: ["exam"], targetExam: "ielts", targetScore: "ielts_7" }), "雅思，目标 7 分");
-  assert.equal(targetExamText({ goals: ["exam"], targetExam: "toefl", targetScore: "toefl_110plus" }), "托福，目标 110 分及以上");
+  assert.equal(targetExamText({ goals: ["exam"], targetExam: "toefl", targetScore: "toefl_5" }), "托福，目标 5 分（旧版 95+）");
+  assert.deepEqual(TARGET_SCORE_BANDS.toefl.map((b) => b.label), [
+    "4 分（旧版 72+）", "4.5 分（旧版 86+）", "5 分（旧版 95+）", "5.5 分（旧版 107+）", "6 分（旧版 114+）", "还没定",
+  ]);
   assert.equal(targetExamText({ goals: ["exam"], targetExam: "ielts", targetScore: "undecided" }), "雅思（目标分数还没定）");
   assert.equal(targetExamText({ goals: ["exam"], targetExam: "kaoyan" }), "考研英语");
   assert.equal(targetExamText({ goals: ["exam"], targetExam: "other" }), "其他考试");

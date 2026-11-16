@@ -119,7 +119,7 @@ export default function SurveyForm({
             value={(value as Record<string, string | undefined>)[q.id]}
             onChange={(v) =>
               q.id === "exam"
-                ? // 换考试时清掉旧分数段，避免出现「六级 + 托福 100 以上」这种错档
+                ? // 换考试时清掉旧分数段，避免出现「六级 + 托福 5.5 分及以上」这种错档
                   set({ exam: v as SurveyAnswers["exam"], examScore: undefined })
                 : set({ [q.id]: v } as Partial<SurveyAnswers>)
             }
