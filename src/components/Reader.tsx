@@ -792,7 +792,7 @@ export default function Reader({
   );
 
   // ===== 分段小结 =====
-  // 按累计词数分区（约 300 词一段区间），只在自然段末尾落标记，绝不拆段
+  // 按累计词数分区（目标 100 词一个区间），只在自然段末尾落标记，绝不拆段
   const sections = useMemo(
     () =>
       planSections(

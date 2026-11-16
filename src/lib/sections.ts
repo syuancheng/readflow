@@ -10,14 +10,16 @@
  * 因此按累计词数切：累加到 ≥ 目标词数，就在当前段末尾截断。
  */
 
-/** 每个区间累计到多少词后截断（约 4 分钟阅读量） */
-export const SECTION_TARGET_WORDS = 300;
+/** 每个区间累计到多少词后截断（用户 2026-11-16 从 300 调到 100，更细粒度的小结） */
+export const SECTION_TARGET_WORDS = 100;
 
 /**
  * 文末残余区间的下限：最后剩下的段落总词数不足这个数时，
  * 并入上一个区间，避免出现「只有一句话、没什么可总结」的尾部标记。
+ * 保持目标的 0.4 比例（原 120/300），目标降到 100 后为 40；
+ * 必须小于 SECTION_TARGET_WORDS，否则已达目标的尾部区间会被错误合并。
  */
-export const SECTION_TAIL_MIN_WORDS = 120;
+export const SECTION_TAIL_MIN_WORDS = 40;
 
 export type SectionPara = { idx: number; content: string };
 
