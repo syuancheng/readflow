@@ -133,3 +133,71 @@ test("同一输入渲染两次结果相同（纯函数）", () => {
   const spec: CardSpec = baseChoiceCard();
   assert.equal(renderCard(spec, R), renderCard(spec, R));
 });
+
+// ---------- P35 ----------
+import { audioKey as p35Key } from "../../src/lib/cards/audio";
+import { REFERENCE_NOTE, REFERENCE_NOTE_AI, SECTIONS as P35_SECTIONS } from "../../src/lib/cards/render";
+import { lintCard as p35Lint } from "../../src/lib/cards/lint";
+import { backTranslateCard, situationCard, rephraseCard, usageCard, baseClozeCard as p35Cloze, SENTENCE as P35_SENTENCE } from "./cards-fixtures";
+
+const P35_VOICE = { model: "qwen3-tts-flash", voice: "Cherry" };
+
+test("P35：四种使用类题型的标签", () => {
+  const tags = [backTranslateCard(), situationCard(), rephraseCard(), usageCard()].map(
+    (c) => renderCard(c, { sourceTitle: "" }).split("\n")[0],
+  );
+  assert.ok(tags[0].includes("🔁 回译"));
+  assert.ok(tags[1].includes("💬 情景说一句"));
+  assert.ok(tags[2].includes("🔀 换个说法"));
+  assert.ok(tags[3].includes("🧩 搭配与用法"));
+});
+
+test("P35：使用类卡背面是「🗣 参考说法」+ 说明行；参考说法不再逐句标 AI 补充", () => {
+  const sit = renderCard(situationCard(), { sourceTitle: "" });
+  assert.ok(sit.includes(P35_SECTIONS.reference) && !sit.includes(P35_SECTIONS.answer));
+  assert.ok(sit.includes(REFERENCE_NOTE_AI));
+  assert.ok(!sit.includes("（AI 补充）"));
+  // 只有原句的回译：说明行不写「AI 补充」
+  const bt = renderCard(backTranslateCard(), { sourceTitle: "" });
+  assert.ok(bt.includes(REFERENCE_NOTE) && !bt.includes(REFERENCE_NOTE_AI));
+  // 换个说法：正面的改写句仍然标 AI 补充（正面不属于参考说法分区）
+  const re = renderCard(rephraseCard(), { sourceTitle: "" });
+  assert.equal(re.split("（AI 补充）").length - 1, 1);
+});
+
+test("P35：音频标签只加在背面英文句子的同一行末尾，正面和提示层不加；不传音色就一个都没有", () => {
+  const out = renderCard(backTranslateCard(), { sourceTitle: "", audio: P35_VOICE });
+  const key = p35Key(P35_SENTENCE, P35_VOICE);
+  const [front, , back] = out.split("\n---\n");
+  assert.ok(!front.includes("[Audio#"));
+  assert.ok(back.includes(`[Audio#M,ID/@AUDIO:${key}@#]`));
+  const line = back.split("\n").find((l) => l.includes("[Audio#"));
+  assert.ok(line && line.startsWith("The [T#"), "音频跟在原句同一行");
+  assert.equal(renderCard(backTranslateCard(), { sourceTitle: "" }).includes("[Audio#"), false);
+  // 认识类卡的补充例句也配音；挖空卡正面的原句不配
+  const cloze = renderCard(p35Cloze({ back: { answer: [{ t: "fill", answer: "ephemeral" }], example: { en: "Youth is ephemeral.", zh: "青春短暂。" } } }), { sourceTitle: "", audio: P35_VOICE });
+  assert.equal(cloze.split("[Audio#").length - 1, 1);
+  assert.ok(cloze.includes(`@AUDIO:${p35Key("Youth is ephemeral.", P35_VOICE)}@`));
+});
+
+test("P35：3 句参考说法加 3 个音频标签仍在 1800 字以内，并且过 lint", () => {
+  const card = situationCard({
+    back: {
+      answer: [
+        { t: "sentence", source: "paraphrase", text: "His excitement was ephemeral." },
+        { t: "text", text: "他的兴奋很短暂。" },
+        { t: "sentence", source: "paraphrase", text: "The thrill of the promotion proved ephemeral." },
+        { t: "text", text: "升职带来的兴奋转瞬即逝。" },
+        { t: "sentence", source: "paraphrase", text: "Success can feel ephemeral at first." },
+        { t: "text", text: "成功一开始可能让人觉得很短暂。" },
+      ],
+    },
+  });
+  const r = renderCardChecked(card, { sourceTitle: "一篇很长的文章标题".repeat(4), audio: P35_VOICE }, { charLimit: 1800 });
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.content.split("[Audio#").length - 1, 3);
+    assert.ok(r.content.length <= 1800);
+    assert.equal(p35Lint(r.content).ok, true);
+  }
+});

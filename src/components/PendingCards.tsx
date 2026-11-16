@@ -27,6 +27,8 @@ type SetCard = { id: string; status: string; needsReview: string | null; edited:
 type Job = {
   jobId: string; status: "running" | "paused" | "done" | "error"; done: number; failed: number; total: number;
   error: string | null; failures: { cardId: string; error: string }[];
+  /** P35：推送成功但没配上音频的卡数 */
+  audioMissing?: number;
 };
 
 /** 待推送总数；词库左侧筛选栏的「待推送 (N)」用 */
@@ -280,6 +282,9 @@ export default function PendingCards({
                 已推送 {job.done} / 共 {job.total}
                 {job.failed > 0 ? `，${job.failed} 张失败` : ""}
               </p>
+              {job.status !== "running" && (job.audioMissing ?? 0) > 0 && (
+                <p className="rf-audio-missing">有 {job.audioMissing} 张卡没配上音频</p>
+              )}
               {job.error && <p className="pc-error">{job.error}</p>}
               {job.status !== "running" && job.failures.length > 0 && (
                 <div>

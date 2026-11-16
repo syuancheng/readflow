@@ -4,7 +4,8 @@
  * 音频在草稿阶段写占位符 @AUDIO:<hash>@，推送时 str.replace 成真实 file.id
  * （不能用模板字符串：墨墨语法里全是方括号和 #，spec §6.3）。
  */
-import type { CardSpec, Block } from "./spec";
+import { isProductive, type CardSpec, type Block } from "./spec";
+import { audioKey, audioPlaceholder, speakable, type Voice } from "./audio";
 import { esc, oneLine, TAG_COLORS } from "./markup";
 import { kindLabel } from "./labels";
 import { lintCard } from "./lint";
@@ -18,7 +19,28 @@ export type RenderOpts = {
   sourceTitle: string;
   /** hash → 草稿占位符会写成 @AUDIO:<hash>@；键是 audio 块的稳定 hash（阶段二填） */
   audioIds?: Record<string, string>;
+  /**
+   * P35 句子音频：传了就给背面每句英文（answer / explanation 的句子块、补充例句）
+   * 在同一行末尾追加 `[Audio#M,ID/@AUDIO:<key>@#]`；不传或 null 不加。正面和提示层永远不加。
+   */
+  audio?: Voice | null;
 };
+
+/** 使用类卡背面「参考说法」分区的说明行（P35 PRD F1） */
+export const REFERENCE_NOTE = "说法不唯一：意思对、用上了目标词，就算说对了";
+export const REFERENCE_NOTE_AI = `AI 补充 · ${REFERENCE_NOTE}`;
+
+/** 使用类卡的说明行：参考说法里有 AI 写的句子时注明「AI 补充」 */
+export function referenceNoteOf(spec: CardSpec): string {
+  const ai = spec.back.answer.some((b) => b.t === "sentence" && b.source === "paraphrase");
+  return ai ? REFERENCE_NOTE_AI : REFERENCE_NOTE;
+}
+
+/** 这句英文的音频标签（带前导空格）；不配音时返回空串 */
+function audioTagFor(text: string, opts: RenderOpts): string {
+  if (!opts.audio || !speakable(text)) return "";
+  return ` ${audioPlaceholder(audioKey(text, opts.audio))}`;
+}
 
 // ---------- 行内渲染 ----------
 
@@ -70,13 +92,23 @@ function renderTextWithEmphasis(b: Extract<Block, { t: "text" }>): string {
   return out;
 }
 
-/** 通用块渲染。blankNo 是当前卡的挖空编号（paragraph_cloze 从 1 递增） */
-function renderBlock(b: Block, blankNo: number, opts: RenderOpts): string | null {
+/**
+ * 通用块渲染。blankNo 是当前卡的挖空编号（paragraph_cloze 从 1 递增）。
+ * ctx.back：背面的块（句子后面配音频）；ctx.noAiTag：使用类卡的参考说法分区，
+ * 「AI 补充」由分区说明行统一写一次，不再逐句标。
+ */
+function renderBlock(
+  b: Block,
+  blankNo: number,
+  opts: RenderOpts,
+  ctx: { back?: boolean; noAiTag?: boolean } = {},
+): string | null {
   switch (b.t) {
     case "sentence": {
       const s = renderSentence(b, blankNo);
       // AI 补充的句子必须带「AI 补充」标记（spec §5.2 第 8 条）
-      return b.source === "paraphrase" ? `${s} [T#${TAG_COLORS.source}#（AI 补充）]` : s;
+      const tagged = b.source === "paraphrase" && !ctx.noAiTag ? `${s} [T#${TAG_COLORS.source}#（AI 补充）]` : s;
+      return ctx.back ? tagged + audioTagFor(b.text, opts) : tagged;
     }
     case "instruction":
       return `[P#L#[T#${TAG_COLORS.source}#${oneLine(b.text)}]]`;
@@ -133,6 +165,7 @@ function section(title: string, body: string[]): string[] {
 export const SECTIONS = {
   hint: "🧭 提示",
   answer: "✅ 答案",
+  reference: "🗣 参考说法",
   explanation: "💡 解析",
   sentenceMeaning: "📝 整句意思",
   structure: "🔍 句子主干",
@@ -170,10 +203,22 @@ export function renderCard(spec: CardSpec, opts: RenderOpts): string {
 
   lines.push("---");
 
-  // 背面分区
-  lines.push(...section(SECTIONS.answer, spec.back.answer.map((b) => renderBlock(b, blankNo, opts) ?? "")));
+  // 背面分区。使用类卡：标题换成「🗣 参考说法」，第一行是灰色说明（P35 PRD F1）
+  const productive = isProductive(spec.kind);
+  const answerLines = spec.back.answer.map(
+    (b) => renderBlock(b, blankNo, opts, { back: true, noAiTag: productive }) ?? "",
+  );
+  if (productive) {
+    lines.push(
+      ...section(SECTIONS.reference, [`[T#${TAG_COLORS.source}#${referenceNoteOf(spec)}]`, ...answerLines]),
+    );
+  } else {
+    lines.push(...section(SECTIONS.answer, answerLines));
+  }
   if (spec.back.explanation) {
-    lines.push(...section(SECTIONS.explanation, spec.back.explanation.map((b) => renderBlock(b, blankNo, opts) ?? "")));
+    lines.push(
+      ...section(SECTIONS.explanation, spec.back.explanation.map((b) => renderBlock(b, blankNo, opts, { back: true }) ?? "")),
+    );
   }
   if (spec.back.sentenceMeaning) {
     lines.push(...section(SECTIONS.sentenceMeaning, [esc(spec.back.sentenceMeaning)]));
@@ -184,7 +229,7 @@ export function renderCard(spec: CardSpec, opts: RenderOpts): string {
   if (spec.back.example) {
     lines.push(
       ...section(SECTIONS.example, [
-        `${esc(spec.back.example.en)} [T#${TAG_COLORS.source}#（AI 补充）]`,
+        `${esc(spec.back.example.en)} [T#${TAG_COLORS.source}#（AI 补充）]${audioTagFor(spec.back.example.en, opts)}`,
         esc(spec.back.example.zh),
       ]),
     );
@@ -207,11 +252,15 @@ export type PreviewModel = {
   front: PreviewSide;
   hints: PreviewSide | null;
   back: {
+    /** 分区标题：认识类「✅ 答案」，使用类「🗣 参考说法」 */
+    answerTitle: string;
+    /** 使用类卡的说明行；认识类为 null */
+    referenceNote: string | null;
     answer: PreviewSide;
     explanation: PreviewSide | null;
     sentenceMeaning: string | null;
     structure: string | null;
-    example: { en: string; zh: string; ai: true } | null;
+    example: { en: string; zh: string; ai: true; audioKey?: string } | null;
     audio: string[];
   };
 };
@@ -223,10 +272,23 @@ export type PreviewSide = {
     blanks?: { answer: string; no: number }[];
     choices?: { options: { text: string; correct: boolean }[]; multi: boolean };
     emphasis?: string[];
+    /** AI 写的句子（显示「AI 补充」） */
+    ai?: boolean;
+    /** 这一行是英文句子块（参考说法分组用） */
+    sentence?: boolean;
+    /** P35：这句英文的音频 key（只在背面、开了配音时有） */
+    audioKey?: string;
   }[];
 };
 
-function previewSide(blocks: Block[]): PreviewSide {
+function previewKey(text: string, audio: Voice | null | undefined): string | undefined {
+  return audio && speakable(text) ? audioKey(text, audio) : undefined;
+}
+
+function previewSide(
+  blocks: Block[],
+  back: { audio?: Voice | null; noAiTag?: boolean } | null = null,
+): PreviewSide {
   let blankNo = 0;
   const lines: PreviewSide["lines"] = [];
   for (const b of blocks) {
@@ -241,7 +303,14 @@ function previewSide(blocks: Block[]): PreviewSide {
           text = b.text.slice(0, b.mark.start + keep) + "_".repeat(Math.max(1, covered.length - keep)) + b.text.slice(b.mark.end);
           blanks = [{ answer: covered.slice(keep), no: blankNo }];
         }
-        lines.push({ text, ...(blanks ? { blanks } : {}), ...(b.source === "paraphrase" ? { emphasis: [] } : {}) });
+        const key = back ? previewKey(b.text, back.audio) : undefined;
+        lines.push({
+          text,
+          sentence: true,
+          ...(blanks ? { blanks } : {}),
+          ...(b.source === "paraphrase" && !back?.noAiTag ? { ai: true } : {}),
+          ...(key ? { audioKey: key } : {}),
+        });
         break;
       }
       case "instruction":
@@ -267,6 +336,8 @@ function previewSide(blocks: Block[]): PreviewSide {
 
 export function renderPreview(spec: CardSpec, opts: RenderOpts): PreviewModel {
   const k = kindLabel(spec.kind, spec.customLabel);
+  const productive = isProductive(spec.kind);
+  const exampleKey = spec.back.example ? previewKey(spec.back.example.en, opts.audio) : undefined;
   const style = effectiveStyle(spec, opts);
   return {
     tags: {
@@ -278,11 +349,15 @@ export function renderPreview(spec: CardSpec, opts: RenderOpts): PreviewModel {
     front: previewSide(spec.front),
     hints: spec.hints && spec.hints.length > 0 ? previewSide(spec.hints) : null,
     back: {
-      answer: previewSide(spec.back.answer),
-      explanation: spec.back.explanation ? previewSide(spec.back.explanation) : null,
+      answerTitle: productive ? SECTIONS.reference : SECTIONS.answer,
+      referenceNote: productive ? referenceNoteOf(spec) : null,
+      answer: previewSide(spec.back.answer, { audio: opts.audio, noAiTag: productive }),
+      explanation: spec.back.explanation ? previewSide(spec.back.explanation, { audio: opts.audio }) : null,
       sentenceMeaning: spec.back.sentenceMeaning ?? null,
       structure: spec.back.structure ?? null,
-      example: spec.back.example ? { ...spec.back.example, ai: true } : null,
+      example: spec.back.example
+        ? { ...spec.back.example, ai: true, ...(exampleKey ? { audioKey: exampleKey } : {}) }
+        : null,
       audio: spec.back.audio ?? [],
     },
   };
@@ -306,4 +381,28 @@ export function renderCardChecked(
   const lint = lintCard(content, { answerLines: answerLinesOf(spec), charLimit: limits.charLimit });
   if (!lint.ok) return { ok: false, problems: lint.problems };
   return { ok: true, content };
+}
+
+/**
+ * P35：把使用类卡背面的参考说法分组，一组 = 搭配（如有）+ 英文句 + 中文。
+ * 预览按组排版：组内 4px、组间 12px（设计简报 §9.2）。
+ * 规则：当前组里已经有英文句时，遇到下一句英文、或一行纯英文（搭配，如 fall behind on sth），就开新组。
+ */
+export function groupReference(lines: PreviewSide["lines"]): PreviewSide["lines"][] {
+  const groups: PreviewSide["lines"][] = [];
+  let cur: PreviewSide["lines"] = [];
+  let hasSentence = false;
+  const englishOnly = (t: string) => /[A-Za-z]/.test(t) && !/[㐀-鿿]/.test(t);
+  for (const l of lines) {
+    const startsNew = hasSentence && (l.sentence === true || (!l.choices && !l.blanks && englishOnly(l.text)));
+    if (startsNew) {
+      groups.push(cur);
+      cur = [];
+      hasSentence = false;
+    }
+    cur.push(l);
+    if (l.sentence) hasSentence = true;
+  }
+  if (cur.length > 0) groups.push(cur);
+  return groups;
 }

@@ -99,7 +99,8 @@ async function request<T>(path: string, token: string, init?: RequestInit): Prom
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      // multipart（上传媒体）由 fetch 自己写带 boundary 的 Content-Type，这里只给 JSON 请求加
+      ...(typeof init?.body === "string" ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
     signal: AbortSignal.timeout(15_000),
@@ -235,6 +236,29 @@ export async function updateCard(
 
   if (!data?.card?.id) throw new MarkjiError("墨墨没有返回卡片 id", 502);
   return data.card;
+}
+
+/**
+ * 上传媒体（P35 句子音频）：POST /files，multipart，字段 file（必填）和 deck_id（可选）。
+ * 墨墨按内容去重：同一份内容重复上传返回同一个 file.id。
+ * 返回的 file.id **大小写敏感**，原样写进 [Audio#M,ID/<id>#]；url 是临时地址，不要保存。
+ */
+export async function uploadFile(
+  deckId: string,
+  bytes: Uint8Array,
+  filename: string,
+  mime: string,
+  token?: string | null,
+): Promise<string> {
+  const data = await serialize(() => {
+    const form = new FormData();
+    form.append("deck_id", deckId);
+    form.append("file", new Blob([new Uint8Array(bytes)], { type: mime }), filename);
+    return call<{ file?: { id?: string } }>("/files", { method: "POST", body: form }, token);
+  });
+  const id = data?.file?.id;
+  if (typeof id !== "string" || !id) throw new MarkjiError("墨墨没有返回文件 id", 502);
+  return id;
 }
 
 /** 读回一张卡片（改卡前先取原内容，避免全量替换时丢掉别的部分） */

@@ -7,7 +7,9 @@ import { renderCardChecked } from "@/lib/cards/render";
 import { examFamilyOf, examStyleLabel } from "@/lib/cards/style";
 import { getLearner, surveyOf } from "@/lib/learner-store";
 import { inlineGloss } from "@/lib/gloss";
-import { charLimitOfUser, listeningOn } from "@/lib/cards/store";
+import { cardAudioVoice, charLimitOfUser, listeningOn } from "@/lib/cards/store";
+import { audioTextsOf } from "@/lib/cards/audio";
+import { ensureAudio } from "@/lib/tts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,6 +77,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     )
     .get(card.set_id) as { title: string } | undefined;
   const charLimit = charLimitOfUser(user.id);
+  const audio = cardAudioVoice();
   const v = validateCard(next, {
     originalSentence: context.originalSentence,
     quote: context.quote,
@@ -82,10 +85,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     listeningEnabled: listeningOn(),
     charLimit,
     sourceTitle: text?.title ?? "",
+    audio,
   });
   if (!v.ok) return NextResponse.json({ error: v.reasons.join("；"), reasons: v.reasons }, { status: 400 });
 
-  const rendered = renderCardChecked(next, { sourceTitle: text?.title ?? "" }, { charLimit });
+  const rendered = renderCardChecked(next, { sourceTitle: text?.title ?? "", audio }, { charLimit });
   if (!rendered.ok) {
     return NextResponse.json({ error: rendered.problems.join("；") }, { status: 400 });
   }
@@ -95,6 +99,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   sqlite
     .prepare("UPDATE cards SET spec = ?, content = ?, edited = 1, needs_review = NULL, updated_at = ? WHERE id = ?")
     .run(JSON.stringify(next), rendered.content, now, id);
+  // P35：改过的句子在后台重新合成音频，不等结果
+  if (audio) for (const t of audioTextsOf(next)) void ensureAudio(t);
   return NextResponse.json({ ok: true, content: rendered.content });
 }
 

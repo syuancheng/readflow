@@ -26,14 +26,19 @@ test("标签文字：雅思味更重的题型用雅思，其余托福；没有�
   assert.equal(examStyleLabel("kaoyan", "sentence_understanding"), "考研 · 句子题");
   assert.equal(examStyleLabel("kaoyan", "layered_cloze"), null);
   assert.equal(examStyleLabel("kaoyan", "custom"), null);
+  // P35：使用类卡永远不带考试风格标签
+  for (const k of ["back_translate", "situation_say", "rephrase", "usage"]) assert.equal(examStyleLabel("toefl_ielts", k), null);
 });
 
 test("提示词段落：随备考目标和阅读感受变化", () => {
   const withExam = stylePromptLines("cet", { goals: ["exam"], readingFeel: "every_sentence" });
   assert.ok(withExam.includes("四六级") && withExam.includes("很吃力"));
+  assert.ok(withExam.includes("最后再加一张") && withExam.includes("12 个词"));
+  assert.ok(withExam.includes("考试题：难点是长句结构"));
   const none = stylePromptLines(null, { readingFeel: "fluent" });
-  assert.ok(none.includes("托福和雅思") && none.includes("无障碍"));
+  assert.ok(none.includes("不出考试题型") && none.includes("无障碍"));
+  assert.ok(!none.includes("考试题：难点"));
   const unknown = stylePromptLines("kaoyan", null);
   assert.ok(unknown.includes("考研") && unknown.includes("自行判断"));
-  assert.ok(withExam.includes("已经做过卡又查到的词"));
+  assert.ok(withExam.includes("已经做过卡又查到的词") && withExam.includes("情景说一句"));
 });

@@ -72,8 +72,31 @@ const leakyCard = () => ({
   ],
 });
 
-const calls = []; // { kind: 'explain'|'cards'|'review'|'redo'|'regen', messages }
-let cardsMode = "good";          // good | bad (永远不合格) | garbage (非 JSON) | leak-then-good | fenced (JSON 包在代码块里) | truncated (到长度上限、JSON 没写完)
+// P35 使用类卡：回译（原句）+ 情景说一句（两句参考说法，带变体号，方便换一批句子）
+let p35Variant = 0;
+const backTranslateCard = () => ({
+  kind: "back_translate",
+  target: "用 ephemeral 说出原句",
+  front: [{ t: "text", text: "那种短暂的喜悦很快就消失了。" }, { t: "instruction", text: "用英文说出这句话" }],
+  hints: [{ t: "text", text: "ephemeral" }],
+  back: { answer: [{ t: "sentence", source: "original", text: SENTENCE, mark: { start: 4, end: 13, as: "highlight" } }] },
+});
+const situationCard = () => ({
+  kind: "situation_say",
+  target: "在场景里用 ephemeral",
+  front: [{ t: "text", text: "朋友说他升职后的兴奋只持续了几天。" }, { t: "instruction", text: "用 ephemeral 说一句" }],
+  back: {
+    answer: [
+      { t: "sentence", source: "paraphrase", text: `His excitement was ephemeral, round ${p35Variant}.` },
+      { t: "text", text: "他的兴奋很短暂。" },
+      { t: "sentence", source: "paraphrase", text: `The thrill proved ephemeral, round ${p35Variant}.` },
+      { t: "text", text: "那份兴奋转瞬即逝。" },
+    ],
+  },
+});
+
+const calls = []; // { kind: 'explain'|'cards'|'review'|'redo'|'redoSet'|'regen', messages }
+let cardsMode = "good";          // good | bad (永远不合格) | garbage (非 JSON) | leak-then-good | fenced (JSON 包在代码块里) | truncated (到长度上限、JSON 没写完) | p35 (使用类卡)
 let leakServed = false;
 let reviewMode = "ok";           // ok | multi (说有多个可行答案)
 let slowMs = 0;
@@ -83,8 +106,9 @@ const classify = (messages) => {
   const last = messages[messages.length - 1]?.content ?? "";
   if (sys.includes("检查一道选择题")) return "review";
   if (last.includes("这张卡不合格")) return "redo";
+  if (last.includes("这一组不合格")) return "redoSet";
   if (last.includes("请换一道")) return "regen";
-  if (last.includes("请为这个词出考试题型的记忆卡")) return "cards";
+  if (last.includes("请为这个词出记忆卡")) return "cards";
   return "explain";
 };
 
@@ -125,6 +149,8 @@ const fake = http.createServer((req, res) => {
     } else if (cardsMode === "leak-then-good" && kind === "cards" && !leakServed) {
       leakServed = true;
       content = JSON.stringify({ cards: [leakyCard(), choiceCard()] });
+    } else if (cardsMode === "p35" && kind === "cards") {
+      content = JSON.stringify({ cards: [backTranslateCard(), situationCard()] });
     } else if (kind === "regen") {
       content = JSON.stringify({ cards: [choiceCard({ target: "换一道后的卡" })] });
     } else {
@@ -139,19 +165,56 @@ const fake = http.createServer((req, res) => {
   });
 });
 
-// ---------- 假墨墨（开放 API 的最小子集）----------
-const MJ_PORT = 3139;
-const mj = { chapters: [{ id: "ch-fixed", name: "固定章节", card_ids: [] }], cards: new Map(), created: 0, chapterCreates: 0, mode: "ok", seq: 0 };
-const mjFake = http.createServer((req, res) => {
+// ---------- 假百炼语音合成（P35）----------
+const TTS_PORT = 3140;
+const tts = { calls: [], mode: "ok" }; // mode: ok | fail
+const WAV = Buffer.from("524946462400000057415645666d74201000000001000100c05d0000803e0100020010006461746100000000", "hex");
+const ttsFake = http.createServer((req, res) => {
   let buf = "";
   req.on("data", (d) => (buf += d));
   req.on("end", () => {
+    if (req.method === "GET" && req.url.startsWith("/audio/")) {
+      res.writeHead(200, { "content-type": "audio/wav", "content-length": String(WAV.length) });
+      res.end(WAV);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/v1/services/aigc/multimodal-generation/generation") {
+      let body = {};
+      try { body = JSON.parse(buf); } catch { /* ignore */ }
+      tts.calls.push({ auth: req.headers.authorization, sse: req.headers["x-dashscope-sse"] ?? null, body });
+      res.writeHead(tts.mode === "ok" ? 200 : 500, { "content-type": "application/json" });
+      res.end(JSON.stringify(tts.mode === "ok"
+        ? { output: { audio: { url: `http://127.0.0.1:${TTS_PORT}/audio/${tts.calls.length}.wav?Expires=1`, expires_at: 1 } }, usage: { characters: body.input?.text?.length ?? 0 } }
+        : { code: "InternalError", message: "boom" }));
+      return;
+    }
+    res.writeHead(404); res.end();
+  });
+});
+
+// ---------- 假墨墨（开放 API 的最小子集）----------
+const MJ_PORT = 3139;
+const mj = { chapters: [{ id: "ch-fixed", name: "固定章节", card_ids: [] }], cards: new Map(), created: 0, chapterCreates: 0, mode: "ok", seq: 0, uploads: 0 };
+const mjFake = http.createServer((req, res) => {
+  const chunks = [];
+  req.on("data", (d) => chunks.push(d));
+  req.on("end", () => {
+    const raw = Buffer.concat(chunks);
+    const buf = raw.toString("utf8");
     const url = new URL(req.url, "http://x");
     const send = (status, data) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(status < 300 ? { success: true, errors: [], data } : { success: false, errors: [{ message: data }], data: null }));
     };
     const m = url.pathname.replace("/open/api/v1/markji", "");
+    // P35：上传媒体是 multipart；按内容去重返回同一个 file.id（和真墨墨一样）
+    if (req.method === "POST" && m === "/files") {
+      mj.uploads++;
+      const ok = (req.headers["content-type"] ?? "").startsWith("multipart/form-data") && buf.includes('name="file"') && buf.includes('name="deck_id"');
+      if (!ok) return send(400, "bad upload");
+      const h = require("node:crypto").createHash("sha256").update(raw.subarray(raw.indexOf("RIFF"))).digest("hex").slice(0, 8);
+      return send(200, { file: { id: `mkjf_Ab${h}`, url: "http://x", mime: "audio/wav", size: WAV.length } });
+    }
     const body = buf ? JSON.parse(buf) : {};
     if (req.method === "GET" && m === "/decks") return send(200, { decks: [{ id: "d1", name: "测试牌组" }] });
     if (req.method === "GET" && m === "/decks/d1/chapters") return send(200, { chapters: mj.chapters.map((c) => ({ ...c, deck_id: "d1" })) });
@@ -185,7 +248,7 @@ const mjFake = http.createServer((req, res) => {
 
 const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-p", String(PORT)], {
   cwd: ROOT,
-  env: { ...process.env, DB_PATH: DB, MARKJI_BASE_URL: `http://127.0.0.1:${3139}/open/api/v1/markji`, NODE_ENV: "production", NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" },
+  env: { ...process.env, DB_PATH: DB, MARKJI_BASE_URL: `http://127.0.0.1:${3139}/open/api/v1/markji`, DASHSCOPE_API_KEY: "fake-dashscope", READFLOW_TTS_BASE_URL: `http://127.0.0.1:${3140}`, NODE_ENV: "production", NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let serverLog = "";
@@ -236,6 +299,7 @@ const callsOf = (kind) => calls.filter((c) => c.kind === kind);
 try {
   await new Promise((resolve) => fake.listen(SITE_PORT, "127.0.0.1", resolve));
   await new Promise((resolve) => mjFake.listen(MJ_PORT, "127.0.0.1", resolve));
+  await new Promise((resolve) => ttsFake.listen(TTS_PORT, "127.0.0.1", resolve));
   let up = false;
   for (let i = 0; i < 90 && !up; i++) {
     try { await fetch(`${BASE}/api/auth/status`); up = true; } catch { await new Promise((r) => setTimeout(r, 400)); }
@@ -295,6 +359,7 @@ try {
   const g1 = await api("/api/cards/generate", { cookie: owner, method: "POST", body: { contextId: o.contextId, answerId } });
   check("C1 generate 立刻返回 generating", g1.status === 200 && g1.data?.status === "generating" && Boolean(g1.data?.setId) && g1.data?.reused === false, JSON.stringify(g1.data));
   const r1 = await waitSet(owner, g1.data.setId);
+  const r1Ready = r1?.set?.status === "ready" && r1.cards.length === 2;
   check("C2 生成完成：ready，2 张草稿卡", r1?.set?.status === "ready" && r1.cards.length === 2 && r1.cards.every((c) => c.status === "draft"), `status=${r1?.set?.status} cards=${r1?.cards?.length}`);
 
   const explainMsgs = callsOf("explain")[0].messages;
@@ -616,6 +681,98 @@ try {
   check("P19 今天已经创建 600 条 → 暂停并提示明天继续，卡片仍是草稿", capDone.status === "paused" && /600/.test(capDone.error ?? "") && dbAll("SELECT status FROM cards WHERE id = ?", pg.cardIds[0])[0].status === "draft", `status=${capDone.status} ${capDone.error}`);
   dbRun("DELETE FROM exports WHERE id LIKE 'cap-%'");
 
+  // ===== P35：使用类卡 + 句子音频 =====
+  cardsMode = "p35";
+  p35Variant = 1;
+  const ttsBefore = tts.calls.length;
+  const q1 = await makeSet(owner, "P35 text 1");
+  const placeholders = (c) => [...new Set([...c.matchAll(/@AUDIO:([0-9a-f]{32})@/g)].map((x) => x[1]))];
+  const q1Keys = [...new Set(q1.cards.flatMap((c) => placeholders(c.content)))];
+  check("A1 使用类卡入库；背面英文带音频占位符；假百炼收到的请求数 = 去重后的句子数（3）",
+    q1.cards.length === 2 && q1Keys.length === 3 && tts.calls.length - ttsBefore === 3 &&
+      q1.cards[0].content.includes("🔁 回译") && q1.cards[1].content.includes("🗣 参考说法"),
+    `cards=${q1.cards.length} keys=${q1Keys.length} tts=${tts.calls.length - ttsBefore}`);
+  const firstTts = tts.calls[ttsBefore];
+  check("A1b 合成请求：Bearer Key、英文、美式音色、非流式（不带 SSE 头）",
+    firstTts?.auth === "Bearer fake-dashscope" && firstTts.sse === null && firstTts.body?.input?.language_type === "English" &&
+      firstTts.body?.model === "qwen3-tts-flash" && firstTts.body?.input?.voice === "Jennifer",
+    JSON.stringify(firstTts?.body));
+  const frontPart = q1.cards[0].content.split("\n---\n")[0];
+  check("A1c 正面不放音频（免得读出答案）；预览给出和占位符一致的 audioKey",
+    !frontPart.includes("[Audio#") &&
+      JSON.stringify(q1.cards[1].preview.back.answer.lines.map((l) => l.audioKey).filter(Boolean)) === JSON.stringify(placeholders(q1.cards[1].content)),
+    frontPart.slice(0, 80));
+
+  const okAudio = await fetch(`${BASE}/api/tts/${q1Keys[0]}`, { headers: { cookie: `readflow_session=${owner}` } });
+  const okBytes = Buffer.from(await okAudio.arrayBuffer());
+  const otherAudio = await api(`/api/tts/${q1Keys[0]}`, { cookie: friend });
+  const badKey = await api("/api/tts/not-a-key", { cookie: owner });
+  const anonAudio = await api(`/api/tts/${q1Keys[0]}`);
+  check("A2 本人取音频 200（audio/wav、私有缓存）；别人 404；非法 key 404；未登录 401",
+    okAudio.status === 200 && okAudio.headers.get("content-type") === "audio/wav" && okBytes.length === WAV.length &&
+      /private/.test(okAudio.headers.get("cache-control") ?? "") && otherAudio.status === 404 && badKey.status === 404 && anonAudio.status === 401,
+    `${okAudio.status}/${otherAudio.status}/${badKey.status}/${anonAudio.status}`);
+
+  const uploads0 = mj.uploads;
+  const created0 = mj.created;
+  const qj = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(q1.cardIds) });
+  const qjDone = await waitJob(owner, qj.data.jobId);
+  const pushedContents = [...mj.cards.values()].slice(-2);
+  check("A3 推送：上传 3 段音频，卡片内容写真实 file.id（[Audio#M,ID/mkjf_…#]），没有占位符；没有音频缺失",
+    qjDone.status === "done" && qjDone.done === 2 && mj.created - created0 === 2 && mj.uploads - uploads0 === 3 &&
+      pushedContents.every((c) => c.includes("[Audio#M,ID/mkjf_Ab") && !c.includes("@AUDIO")) && qjDone.audioMissing === 0,
+    `status=${qjDone.status} uploads=${mj.uploads - uploads0} missing=${qjDone.audioMissing}`);
+  check("A3b 草稿里的占位符保留（预览接口靠它判断归属）；markji_media 按用户记下 3 个 file.id",
+    dbAll("SELECT content FROM cards WHERE id = ?", q1.cardIds[0])[0].content.includes("@AUDIO:") &&
+      dbAll("SELECT COUNT(*) AS n FROM markji_media WHERE user_id = ?", ownerId)[0].n === 3);
+
+  // 同样的句子再做一组、再推一次：不再合成，也不再上传
+  const ttsMid = tts.calls.length;
+  const q2 = await makeSet(owner, "P35 text 2");
+  const uploads1 = mj.uploads;
+  const q2j = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(q2.cardIds) });
+  const q2Done = await waitJob(owner, q2j.data.jobId);
+  check("A3c 同一句话只合成一次、只上传一次（不同文章复用）",
+    tts.calls.length === ttsMid && q2Done.done === 2 && mj.uploads === uploads1,
+    `tts=${tts.calls.length - ttsMid} uploads=${mj.uploads - uploads1}`);
+
+  // 合成失败：组照常 ready；推送照常成功，缺音频的卡计入 audioMissing
+  tts.mode = "fail";
+  p35Variant = 2;
+  const q3 = await makeSet(owner, "P35 text 3");
+  const q3j = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(q3.cardIds) });
+  const q3Done = await waitJob(owner, q3j.data.jobId);
+  const q3Sit = [...mj.cards.values()].at(-1);
+  const q3Audio = await api(`/api/tts/${placeholders(q3.cards[1].content)[0]}`, { cookie: owner });
+  check("A4 合成失败：组照常 ready；推送成功，情景卡不带音频，audioMissing = 1；预览取音频返回 503",
+    q3.cards.length === 2 && q3Done.status === "done" && q3Done.done === 2 && q3Done.audioMissing === 1 &&
+      !q3Sit.includes("[Audio#") && !q3Sit.includes("@AUDIO") && q3Audio.status === 503 && /音频暂时没生成/.test(q3Audio.text),
+    `ready=${q3.cards.length} done=${q3Done.done} missing=${q3Done.audioMissing} preview=${q3Audio.status}`);
+  tts.mode = "ok";
+
+  // 站长关掉句子配音：新卡没有占位符，也不请求百炼
+  const offAudio = await api("/api/settings", { cookie: owner, method: "PUT", body: { cardsAudio: "off" } });
+  const st = await api("/api/settings", { cookie: owner });
+  p35Variant = 3;
+  const ttsOff = tts.calls.length;
+  const q4 = await makeSet(owner, "P35 text 4");
+  const fAudio = await api("/api/settings", { cookie: friend, method: "PUT", body: { cardsAudio: "on" } });
+  await api("/api/settings", { cookie: owner, method: "PUT", body: { cardsAudio: "on" } });
+  check("A5 句子配音关闭：新卡没有音频占位符，百炼收不到请求；普通账号改这个开关 → 403；设置接口返回开关和 Key 状态",
+    offAudio.status === 200 && st.data?.cardsAudio === "off" && st.data?.ttsKeyReady === true &&
+      q4.cards.every((c) => !c.content.includes("@AUDIO")) && tts.calls.length === ttsOff && fAudio.status === 403,
+    `cardsAudio=${st.data?.cardsAudio} key=${st.data?.ttsKeyReady} tts=${tts.calls.length - ttsOff} friend=${fAudio.status}`);
+
+  const ownerPrompt = callsOf("cards").map((c) => c.messages.at(-1).content).find((t) => t.includes("四六级"));
+  const friendPrompt = callsOf("cards").map((c) => c.messages.at(-1).content).find((t) => t.includes("学生没有考试目标"));
+  check("A6 有考试目标的学生才给考试题型菜单；提示词里没有固定张数",
+    Boolean(ownerPrompt?.includes("考试题型（学生在备考")) && Boolean(friendPrompt) && !friendPrompt.includes("考试题型（学生在备考") &&
+      !/\d\s*[~～-]\s*\d\s*张/.test(ownerPrompt ?? "") && Boolean(ownerPrompt?.includes("出几张由你按这个词决定")),
+    `owner=${Boolean(ownerPrompt)} friend=${Boolean(friendPrompt)}`);
+  check("A7 一组里一张使用类卡都没有 → 整组重出过一次（仍没有就照常保存）", callsOf("redoSet").length >= 1 && r1Ready,
+    `redoSet=${callsOf("redoSet").length}`);
+  cardsMode = "good";
+
   // 做卡开关关闭时不能推送
   await api("/api/settings", { cookie: owner, method: "PUT", body: { cardsEnabled: "off" } });
   const offPush = await api("/api/cards/push", { cookie: owner, method: "POST", body: pushBody(pg.cardIds) });
@@ -631,6 +788,7 @@ try {
   server.kill("SIGTERM");
   await new Promise((r) => fake.close(r));
   await new Promise((r) => mjFake.close(r));
+  await new Promise((r) => ttsFake.close(r));
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* ignore */ }
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

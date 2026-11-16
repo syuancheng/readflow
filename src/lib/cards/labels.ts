@@ -15,6 +15,11 @@ export const KIND_LABELS: Record<string, { emoji: string; label: string }> = {
   layered_cloze: { emoji: "🪜", label: "分层提示" },
   paragraph_cloze: { emoji: "📄", label: "一段多空" },
   custom: { emoji: "✳️", label: "自定义" },
+  // P35 使用类
+  back_translate: { emoji: "🔁", label: "回译" },
+  situation_say: { emoji: "💬", label: "情景说一句" },
+  rephrase: { emoji: "🔀", label: "换个说法" },
+  usage: { emoji: "🧩", label: "搭配与用法" },
 };
 
 /** 拿题型标签；custom 且有 customLabel 时用它替换「自定义」 */

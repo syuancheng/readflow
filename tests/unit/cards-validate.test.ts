@@ -190,3 +190,90 @@ test("多个问题一起报", () => {
   assert.equal(r.ok, false);
   if (!r.ok) assert.ok(r.reasons.length >= 2);
 });
+
+// ---------- P35 使用类卡（spec §11.2） ----------
+import { usesTarget, BACK_TRANSLATE_MAX_WORDS } from "../../src/lib/cards/validate";
+import { backTranslateCard, situationCard, rephraseCard, usageCard } from "./cards-fixtures";
+
+test("P35 基准：四种使用类卡全部通过（正面可以有目标词和整句中文）", () => {
+  for (const c of [backTranslateCard(), situationCard(), rephraseCard(), usageCard()]) {
+    assert.deepEqual(reasonsOf(c), [], c.kind);
+  }
+  // 题干出现了目标词的中文意思「短暂的」，使用类卡照样通过
+  assert.ok(backTranslateCard().front.some((b) => b.t === "text" && b.text.includes("短暂的")));
+});
+
+test("P35 规则1：使用类卡正面可以只有中文，但背面必须有英文句子", () => {
+  const noEnglish = situationCard({ back: { answer: [{ t: "text", text: "只有中文" }] } });
+  assert.ok(has(noEnglish, "背面必须有英文参考说法"));
+  const emptyFront = situationCard({ front: [{ t: "instruction", text: "说一句" }] });
+  assert.ok(has(emptyFront, "必须有一个句子"));
+});
+
+test("P35 规则2：正面或提示层出现背面的英文参考说法 → 不通过", () => {
+  const leakFront = backTranslateCard({ front: [{ t: "text", text: `${SENTENCE}（中文）` }] });
+  assert.ok(has(leakFront, "不能出现背面的英文参考说法"));
+  const leakHint = situationCard({ hints: [{ t: "text", text: "his excitement was EPHEMERAL" }] });
+  assert.ok(has(leakHint, "不能出现背面的英文参考说法"));
+});
+
+test("P35 规则3：回译的背面必须是原句，且不超过 35 个词", () => {
+  const notOriginal = backTranslateCard({ back: { answer: [{ t: "sentence", source: "paraphrase", text: "Joy is ephemeral." }] } });
+  assert.ok(has(notOriginal, "回译卡的背面必须是原句"));
+  const long = Array.from({ length: BACK_TRANSLATE_MAX_WORDS + 1 }, (_, i) => (i === 3 ? "ephemeral" : "word")).join(" ") + ".";
+  const tooLong = backTranslateCard({ back: { answer: [{ t: "sentence", source: "original", text: long }] } });
+  assert.ok(has(tooLong, "超过 35 个词", { originalSentence: long }));
+  const exact = Array.from({ length: BACK_TRANSLATE_MAX_WORDS }, () => "ephemeral").join(" ");
+  const ok35 = backTranslateCard({ back: { answer: [{ t: "sentence", source: "original", text: exact }] } });
+  assert.ok(!has(ok35, "超过 35 个词", { originalSentence: exact }));
+});
+
+test("P35 规则4：情景说一句 / 搭配与用法的参考说法 2～3 句", () => {
+  const one = situationCard({ back: { answer: [{ t: "sentence", source: "paraphrase", text: "It was ephemeral." }] } });
+  assert.ok(has(one, "2～3 句"));
+  const four = situationCard({
+    back: { answer: Array.from({ length: 4 }, (_, i) => ({ t: "sentence" as const, source: "paraphrase" as const, text: `Fame ${i} is ephemeral.` })) },
+  });
+  assert.ok(has(four, "2～3 句"));
+  const usageOne = usageCard({ back: { answer: [{ t: "sentence", source: "paraphrase", text: "Ephemeral fame fades." }] } });
+  assert.ok(has(usageOne, "2～3 句"));
+});
+
+test("P35 规则5：情景说一句 / 换个说法的每句参考说法都要用上目标词（认词形变化和短语）", () => {
+  const missing = situationCard({
+    back: {
+      answer: [
+        { t: "sentence", source: "paraphrase", text: "His excitement was ephemeral." },
+        { t: "sentence", source: "paraphrase", text: "It did not last." },
+      ],
+    },
+  });
+  assert.ok(has(missing, "都要用上目标词"));
+  assert.equal(usesTarget("We fell behind schedule.", "fall behind"), true);
+  assert.equal(usesTarget("They are falling behind on rent.", "fall behind on sth"), true);
+  assert.equal(usesTarget("We stayed behind.", "fall behind"), false);
+  assert.equal(usesTarget("We fell over.", "fall behind"), false);
+  assert.equal(usesTarget("Ephemerally so.", "ephemeral"), true);
+  assert.equal(usesTarget("anything", ""), false);
+  assert.equal(usesTarget("anything", "sth"), false);
+});
+
+test("P35 规则6：换个说法的正面不能已经用上目标词，也不能和答案相同", () => {
+  const already = rephraseCard({ front: [{ t: "sentence", source: "paraphrase", text: "The joy was ephemeral indeed." }] });
+  assert.ok(has(already, "不能已经用上目标词"));
+  const noEnglish = rephraseCard({ front: [{ t: "text", text: "中文" }] });
+  assert.ok(has(noEnglish, "正面要有一句英文"));
+  const same = rephraseCard({
+    front: [{ t: "sentence", source: "paraphrase", text: "Short joy." }],
+    back: { answer: [{ t: "sentence", source: "paraphrase", text: "short JOY" }] },
+  });
+  assert.ok(has(same, "不能和正面的句子一样", { quote: "short" }));
+});
+
+test("P35：配音时音频标签计入字数上限", () => {
+  const V = { model: "qwen3-tts-flash", voice: "Cherry" };
+  const noAudio = reasonsOf(situationCard(), { charLimit: 330 });
+  const withAudio = reasonsOf(situationCard(), { charLimit: 330, audio: V });
+  assert.deepEqual(noAudio, []);
+  assert.ok(withAudio.some((r) => r.includes("卡片太长")));
+});

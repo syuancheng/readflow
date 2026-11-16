@@ -2,6 +2,7 @@
 @import "../styles/tokens.css";
 /* P34：反馈行与老师笔记更新说明（单独成文件，便于按设计规范检查） */
 @import "../styles/p34-feedback.css";
+@import "../styles/p35-cards.css";
 
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）

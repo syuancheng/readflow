@@ -7,13 +7,31 @@
 export type CardKind =
   | "context_meaning" | "word_completion" | "paraphrase_fill" | "sentence_understanding"
   | "true_false_ng" | "reference" | "collocation" | "listen_fill" | "listen_choose"
-  | "layered_cloze" | "paragraph_cloze" | "custom";
+  | "layered_cloze" | "paragraph_cloze" | "custom"
+  // P35 使用类：用句子学词、练开口（背面给参考说法，自己对照）
+  | "back_translate" | "situation_say" | "rephrase" | "usage";
 
 const KINDS: readonly CardKind[] = [
   "context_meaning", "word_completion", "paraphrase_fill", "sentence_understanding",
   "true_false_ng", "reference", "collocation", "listen_fill", "listen_choose",
   "layered_cloze", "paragraph_cloze", "custom",
+  "back_translate", "situation_say", "rephrase", "usage",
 ];
+
+/** P35 使用类题型（回译、情景说一句、换个说法、搭配与用法）；其余都是认识类 */
+export const PRODUCTIVE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>([
+  "back_translate", "situation_say", "rephrase", "usage",
+]);
+
+export function isProductive(kind: string): boolean {
+  return PRODUCTIVE_KINDS.has(kind as CardKind);
+}
+
+/**
+ * 一组最多保留几张（P35 spec §2.2）。张数由 AI 决定，这只是挡住异常输出的保险，
+ * 不是产品规则，提示词里不提这个数。
+ */
+export const CARDS_SAFETY_MAX = 8;
 
 export type SentenceMark = {
   start: number;
@@ -55,7 +73,9 @@ export type CardSpec = {
 export type CardGenResult = { cards: CardSpec[] };
 
 /** 解析结果：ok=false 时 reason 是给人看的中文原因 */
-export type ParseResult = { ok: true; cards: CardSpec[] } | { ok: false; reason: string };
+export type ParseResult =
+  | { ok: true; cards: CardSpec[]; /** 超过保险上限被丢掉的张数 */ dropped?: number }
+  | { ok: false; reason: string };
 
 // ---------- 白名单解析：未知字段丢弃，类型不对就判失败 ----------
 
@@ -226,7 +246,8 @@ export function parseJsonLoose(raw: string): unknown {
 }
 
 /**
- * 解析模型的出题输出。要求顶层是 `{"cards": [...]}`，1~3 张（PRD Q6）。
+ * 解析模型的出题输出。要求顶层是 `{"cards": [...]}`，至少 1 张；张数由 AI 决定（P35 PRD F2），
+ * 超过保险上限 CARDS_SAFETY_MAX 时只保留前面的。
  * 未知字段丢弃；任何必要字段类型不对 → 整体失败（按失败重出处理）。
  */
 export function parseCardGen(raw: string): ParseResult {
@@ -238,12 +259,13 @@ export function parseCardGen(raw: string): ParseResult {
   if (!Array.isArray(cardsRaw) || cardsRaw.length === 0) {
     return { ok: false, reason: "模型没有返回任何卡片" };
   }
-  if (cardsRaw.length > 3) return { ok: false, reason: "一个词最多做 3 张卡" };
+  const kept = cardsRaw.slice(0, CARDS_SAFETY_MAX);
   const cards: CardSpec[] = [];
-  for (const item of cardsRaw) {
+  for (const item of kept) {
     const c = parseCard(item);
     if (!c) return { ok: false, reason: "卡片的字段类型不符合要求" };
     cards.push(c);
   }
-  return { ok: true, cards };
+  const dropped = cardsRaw.length - kept.length;
+  return dropped > 0 ? { ok: true, cards, dropped } : { ok: true, cards };
 }
