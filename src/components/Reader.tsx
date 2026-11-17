@@ -2056,6 +2056,7 @@ function PickCard({
           {!busy && (
             <MakeCardButton
               contextId={pick.contextId}
+              word={quote}
               answerId={[...turns].reverse().find((t) => t.answerId)?.answerId}
               suggestion={
                 splitCardSuggestion(

@@ -4,6 +4,7 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import BottomNav from "@/components/BottomNav";
 import SiteHeader from "@/components/SiteHeader";
+import CardToasts from "@/components/CardToasts";
 
 /**
  * 字体（设计规范 v1，docs/design-system.md）：全站只用 DM Sans 一套西文字族，
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SiteHeader />
         <main className="flex-1">{children}</main>
         <BottomNav />
+        <CardToasts />
       </body>
     </html>
   );

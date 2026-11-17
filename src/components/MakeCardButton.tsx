@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { bgFetch } from "@/lib/bg-fetch";
+import { trackCardJob } from "@/lib/card-toast-store";
 
 /** /api/cards/state 的返回（PRD F2 的五种状态） */
 type CardState = {
@@ -25,9 +26,12 @@ export default function MakeCardButton({
   contextId,
   answerId,
   suggestion,
+  word,
 }: {
   contextId?: string;
   answerId?: string;
+  /** 通知里显示的词（P43） */
+  word?: string;
   /** 讲解末尾「制卡建议：」的理由；没有则 null */
   suggestion: string | null;
 }) {
@@ -70,6 +74,8 @@ export default function MakeCardButton({
     }
     setProgressStart((cur) => cur ?? Date.now());
     setTick(Date.now());
+    // P43：做卡在后台跑，用户可能切走。登记到页面级跟踪器，做完会在右上角弹通知；重复登记无副作用
+    if (contextId) trackCardJob({ contextId, word: word ?? "", setId: st?.setId ?? null });
     const ticker = setInterval(() => setTick(Date.now()), 200);
     const timer = setInterval(() => {
       polls.current += 1;
@@ -104,6 +110,7 @@ export default function MakeCardButton({
         return;
       }
       polls.current = 0;
+      if (contextId) trackCardJob({ contextId, word: word ?? "", setId: (data as { setId?: string } | null)?.setId ?? null });
       await refresh();
     } catch {
       setError("网络不通，稍后再试");

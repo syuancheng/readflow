@@ -1,0 +1,96 @@
+/*
+ * P43：做卡完成通知（右上角）。只用设计令牌（--rf-*），间距走 4px 阶梯。
+ *
+ * - 亲密性：图标、标题 + 词、按钮在同一行内成组（间距 12px）；多条通知之间 8px。
+ * - 对齐：整体贴右上，通知内部文字左对齐，按钮和关闭叉靠右。
+ * - 重复：圆角 / 边框 / 阴影沿用卡片与 Toast 令牌；「查看」用全站同一个 .duo-btn-sm 底盘。
+ * - 对比：标题（主文字色、粗）和词（次要灰、常规）拉开；成功用绿色点缀、失败用红色点缀，只用在图标上。
+ */
+.rf-toasts {
+  position: fixed;
+  top: calc(var(--rf-header-h) + var(--rf-space-4));
+  right: var(--rf-space-4);
+  z-index: var(--rf-z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--rf-space-2);
+  width: min(360px, calc(100vw - var(--rf-space-8)));
+  pointer-events: none; /* 容器不挡正文，只有通知本身可点 */
+}
+
+.rf-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-3);
+  padding: var(--rf-space-3) var(--rf-space-3) var(--rf-space-3) var(--rf-space-4);
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-lg);
+  background: var(--rf-bg-surface);
+  box-shadow: var(--rf-shadow-md);
+  pointer-events: auto;
+  animation: rf-toast-in var(--rf-duration-base) var(--rf-ease);
+}
+
+.rf-toast-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rf-space-6);
+  height: var(--rf-space-6);
+  border-radius: var(--rf-radius-full);
+  font-size: var(--rf-text-sm);
+  font-weight: 800;
+}
+.rf-toast-ready .rf-toast-icon {
+  background: var(--rf-accent-soft);
+  color: var(--rf-accent-text);
+}
+.rf-toast-failed .rf-toast-icon {
+  background: var(--rf-danger-soft);
+  color: var(--rf-danger-text);
+}
+
+.rf-toast-body {
+  flex: 1;
+  min-width: 0; /* 让长词 / 长原因能换行，不把按钮挤出去 */
+}
+.rf-toast-title {
+  margin: 0;
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  font-weight: 700;
+  color: var(--rf-text-primary);
+}
+.rf-toast-sub {
+  margin: 0;
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.rf-toast-close {
+  flex: none;
+  width: var(--rf-space-8);
+  height: var(--rf-space-8);
+  border: 0;
+  border-radius: var(--rf-radius-full);
+  background: transparent;
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-md);
+  line-height: 1;
+  cursor: pointer;
+}
+.rf-toast-close:hover {
+  background: var(--rf-bg-hover);
+  color: var(--rf-text-primary);
+}
+
+@keyframes rf-toast-in {
+  from { opacity: 0; transform: translateY(calc(-1 * var(--rf-space-2))); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rf-toast { animation: none; }
+}
