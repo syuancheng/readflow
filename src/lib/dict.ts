@@ -1,8 +1,40 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { LruCache, caseCandidates } from "./dict-cache";
 
 let dictDb: Database.Database | null = null;
+/** 库里有没有「大小写不敏感索引」：有 → 直接 COLLATE NOCASE 查（和以前一致）；没有 → 精确匹配几种写法，不全表扫 */
+let nocaseReady = false;
+const stmts = new Map<string, Database.Statement>();
+
+function stmt(db: Database.Database, sql: string): Database.Statement {
+  let s = stmts.get(sql);
+  if (!s) {
+    s = db.prepare(sql);
+    stmts.set(sql, s);
+  }
+  return s;
+}
+
+/** 按词查一行。cols 是要取的列（调用方写死的常量，不来自用户输入） */
+function fetchWord<T>(cols: string, word: string): T | undefined {
+  const db = getDictDb();
+  if (nocaseReady) {
+    return stmt(db, `SELECT ${cols} FROM ecdict WHERE word = ? COLLATE NOCASE`).get(word) as T | undefined;
+  }
+  const exact = stmt(db, `SELECT ${cols} FROM ecdict WHERE word = ?`);
+  for (const c of caseCandidates(word)) {
+    const row = exact.get(c) as T | undefined;
+    if (row) return row;
+  }
+  return undefined;
+}
+
+// 词典只读：同一个词在一次点词里会被 /api/dict、收词、记录查词事件各查一遍，记住结果
+const lemmaCache = new LruCache<string>(2000);
+const frqCache = new LruCache<number | null>(4000);
+const lookupCache = new LruCache<LookupResult>(1000);
 
 function getDictDb(): Database.Database {
   if (dictDb) return dictDb;
@@ -12,7 +44,7 @@ function getDictDb(): Database.Database {
     throw new Error(`ECDICT database not found at ${dbPath}. Run: node scripts/import-ecdict.mjs`);
   }
 
-  ensureNocaseIndex(dbPath);
+  nocaseReady = ensureNocaseIndex(dbPath);
   dictDb = new Database(dbPath, { readonly: true, fileMustExist: true });
   dictDb.pragma("query_only = ON");
   return dictDb;
@@ -26,23 +58,34 @@ function getDictDb(): Database.Database {
  * 老库（以及服务器上已经导入好的库）没有这个索引：第一次打开词典时补建一次，
  * 77 万行约 0.4 秒、库文件多十几 MB。建不了（只读盘等）就照旧慢查，不影响功能。
  */
-function ensureNocaseIndex(dbPath: string): void {
+function ensureNocaseIndex(dbPath: string): boolean {
   try {
     const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
     const has = probe
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_ecdict_word_nocase'")
       .get();
     probe.close();
-    if (has) return;
+    if (has) return true;
+    const t0 = Date.now();
     const rw = new Database(dbPath, { fileMustExist: true });
     try {
       rw.exec("CREATE INDEX IF NOT EXISTS idx_ecdict_word_nocase ON ecdict(word COLLATE NOCASE)");
     } finally {
       rw.close();
     }
+    console.log(`[dict] 已补建大小写不敏感索引，用时 ${Date.now() - t0}ms`);
+    return true;
   } catch (err) {
-    console.warn("[dict] 补建大小写不敏感索引失败，查词会变慢：", (err as Error).message);
+    // 建不了（只读盘 / 权限不对）：不影响功能，查词改走「精确匹配几种写法」，仍然走索引、不全表扫
+    console.warn("[dict] 补建大小写不敏感索引失败，改用精确匹配查词：", (err as Error).message);
+    return false;
   }
+}
+
+/** 服务启动时先把词典打开（必要时补建索引），别把这几秒花在第一个用户点词的请求里 */
+export function warmDict(): { nocaseIndex: boolean } {
+  getDictDb();
+  return { nocaseIndex: nocaseReady };
 }
 
 /**
@@ -77,11 +120,12 @@ function lemmaFromRow(row: LemmaRow | undefined, fallback: string): string {
 }
 
 export function lemma(word: string): string {
-  const db = getDictDb();
-  const row = db
-    .prepare("SELECT exchange, translation FROM ecdict WHERE word = ? COLLATE NOCASE")
-    .get(word) as LemmaRow | undefined;
-  return lemmaFromRow(row, word);
+  const hit = lemmaCache.get(word);
+  if (hit !== undefined) return hit;
+  const row = fetchWord<LemmaRow>("exchange, translation", word);
+  const out = lemmaFromRow(row, word);
+  lemmaCache.set(word, out);
+  return out;
 }
 
 /**
@@ -95,18 +139,21 @@ export function lemma(word: string): string {
  * 缩写或真正的生僻词 —— 调用方（cefr.ts）把它按「最生僻」处理并降低置信度。
  */
 export function frequencyRank(word: string): number | null {
-  const db = getDictDb();
-  const row = db
-    .prepare("SELECT frq, exchange, translation FROM ecdict WHERE word = ? COLLATE NOCASE")
-    .get(word) as (LemmaRow & { frq: number | null }) | undefined;
+  const cached = frqCache.get(word);
+  if (cached !== undefined) return cached;
+  const out = frequencyRankUncached(word);
+  frqCache.set(word, out);
+  return out;
+}
+
+function frequencyRankUncached(word: string): number | null {
+  const row = fetchWord<LemmaRow & { frq: number | null }>("frq, exchange, translation", word);
 
   if (row?.frq && row.frq > 0) return row.frq;
 
   const base = lemmaFromRow(row, word).toLowerCase();
   if (base !== word.toLowerCase()) {
-    const baseRow = db
-      .prepare("SELECT frq FROM ecdict WHERE word = ? COLLATE NOCASE")
-      .get(base) as { frq: number | null } | undefined;
+    const baseRow = fetchWord<{ frq: number | null }>("frq", base);
     if (baseRow?.frq && baseRow.frq > 0) return baseRow.frq;
   }
 
@@ -147,9 +194,7 @@ export function distractors(opts: {
 
   // 直接查不到词性（如 "下雨（rain的过去式）"）就用原形的释义推
   if (!posTag && lemma && lemma.toLowerCase() !== word.toLowerCase()) {
-    const row = db
-      .prepare("SELECT translation FROM ecdict WHERE word = ? COLLATE NOCASE")
-      .get(lemma) as { translation: string | null } | undefined;
+    const row = fetchWord<{ translation: string | null }>("translation", lemma);
     posTag = derivePos(row?.translation ?? null);
   }
 
@@ -215,8 +260,7 @@ export function derivePos(translation: string | null | undefined): string | null
   return m ? m[1].toLowerCase() : null;
 }
 
-const SELECT_ENTRY =
-  "SELECT word, phonetic, definition, translation, pos, collins, oxford, tag, frq FROM ecdict WHERE word = ? COLLATE NOCASE";
+const ENTRY_COLS = "word, phonetic, definition, translation, pos, collins, oxford, tag, frq";
 
 function cjkChars(s: string | null | undefined): Set<string> {
   return new Set(s?.match(/[\u4e00-\u9fff]/g) ?? []);
@@ -254,16 +298,26 @@ function isPointerGloss(translation: string | null | undefined): boolean {
  *      - 其余情况（glistened→glisten、studies→study）→ 用原形的。
  *   3. lemmaForm 一律小写，它是词库去重键；句首大写的 "The" 不该和 "the" 分成两个词。
  */
-export function lookup(word: string): { entry: DictEntry | null; originalForm: string; lemmaForm: string } {
-  const db = getDictDb();
+type LookupResult = { entry: DictEntry | null; originalForm: string; lemmaForm: string };
+
+export function lookup(word: string): LookupResult {
+  const hit = lookupCache.get(word);
+  // 返回副本：调用方改了结果也不会污染缓存
+  if (hit) return { ...hit, entry: hit.entry ? { ...hit.entry } : null };
+  const out = lookupUncached(word);
+  lookupCache.set(word, out);
+  return { ...out, entry: out.entry ? { ...out.entry } : null };
+}
+
+function lookupUncached(word: string): LookupResult {
   const originalForm = word;
-  const direct = db.prepare(SELECT_ENTRY).get(word) as DictEntry | undefined;
+  const direct = fetchWord<DictEntry>(ENTRY_COLS, word);
 
   const lemmaForm = lemma(word).toLowerCase();
   const isVariant = lemmaForm !== word.toLowerCase();
 
   if (isVariant) {
-    const lemmaEntry = db.prepare(SELECT_ENTRY).get(lemmaForm) as DictEntry | undefined;
+    const lemmaEntry = fetchWord<DictEntry>(ENTRY_COLS, lemmaForm);
 
     if (lemmaEntry?.translation) {
       const own = direct?.translation ?? "";

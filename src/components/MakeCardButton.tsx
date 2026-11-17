@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { bgFetch } from "@/lib/bg-fetch";
 
 /** /api/cards/state 的返回（PRD F2 的五种状态） */
 type CardState = {
@@ -42,7 +43,7 @@ export default function MakeCardButton({
   const refresh = useCallback(async (): Promise<CardState | null> => {
     if (!contextId) return null;
     try {
-      const res = await fetch(`/api/cards/state?contextId=${encodeURIComponent(contextId)}`);
+      const res = await bgFetch(`/api/cards/state?contextId=${encodeURIComponent(contextId)}`);
       if (!res.ok) return null;
       const data = (await res.json()) as CardState;
       setSt(data);

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { currentBlockIdx, scrollProgress, type BlockPosition } from "@/lib/read-progress";
+import { bgFetch } from "@/lib/bg-fetch";
+import { createCoalescer } from "@/lib/request-gate";
 
 /**
  * 阅读进度的计算与上报（P18 逻辑，P19 从 ReadProgressPill 抽成 hook）。
@@ -75,17 +77,46 @@ export function useReadProgress({
       }
     };
 
-    const report = (keepalive: boolean) => {
-      if (!dirtyRef.current) return;
+    const url = `/api/texts/${textId}`;
+    const buildBody = () => {
       const payload: { readRatio: number; readIdx?: number } = { readRatio: ratioRef.current };
       if (idxRef.current >= 0) payload.readIdx = idxRef.current;
-      const url = `/api/texts/${textId}`;
-      const body = JSON.stringify(payload);
+      return JSON.stringify(payload);
+    };
+
+    // P41：平时的上报同一时刻只在途一个（服务器慢时，滚动每 2s 一发会攒出 4、5 条
+    // 同时挂着的 PATCH，把浏览器的 6 条连接占满，查词典排到后面）。跑的过程中又滚动了，
+    // 完成后会补发一次最新位置；补发时才取当时的进度，不会发旧值。
+    const sendProgress = createCoalescer(async () => {
+      if (!dirtyRef.current) return;
+      const body = buildBody();
       dirtyRef.current = false;
+      try {
+        // bgFetch 在闸门内读完响应体（Next 返回 keep-alive + chunked，不读完连接不归还池子，P40 实测）
+        const res = await bgFetch(url, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        if (!res.ok) dirtyRef.current = true;
+      } catch {
+        dirtyRef.current = true; // 下个周期重试
+      }
+    });
+
+    const report = (keepalive: boolean) => {
+      if (!dirtyRef.current) return;
+
+      if (!keepalive) {
+        void sendProgress();
+        return;
+      }
 
       // 页面销毁 / 切后台时 fetch keepalive 实测会丢（滚完立刻关标签页，
       // 进度停在旧值）。sendBeacon 专为卸载场景设计，浏览器保证投递。
-      if (keepalive && typeof navigator.sendBeacon === "function") {
+      const body = buildBody();
+      dirtyRef.current = false;
+      if (typeof navigator.sendBeacon === "function") {
         try {
           if (navigator.sendBeacon(url, new Blob([body], { type: "application/json" }))) return;
         } catch {
@@ -96,14 +127,11 @@ export function useReadProgress({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body,
-        keepalive,
+        keepalive: true,
       })
-        // 必须消费响应体：Next 返回的是 keep-alive + chunked，body 不读完
-        // 这条连接就不会归还 Chrome 的每域名连接池。滚动时连续上报会攒够
-        // 6 条未释放连接，之后查词等所有请求都卡在 Stalled（实测可复现）。
         .then((res) => res.arrayBuffer())
         .catch(() => {
-          dirtyRef.current = true; // 下个周期重试
+          dirtyRef.current = true;
         });
     };
 
