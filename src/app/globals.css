@@ -1259,16 +1259,19 @@ body {
   background: var(--rf-border);
 }
 
+/* 次级操作：与「问 AI」实体按钮形成主次对比——字号 12/14、字重 400/700、
+   浅底无描边 vs 白底粗边。四个选项彼此共享同一形态（R-01）。 */
 .rf-ask-chip {
   display: inline-flex;
   align-items: center;
-  padding: var(--rf-space-2) var(--rf-space-3);
-  border-radius: var(--rf-radius-md);
-  border: var(--rf-border-width) solid var(--rf-border);
-  background: var(--rf-bg-surface);
-  font-size: var(--rf-text-sm);
-  font-weight: 600; /* = --rf-weight-medium；项目 check-tokens 只认字面字重 */
-  color: var(--rf-text-primary);
+  padding: var(--rf-space-1) var(--rf-space-2);
+  border-radius: var(--rf-radius-sm);
+  border: var(--rf-border-width) solid transparent; /* 占住 1px，hover 不跳动 */
+  background: var(--rf-bg-subtle);
+  font-size: var(--rf-text-xs);
+  font-weight: 400; /* = --rf-weight-regular；项目 check-tokens 只认字面字重 */
+  line-height: var(--rf-leading-xs); /* 重置正文大行距，避免标签虚胖 */
+  color: var(--rf-text-secondary);
   text-align: left;
   cursor: pointer;
   transition: border-color var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
