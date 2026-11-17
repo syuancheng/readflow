@@ -65,3 +65,77 @@ test("新锚点与 resolveAnchor 往返：offset 失效后靠 prefix+quote+suffi
   assert.ok(hit, "必须能重新定位");
   assert.equal(shifted.slice(hit.start, hit.end), "heuristics");
 });
+
+// ---------- P43：词在括号里面，上下文锚点只取括号里面那一段 ----------
+import { parenthetical } from "../../src/lib/tokenize";
+
+const PAREN_PARA =
+  "I've talked about these many times, and synthesized them into my own Human 3.0 model, but here's the 80/20 of the 9 stages of ego development as a refresher (because repetition helps reveal things you didn't notice before, and there are new people reading these letters):";
+
+test("P43 词在括号里面：前后文只取括号里面那一段，不含括号外的主句（用户截图里的句子）", () => {
+  const at = PAREN_PARA.indexOf("reveal");
+  const a = buildAnchor(PAREN_PARA, at, at + "reveal".length);
+  assert.equal(a.quote, "reveal");
+  assert.equal(a.prefix, "because repetition helps ");
+  assert.equal(a.suffix, " things you didn't notice before, and there are new people reading these letters");
+  // 括号外的内容一个字都不能混进来
+  assert.ok(!a.prefix.includes("refresher") && !a.prefix.includes("("));
+  assert.ok(!a.suffix.includes(")") && !a.suffix.includes(":"));
+});
+
+test("P43 括号收窄之后，前文+选中词+后文仍是原文里连续的一段，resolveAnchor 照常能找回", () => {
+  const at = PAREN_PARA.indexOf("reveal");
+  const a = buildAnchor(PAREN_PARA, at, at + 6);
+  assert.ok(PAREN_PARA.includes(`${a.prefix}${a.quote}${a.suffix}`));
+  // offset 对不上（文本前面被插了内容）时，靠 quote + 前后文搜回来
+  const shifted = "NEW PARAGRAPH START. " + PAREN_PARA;
+  const found = resolveAnchor(shifted, a);
+  assert.ok(found);
+  assert.equal(shifted.slice(found.start, found.end), "reveal");
+});
+
+test("P43 词在括号外面：和以前一样，取整句", () => {
+  const at = PAREN_PARA.indexOf("refresher");
+  const a = buildAnchor(PAREN_PARA, at, at + "refresher".length);
+  assert.ok(a.prefix.startsWith("I've talked about"));
+  assert.ok(a.suffix.includes("(because repetition helps reveal"));
+});
+
+test("P43 选区跨过括号 / 包含括号本身：不收窄", () => {
+  const open = PAREN_PARA.indexOf("(because");
+  const crossing = buildAnchor(PAREN_PARA, open - 5, open + 10); // "esher (becau"
+  assert.ok(crossing.prefix.startsWith("I've talked about"));
+  const whole = PAREN_PARA.slice(open, PAREN_PARA.indexOf("):") + 1);
+  const all = buildAnchor(PAREN_PARA, open, open + whole.length);
+  assert.ok(all.prefix.startsWith("I've talked about"));
+});
+
+test("P43 parenthetical：嵌套取最里面够用的一层；不成对的括号和只有 1 个词的括号都不收窄", () => {
+  const t = "Start (outer one two (inner alpha beta) outer three) end.";
+  const at = t.indexOf("alpha");
+  assert.deepEqual(parenthetical(t, 0, t.length, at, at + 5), { start: t.indexOf("inner"), end: t.indexOf(") outer three") });
+  const at2 = t.indexOf("three");
+  assert.deepEqual(parenthetical(t, 0, t.length, at2, at2 + 5), { start: t.indexOf("outer one"), end: t.lastIndexOf(")") });
+  // 只有一个词：("(reveal)" / "(a)")
+  const one = "We then (reveal) it.";
+  assert.equal(parenthetical(one, 0, one.length, one.indexOf("reveal"), one.indexOf("reveal") + 6), null);
+  const marker = "Steps: (a) first thing here.";
+  assert.equal(parenthetical(marker, 0, marker.length, marker.indexOf("a)"), marker.indexOf("a)") + 1), null);
+  // 括号不成对：":)" 和 "1)" 这类
+  const smile = "That was fun :) and so was this one.";
+  assert.equal(parenthetical(smile, 0, smile.length, smile.indexOf("fun"), smile.indexOf("fun") + 3), null);
+  const unclosed = "He said (and then kept talking for a while.";
+  assert.equal(parenthetical(unclosed, 0, unclosed.length, unclosed.indexOf("kept"), unclosed.indexOf("kept") + 4), null);
+});
+
+test("P43 全角括号也算；括号里的词只有选中词自己时仍取整句", () => {
+  const t = "这是 background material（because it helps explain things）和后面的话。";
+  const at = t.indexOf("explain");
+  const a = buildAnchor(t, at, at + 7);
+  assert.equal(a.prefix, "because it helps ");
+  assert.equal(a.suffix, " things");
+  const single = "We then (reveal) it quickly.";
+  const b = buildAnchor(single, single.indexOf("reveal"), single.indexOf("reveal") + 6);
+  assert.equal(b.prefix, "We then (");
+  assert.equal(b.suffix, ") it quickly.");
+});

@@ -50,13 +50,50 @@ export function tokenize(text: string): Token[] {
  * 生成位置锚点。offset 只当快速路径，真正能扛住文本变化的是 quote + 前后文。
  * 见 W3C Web Annotation 的 TextQuoteSelector / TextPositionSelector 模型。
  *
- * prefix / suffix 截到**句子边界**（句号 / 问号 / 叹号 / 省略号结束一句）：
+ * prefix / suffix 截到**句子边界**（句号 / 问号 / 叹号 / 省略号结束一句）；
+ * 词在括号里面时，只截到括号里面那一段（见 parenthetical）：
  * 绝不从词中间剁（老版固定 ±40 字符窗口会把 thus 剁成 hus），
  * 语义与 AI 上下文（sentence.ts aiContextOf）一致。
  *
  * 仅在客户端点词/划选事件回调中调用，不参与 SSR —— 用 Intl.Segmenter
  * 切句没有 hydration 风险（同 sentence.ts 的约定）。
  */
+/**
+ * 选区完全落在一对括号里面时，返回括号**里面**的区间（不含括号本身）；否则返回 null。
+ *
+ * 为什么：括号里的话是插入语 / 补充说明（"……as a refresher (because repetition helps reveal things…):"），
+ * 它的前后文就是括号里那一小段，不该把括号外的主句也算进「上下文锚点」。
+ *
+ * 规则：
+ *   - 只在 [from, to)（选区所在的句子范围）内配对；括号不成对的忽略（":)"、"1)" 这类）；
+ *   - 选区必须整个在括号里面（不含括号字符本身）；嵌套时取最里面、且够用的那一层；
+ *   - 括号里至少 2 个词才收窄：只有选中词自己（"(reveal)"）或 "(a)" 这种序号，收窄后上下文是空的，没有意义。
+ * 半角 () 和全角（）都算。
+ */
+export function parenthetical(
+  text: string,
+  from: number,
+  to: number,
+  selStart: number,
+  selEnd: number,
+): { start: number; end: number } | null {
+  const opens: number[] = [];
+  for (let i = from; i < to; i++) {
+    const ch = text[i];
+    if (ch === "(" || ch === "（") {
+      opens.push(i);
+    } else if ((ch === ")" || ch === "）") && opens.length > 0) {
+      const open = opens.pop() as number;
+      // 先闭合的先出栈，所以先遇到的满足条件的一对就是最里面的一层
+      if (open < selStart && selEnd <= i) {
+        const words = text.slice(open + 1, i).trim().split(/\s+/).filter(Boolean).length;
+        if (words >= 2) return { start: open + 1, end: i };
+      }
+    }
+  }
+  return null;
+}
+
 export function buildAnchor(paragraph: string, start: number, end: number) {
   const s = Math.max(0, Math.min(start, paragraph.length));
   const e = Math.max(s, Math.min(end, paragraph.length));
@@ -71,8 +108,15 @@ export function buildAnchor(paragraph: string, start: number, end: number) {
       s1 = i;
     }
   });
-  const sentStart = s0 >= 0 ? sentences[s0].start : 0;
-  const sentEnd = s1 >= 0 ? sentences[s1].end : paragraph.length;
+  let sentStart = s0 >= 0 ? sentences[s0].start : 0;
+  let sentEnd = s1 >= 0 ? sentences[s1].end : paragraph.length;
+
+  // 词在括号里面：前后文只取括号里面那一段，不带括号外的主句
+  const inner = parenthetical(paragraph, sentStart, sentEnd, s, e);
+  if (inner) {
+    sentStart = inner.start;
+    sentEnd = inner.end;
+  }
 
   // 只 trim 外侧（prefix 的头 / suffix 的尾）：
   // 内侧贴着 quote 的空格必须保留，否则 prefix+quote+suffix 不再是原文的连续子串，
