@@ -110,6 +110,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   db.update(texts).set(updates).where(eq(texts.id, id)).run();
   const [next] = await db.select().from(texts).where(eq(texts.id, id)).limit(1);
+  // P41：只上报阅读进度时别把整篇文章原文（实测 43KB）当响应送回去——滚动时每 2 秒一次，
+  // 前端根本不看这个响应。改标题 / 分类才返回完整的一行，和以前一致。
+  if (!("title" in updates) && !("category" in updates)) {
+    return NextResponse.json({
+      text: { id: next.id, readIdx: next.readIdx, readRatio: next.readRatio, completedAt: next.completedAt },
+    });
+  }
   return NextResponse.json({ text: next });
 }
 
