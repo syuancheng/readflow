@@ -9,6 +9,8 @@ import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
+import { bgFetch } from "@/lib/bg-fetch";
+import { createCoalescer } from "@/lib/request-gate";
 import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
 import { inlineGloss } from "@/lib/gloss";
 import { attachAnswers, parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
@@ -667,7 +669,7 @@ export default function Reader({
   useEffect(() => {
     let alive = true;
     const refresh = () => {
-      void fetch("/api/learner")
+      void bgFetch("/api/learner")
         .then((r) => r.json())
         .then((d: { showFeedback?: boolean; personalized?: boolean }) => {
           if (alive) setFeedbackEnabled(d.showFeedback !== false && d.personalized !== false);
@@ -821,7 +823,7 @@ export default function Reader({
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`/api/summarize?textId=${encodeURIComponent(textId)}`);
+        const res = await bgFetch(`/api/summarize?textId=${encodeURIComponent(textId)}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!alive) return;
@@ -914,18 +916,25 @@ export default function Reader({
   // 连续点两个词会并发发两次请求；旧的响应晚到会覆盖掉含新批注的列表，
   // 于是「AI 释义找不到该写回哪条」变成偶发问题。用序号丢弃过期响应。
   const annotSeq = useRef(0);
-  const loadAnnotations = useCallback(async () => {
-    const seq = ++annotSeq.current;
-    try {
-      const res = await fetch(`/api/annotations?textId=${encodeURIComponent(textId)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (seq !== annotSeq.current) return;
-      setAnnotations(data.annotations ?? []);
-    } catch {
-      /* 静默失败：标记与释义缓存是增强功能，不影响正文阅读 */
-    }
-  }, [textId]);
+  // P41：批注刷新同一时刻只在途一个。每次点词都会刷新一次，AI 答完又刷新一次；
+  // 服务器慢时，连点几个词会攒出一串并发的整篇批注请求（每个都带着全部 AI 讲解全文）。
+  // 合并后：在跑的这个完成，再补一次最新的；await 的调用方拿到的是覆盖了自己那次的结果。
+  const loadAnnotations = useMemo(
+    () =>
+      createCoalescer(async () => {
+        const seq = ++annotSeq.current;
+        try {
+          const res = await bgFetch(`/api/annotations?textId=${encodeURIComponent(textId)}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          if (seq !== annotSeq.current) return;
+          setAnnotations(data.annotations ?? []);
+        } catch {
+          /* 静默失败：标记与释义缓存是增强功能，不影响正文阅读 */
+        }
+      }),
+    [textId],
+  );
 
   useEffect(() => {
     void loadAnnotations();
@@ -1653,7 +1662,7 @@ function PickCard({
       let stale = false;
       const contextId = pick.contextId;
       if (contextId && feedbackEnabled) {
-        fetch(`/api/explain/answers?contextId=${encodeURIComponent(contextId)}`)
+        bgFetch(`/api/explain/answers?contextId=${encodeURIComponent(contextId)}`)
           .then((r) => (r.ok ? r.json() : null))
           .then((data: { answers?: { answerId: string; text: string; feedback: string | null }[] } | null) => {
             if (stale || !data?.answers?.length) return;
