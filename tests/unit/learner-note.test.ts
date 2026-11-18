@@ -13,8 +13,8 @@ const NOW = Date.UTC(2026, 10, 13, 12, 0, 0);
 const DAY = 24 * 3600 * 1000;
 const stats = (over: Partial<BehaviorStats> = {}): BehaviorStats => ({ ...EMPTY_BEHAVIOR_STATS, ...over });
 
-test("阈值常量：笔记最多 300 字（PRD F3）；触发规则改为每晚整理（P34，见 learner-note-nightly）", () => {
-  assert.equal(NOTE_MAX_CHARS, 300);
+test("阈值常量：笔记最多 500 字（2026-11-18）；触发规则改为每晚整理（P34，见 learner-note-nightly）", () => {
+  assert.equal(NOTE_MAX_CHARS, 500);
 });
 
 test("validateNote：合法的纯中文笔记原样通过", () => {
@@ -27,8 +27,8 @@ test("validateNote：空内容被拒绝", () => {
   assert.deepEqual(validateNote("   \n  "), { ok: false, reason: "笔记为空" });
 });
 
-test("validateNote：超过 300 字时截到最后一个句号", () => {
-  const first = "学生读技术文档较多，偏好简短解释。".repeat(20); // 远长于 300
+test("validateNote：超过上限时截到最后一个句号", () => {
+  const first = "学生读技术文档较多，偏好简短解释。".repeat(40); // 远长于上限
   const tail = "补充说明没有句号结尾";
   const raw = `${first}${tail}`;
   assert.ok(raw.length > NOTE_MAX_CHARS);
@@ -40,26 +40,26 @@ test("validateNote：超过 300 字时截到最后一个句号", () => {
   }
 });
 
-test("validateNote：超过 300 字且句号落在 300 字之后时拒绝", () => {
-  const raw = `${"这是一段很长的中文观察文字".repeat(30)}。最后才出现句号。`;
+test("validateNote：超过上限且句号落在末尾之前时拒绝", () => {
+  const raw = `${"这是一段很长的中文观察文字".repeat(60)}。最后才出现句号。`;
   assert.ok(raw.length > NOTE_MAX_CHARS);
   const r = validateNote(raw);
   assert.equal(r.ok, false);
-  if (!r.ok) assert.match(r.reason, /超过 300 字/);
+  if (!r.ok) assert.match(r.reason, /超过 500 字/);
 });
 
-test("validateNote：超过 300 字且完全没有句号时拒绝", () => {
-  const r = validateNote("这是一段没有句号的长中文观察".repeat(30));
+test("validateNote：超过上限且完全没有句号时拒绝", () => {
+  const r = validateNote("这是一段没有句号的长中文观察".repeat(60));
   assert.equal(r.ok, false);
-  if (!r.ok) assert.match(r.reason, /超过 300 字/);
+  if (!r.ok) assert.match(r.reason, /超过 500 字/);
 });
 
-test("validateNote：恰好 300 字通过，301 字走截断/拒绝分支", () => {
+test("validateNote：恰好上限通过，再加一字走截断/拒绝分支", () => {
   const exactly = "中".repeat(NOTE_MAX_CHARS);
   assert.equal(validateNote(exactly).ok, true);
   const over = `${"中".repeat(NOTE_MAX_CHARS)}。`;
   const r = validateNote(over);
-  // 句号在末尾，截完仍是 301 字 → 必须拒绝
+  // 句号在末尾，截完仍超上限 → 必须拒绝
   assert.equal(r.ok, false);
 });
 
@@ -101,12 +101,12 @@ test("validateNote(user)：用户手改只查长度与 Markdown，不限制英�
   if (!md.ok) assert.match(md.reason, /Markdown/);
 });
 
-test("validateNote(user)：超过 300 字直接拒绝，不擅自截断用户输入", () => {
-  const raw = `${"中文观察。".repeat(70)}`; // 350 字
+test("validateNote(user)：超过上限直接拒绝，不擅自截断用户输入", () => {
+  const raw = `${"中文观察。".repeat(120)}`; // 350 字
   assert.ok(raw.length > NOTE_MAX_CHARS);
   const r = validateNote(raw, "user");
   assert.equal(r.ok, false);
-  if (!r.ok) assert.match(r.reason, /超过 300 字/);
+  if (!r.ok) assert.match(r.reason, /超过 500 字/);
 });
 
 test("buildNotePrompt：系统提示词写明不要列具体单词、以统计为准、改写不追加", () => {
@@ -116,7 +116,7 @@ test("buildNotePrompt：系统提示词写明不要列具体单词、以统计�
   assert.match(system, /改写（不是追加）/);
   assert.match(system, /不要评价学生的人格/);
   assert.match(system, /不分点/);
-  assert.match(system, /300 字/);
+  assert.match(system, /500 字/);
 });
 
 test("buildNotePrompt：统计数据进入 user 消息，具体英文词不进入", () => {

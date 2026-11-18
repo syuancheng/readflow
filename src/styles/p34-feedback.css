@@ -63,6 +63,19 @@
   animation: rf-check-pop 220ms var(--rf-ease);
 }
 
+/* 2026-11-18：原因标签复用按钮形态，只差行内缩进；选中态沿用同一套颜色/字重/✓ */
+.rf-feedback-reasons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.rf-feedback-reason {
+  padding: 0 var(--rf-space-2);
+  background: var(--rf-bg-subtle);
+  border-radius: var(--rf-radius-sm);
+}
+
 @keyframes rf-check-pop {
   0% { transform: scale(0.2); opacity: 0; }
   70% { transform: scale(1.25); opacity: 1; }

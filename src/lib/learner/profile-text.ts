@@ -14,12 +14,12 @@ import {
   targetExamText,
   type SurveyAnswers,
 } from "./survey";
-import type { BehaviorStats, LearnerLevel } from "./types";
+import type { BehaviorStats, Cefr, LearnerLevel } from "./types";
 import { MIN_LOOKUPS } from "./model";
 import { RECENT_FEEDBACK_FOR_PROFILE } from "./recent-feedback";
 
-/** P34：多了最多 3 行「最近的反馈」（约 100–150 字），上限从 600 放宽到 720 */
-export const LEARNER_BLOCK_MAX_CHARS = 720;
+/** P34：多了最多 3 行「最近的反馈」（约 100–150 字），上限从 600 放宽到 720；2026-11-18 再放宽到 850 */
+export const LEARNER_BLOCK_MAX_CHARS = 850;
 
 /**
  * 有没有「可依据的档案」：填过问卷，或最近查词够 30 次，或有老师笔记，
@@ -42,6 +42,8 @@ export function hasUsableProfile(input: {
 
 const HEAD = "学生档案（供你判断讲多深、讲什么；回答里不要提到这些信息）：";
 const P_LEVEL = "- 估计水平：";
+/** 2026-11-18：低置信时提示模型「仅供参考」，避免把 29 次查词的猜测当定论 */
+const P_LEVEL_LOW = "（低置信，仅供参考）";
 const P_IDENTITY = "- 身份：";
 const P_GOALS = "- 主要阅读：";
 const P_TARGET = "- 正在备考：";
@@ -93,6 +95,8 @@ export function buildLearnerBlock(input: {
   note: string | null;
   /** P34：formatRecentFeedback 的结果（最多 3 行，从新到旧） */
   recentFeedback?: string[];
+  /** 用户手填的水平覆盖：显示时标注「你设定的」，且不加低置信提示 */
+  levelOverride?: { cefr: Cefr | null; vocab: number | null } | null;
 }): string {
   const { level, survey, stats, note } = input;
   const recent = (input.recentFeedback ?? []).filter((l) => l.trim());
@@ -106,9 +110,15 @@ export function buildLearnerBlock(input: {
     const basis: string[] = [];
     if (stats && stats.lookups >= 30) basis.push(`最近 ${stats.lookups} 次提问`);
     if (hasSurvey) basis.push("问卷");
+    const override = input.levelOverride;
+    const overrideActive = Boolean(override && (override.cefr || override.vocab !== null));
+    const low = !overrideActive && (
+      (!stats || stats.lookups < 30) && !hasSurvey
+    );
+    const tag = overrideActive ? "（你设定的）" : low ? P_LEVEL_LOW : "";
     lines.push({
       key: "level",
-      text: `${P_LEVEL}${lv}${basis.length ? `（依据：${basis.join(" + ")}）` : ""}`,
+      text: `${P_LEVEL}${lv}${tag}${basis.length && !overrideActive ? `（依据：${basis.join(" + ")}）` : ""}`,
     });
   }
   if (survey?.identity) lines.push({ key: "identity", text: P_IDENTITY + (IDENTITY_LABEL.get(survey.identity) ?? "") });

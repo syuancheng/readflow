@@ -13,6 +13,7 @@ import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
 import { learnerBlockFor, linkExplainContext, logExplain, saveAnswer } from "@/lib/learner-store";
+import { buildRulesSystemPrompt } from "@/lib/learner/teaching-rules";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
 import { cardsEnabled } from "@/lib/cards/flags";
 import { explainCache } from "@/lib/cards/explain-cache";
@@ -107,12 +108,13 @@ export async function handleExplain(
 
   // P32 F4：画像只在这一处接入，网站与插件自动一致。开关关闭时 block 为空串、
   // personalized 为 false，提示词逐字回到旧规则。
-  let profile = { block: "", detailed: false, personalized: false };
+  let profile: ReturnType<typeof learnerBlockFor> = { block: "", detailed: false, personalized: false, rules: { can: [], cannot: [] } };
   try {
     profile = learnerBlockFor(user.id);
   } catch (err) {
     console.error("[learner] 读取档案失败，本次按旧规则讲解:", err);
   }
+  const rulesText = buildRulesSystemPrompt(profile.rules);
 
   // 事件 id 同时是「这段回答」的 id；记事件失败绝不能打断讲解
   let answerId = "";
@@ -158,6 +160,7 @@ export async function handleExplain(
     learnerBlock: profile.block || undefined,
     personalized: profile.personalized,
     detailed: profile.detailed,
+    teachingRules: rulesText || undefined,
     otherTextLookups,
     cardedBefore: cardedBefore === true,
     cardsEnabled: cardsOn,

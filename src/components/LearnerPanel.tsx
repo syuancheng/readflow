@@ -15,7 +15,11 @@ import type { SurveyAnswers } from "@/lib/learner/survey";
 import { STYLE_LABEL } from "@/lib/learner/survey";
 import { DIFFICULTY_LABEL } from "@/lib/learner/profile-text";
 import { NOTE_MAX_CHARS } from "@/lib/learner/note";
+import type { TeachingRules } from "@/lib/learner/teaching-rules";
+import type { FeedbackReason } from "@/lib/learner/feedback-reason";
 import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
+
+const CEFR_OPTIONS = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
 type LevelPayload = {
   cefr: string | null;
@@ -36,6 +40,10 @@ type LearnerPayload = {
   /** P34：nightly 每晚整理 / user 你修改过 / null 老数据 */
   noteUpdateKind: "nightly" | "user" | null;
   noteReason: NoteReason;
+  teachingRules: TeachingRules;
+  levelOverride: { cefr: string | null; vocab: number | null };
+  noteHistory: { id: string; note: string; kind: string; createdAt: number }[];
+  feedbackReasons: readonly FeedbackReason[];
 };
 
 /** PRD F6 的两种原因文案，逐字使用；N=0 是「条件已满足但还没生成」的边界 */
@@ -83,6 +91,15 @@ export default function LearnerPanel() {
   const [noteSaved, setNoteSaved] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
 
+  // 2026-11-18：教学规则 / 手填水平 / 笔记历史
+  const [rulesCan, setRulesCan] = useState("");
+  const [rulesCannot, setRulesCannot] = useState("");
+  const [overrideCefr, setOverrideCefr] = useState("");
+  const [overrideVocab, setOverrideVocab] = useState("");
+  const [rulesBusy, setRulesBusy] = useState(false);
+  const [rulesSaved, setRulesSaved] = useState(false);
+  const [rulesError, setRulesError] = useState("");
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/learner");
@@ -91,6 +108,10 @@ export default function LearnerPanel() {
       setPayload(d);
       setAnswers(d.survey ?? {});
       setShowFeedback(d.showFeedback !== false);
+      setRulesCan((d.teachingRules?.can ?? []).join("\n"));
+      setRulesCannot((d.teachingRules?.cannot ?? []).join("\n"));
+      setOverrideCefr(d.levelOverride?.cefr ?? "");
+      setOverrideVocab(d.levelOverride?.vocab != null ? String(d.levelOverride.vocab) : "");
     } catch {
       /* 读不到就保持原状，不影响设置里其它面板 */
     } finally {
@@ -141,6 +162,60 @@ export default function LearnerPanel() {
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "保存失败");
       const d = (await res.json()) as LearnerPayload; // PUT 返回的就是 GET 的完整结构
+      setPayload(d);
+      setEditing(false);
+      setNoteSaved(true);
+      window.dispatchEvent(new Event(LEARNER_CHANGED_EVENT));
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : "网络异常，请稍后重试");
+    } finally {
+      setNoteBusy(false);
+    }
+  }
+
+  async function saveRules() {
+    setRulesBusy(true);
+    setRulesSaved(false);
+    setRulesError("");
+    try {
+      const vocab = overrideVocab.trim() ? Number(overrideVocab) : null;
+      if (vocab !== null && (!Number.isFinite(vocab) || vocab < 500 || vocab > 30000)) {
+        throw new Error("词汇量请填 500 到 30000 之间的数字");
+      }
+      const res = await fetch("/api/learner", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teachingRules: {
+            can: rulesCan.split("\n").map((s) => s.trim()).filter(Boolean),
+            cannot: rulesCannot.split("\n").map((s) => s.trim()).filter(Boolean),
+          },
+          levelOverride: { cefr: overrideCefr || null, vocab },
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "保存失败");
+      const d = (await res.json()) as LearnerPayload;
+      setPayload(d);
+      setRulesSaved(true);
+      window.dispatchEvent(new Event(LEARNER_CHANGED_EVENT));
+    } catch (err) {
+      setRulesError(err instanceof Error ? err.message : "网络异常，请稍后重试");
+    } finally {
+      setRulesBusy(false);
+    }
+  }
+
+  async function restoreNoteVersion(id: string) {
+    setNoteBusy(true);
+    setNoteError("");
+    try {
+      const res = await fetch("/api/learner", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restoreNoteId: id }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "恢复失败");
+      const d = (await res.json()) as LearnerPayload;
       setPayload(d);
       setEditing(false);
       setNoteSaved(true);
@@ -250,6 +325,30 @@ export default function LearnerPanel() {
             <p className="st-help">依据：{level?.basisText ?? "还没有足够的信息"}</p>
 
             <div className="rf-learner-row">
+              <span className="text-xs">手填水平</span>
+              <select
+                className="rf-survey-select"
+                aria-label="手填水平"
+                value={overrideCefr}
+                onChange={(e) => { setOverrideCefr(e.target.value); setRulesSaved(false); }}
+              >
+                <option value="">让系统判断</option>
+                {CEFR_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input
+                className="duo-input rf-override-vocab"
+                type="number"
+                min={500}
+                max={30000}
+                placeholder="词汇量"
+                aria-label="手填词汇量"
+                value={overrideVocab}
+                onChange={(e) => { setOverrideVocab(e.target.value); setRulesSaved(false); }}
+              />
+              <span className="text-xs">手填后优先于推断值</span>
+            </div>
+
+            <div className="rf-learner-row">
               <span className="text-xs">主要难点</span>
               {difficulties.length ? (
                 difficulties.map((d) => (
@@ -313,6 +412,53 @@ export default function LearnerPanel() {
 
             {noteSaved && <p className="st-help">已保存</p>}
             {noteError && <p className="st-help" style={{ color: "var(--rf-danger-text)" }}>{noteError}</p>}
+
+            <div className="rf-learner-row">
+              <span className="text-xs">希望老师做的（每行一条）</span>
+            </div>
+            <textarea
+              className="duo-input rf-learner-input"
+              rows={3}
+              value={rulesCan}
+              aria-label="希望老师做的"
+              placeholder="例如：主动补充常用的欧美习惯用语"
+              onChange={(e) => { setRulesCan(e.target.value); setRulesSaved(false); }}
+            />
+            <div className="rf-learner-row">
+              <span className="text-xs">希望老师不要做的（每行一条）</span>
+            </div>
+            <textarea
+              className="duo-input rf-learner-input"
+              rows={3}
+              value={rulesCannot}
+              aria-label="希望老师不要做的"
+              placeholder="例如：不要一次性给出整句翻译"
+              onChange={(e) => { setRulesCannot(e.target.value); setRulesSaved(false); }}
+            />
+            <div className="rf-learner-actions">
+              <button type="button" className="st-btn st-btn-primary" disabled={rulesBusy} onClick={() => void saveRules()}>
+                {rulesBusy ? "保存中…" : "保存讲解要求"}
+              </button>
+              {rulesSaved && <span className="rf-survey-status" role="status">已保存</span>}
+            </div>
+            {rulesError && <p className="st-help" style={{ color: "var(--rf-danger-text)" }}>{rulesError}</p>}
+            <p className="st-help">这些要求优先于 AI 的观察，每晚整理不会改写它们。</p>
+
+            {payload.noteHistory.length > 0 && (
+              <details className="rf-note-history">
+                <summary>笔记历史（{payload.noteHistory.length}）</summary>
+                <div className="rf-note-history-list">
+                  {payload.noteHistory.slice(0, 10).map((h) => (
+                    <div key={h.id} className="rf-note-history-item">
+                      <span>{formatNoteTime(h.createdAt, Date.now())} · {h.kind === "user" ? "你修改过" : h.kind === "restore" ? "恢复" : "每晚整理"}</span>
+                      <button type="button" className="st-btn st-btn-ghost" disabled={noteBusy} onClick={() => void restoreNoteVersion(h.id)}>
+                        恢复这一版
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
 
             {!editing && (
               <div className="rf-learner-actions">

@@ -151,7 +151,7 @@ CREATE INDEX IF NOT EXISTS idx_explain_answers_user ON explain_answers(user_id, 
 5. 用站点模型，不调用 `consumeAiQuota`（与现在一致）。
 
 ### 4.3 提示词（纯函数 `buildNightlyNotePrompt`，单测）
-- 沿用现有 `buildNotePrompt` 的结构（统计 → 最近提问摘要 → 旧笔记），增加「【带回答的反馈】」一节：这个用户**所有文章**里最近最多 30 组（不按文章过滤），每组写提问种类、单词 / 短语、`answerTraits` 的特征、回答开头 300 字（去掉建议行）、评价。
+- 沿用现有 `buildNotePrompt` 的结构（统计 → 最近提问摘要 → 旧笔记），增加「【带回答的反馈】」一节：这个用户**所有文章**里最近最多 12 组（不按文章过滤；2026-11-18 从 30 组压缩，同类至少 3 次才写笔记，12 组足够归纳偏好），每组写提问种类、单词 / 短语、`answerTraits` 的特征、回答开头 150 字（去掉建议行）、评价。
 - 要求「完整重写，合并重复、去掉已经过时的判断」；仍遵守 300 字、不列英文单词、以统计为准、保留用户手改内容。
 - 成功：`note`、`note_updated_at = now`、`note_update_kind = 'nightly'`、`note_user_edited = 0`。`note_lookup_cursor` 不再使用（保留列，不再写入）：过期删除会让「查词总数」变小，基于总数的游标不再可靠，新动静一律按时间计算。
 - 用户在设置里手改笔记时写 `note_update_kind = 'user'`（`editNote`）。
@@ -334,7 +334,7 @@ DELETE FROM explain_events WHERE kind = 'lookup' AND created_at < :lookupCutoff;
 | `learner-recent-feedback.test.ts` | `answerTraits`（地图 / 整句大意 / 例句 / 字数；去掉建议行与释义行；没有原文）、`formatRecentFeedback`（不含英文原词、`ask_label` 优先且截 12 字、从新到旧、每种评价一条最多 3 行、缺某种时少一行） |
 | `learner-profile-text.test.ts`（扩展） | 「最近的反馈」位置；720 字上限；截短顺序（笔记 → 难点 → 统计 → 最近反馈从最旧整行去掉）；`hasUsableProfile` 的 2 / 3 次反馈边界 |
 | `ai-prompt-personalized.test.ts`（扩展） | 个性化深度指引含「最近的反馈」用法一句；个性化关闭时与旧快照逐字一致 |
-| `learner-note-nightly.test.ts` | `nightlyDue`（北京时间 02:59 / 03:00、跨日、已跑过）、`nightlyEligible`（有新反馈、新事件 9 / 10 次、个性化关闭）、`buildNightlyNotePrompt`（30 组上限、结构顺序、不含英文原词） |
+| `learner-note-nightly.test.ts` | `nightlyDue`（北京时间 02:59 / 03:00、跨日、已跑过）、`nightlyEligible`（有新反馈、新事件 9 / 10 次、个性化关闭）、`buildNightlyNotePrompt`（12 组上限、结构顺序、不含英文原词） |
 | `learner-retention.test.ts` | `retentionCutoffs`：讲解 30 天 / 90 天、查词 90 天三个截止时间的边界 |
 | `ai-thread.test.ts`（扩展） | `attachAnswers` 五种情况 |
 | `learner-note-time.test.ts` | `formatNoteTime` 今天 / 昨天 / 更早 |

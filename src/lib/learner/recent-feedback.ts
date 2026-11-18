@@ -7,6 +7,7 @@
  * 单测把本目录编译成 CommonJS 直接运行，这里只能用相对路径 import。
  */
 import { splitCardSuggestion } from "../cards/suggestion";
+import { formatReasonLine } from "./feedback-reason";
 import { ASK_LABEL, FEEDBACK_LABEL } from "./note";
 
 /** 每种评价各取一次 */
@@ -55,6 +56,7 @@ export type RecentFeedbackItem = {
   askLabel: string | null;
   isPhrase: boolean;
   answerText: string | null;
+  reason?: string | null;
 };
 
 /** 一条反馈 → 一行，例如「单词，自动讲解：约 180 字，画了句子地图 → 太深」 */
@@ -70,6 +72,8 @@ export function formatFeedbackLine(item: RecentFeedbackItem): string {
   if (t.hasWholeMeaning) parts.push("有整句大意");
   if (t.hasMap) parts.push("画了句子地图");
   if (t.hasExample) parts.push("给了例句");
+  const reason = formatReasonLine(item.reason);
+  if (reason) parts.push(reason);
   return parts.length > 0 ? `${unit}，${label}：${parts.join("，")} → ${verdict}` : `${unit}，${label} → ${verdict}`;
 }
 

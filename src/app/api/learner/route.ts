@@ -11,9 +11,15 @@ import {
   setShowFeedback,
   surveyOf,
   editNote,
+  teachingRulesFor,
+  saveTeachingRules,
+  saveLevelOverride,
+  noteHistoryFor,
+  restoreNote,
 } from "@/lib/learner-store";
 import { SURVEY_QUESTIONS, EXAM_SCORE_BANDS, TARGET_SCORE_BANDS } from "@/lib/learner/survey";
 import { NIGHTLY_MIN_NEW_EVENTS } from "@/lib/learner/nightly";
+import { FEEDBACK_REASONS } from "@/lib/learner/feedback-reason";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +58,10 @@ export async function GET() {
       : null,
     stats: profile.stats,
     difficulties: profile.stats?.difficulties ?? [],
+    feedbackReasons: FEEDBACK_REASONS,
+    teachingRules: profile.rules,
+    levelOverride: profile.levelOverride,
+    noteHistory: noteHistoryFor(user.id),
     note: row.note,
     noteUpdatedAt: row.note_updated_at,
     // P34：笔记来源 nightly / user（老数据为 null）
@@ -68,7 +78,14 @@ export async function GET() {
 export async function PUT(req: Request) {
   const user = await currentUser();
   if (!user) return Response.json({ error: "请先登录" }, { status: 401 });
-  let body: { survey?: unknown; showFeedback?: unknown; note?: unknown };
+  let body: {
+    survey?: unknown;
+    showFeedback?: unknown;
+    note?: unknown;
+    teachingRules?: unknown;
+    levelOverride?: unknown;
+    restoreNoteId?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -90,5 +107,12 @@ export async function PUT(req: Request) {
       );
     }
   }
+  if (typeof body.restoreNoteId === "string") {
+    if (!restoreNote(user.id, body.restoreNoteId)) {
+      return Response.json({ error: "找不到这一版笔记" }, { status: 404 });
+    }
+  }
+  if (body.teachingRules !== undefined) saveTeachingRules(user.id, body.teachingRules);
+  if (body.levelOverride !== undefined) saveLevelOverride(user.id, body.levelOverride);
   return GET();
 }

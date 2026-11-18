@@ -15,6 +15,7 @@ import { explainTurns } from "@/lib/ai";
 import { inlineGloss } from "@/lib/gloss";
 import { parseThread } from "@/lib/ai-thread";
 import { learnerBlockFor, getLearner, surveyOf } from "@/lib/learner-store";
+import { buildRulesSystemPrompt } from "@/lib/learner/teaching-rules";
 import { parseCardGen, parseJsonLoose, type CardSpec } from "./spec";
 import { validateCard, type ValidateCtx } from "./validate";
 import { renderCardChecked } from "./render";
@@ -249,7 +250,7 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
     base = [...cached.messages, { role: "assistant", content: cached.assistantText }];
     learnerBlock = learnerBlockOfMessages(cached.messages);
   } else {
-    let profile = { block: "", detailed: false, personalized: false };
+    let profile: ReturnType<typeof learnerBlockFor> = { block: "", detailed: false, personalized: false, rules: { can: [], cannot: [] } };
     try {
       profile = learnerBlockFor(user.id);
     } catch (err) {
@@ -266,6 +267,7 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
         learnerBlock: profile.block || undefined,
         personalized: profile.personalized,
         detailed: profile.detailed,
+        teachingRules: buildRulesSystemPrompt(profile.rules) || undefined,
         otherTextLookups: lookups,
         cardedBefore: carded,
         cardsEnabled: true,

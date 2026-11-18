@@ -23,12 +23,14 @@ const DAY = 24 * 3600 * 1000;
 // 北京时间 2026-11-14 03:00 = UTC 2026-11-13 19:00
 const T3 = Date.UTC(2026, 10, 13, 19, 0, 0);
 
-test("常量：凌晨 3 点、攒够 10 次、讲解 30 / 90 天、查词 90 天（PRD Q6 / Q7 / Q9）", () => {
+test("常量：凌晨 3 点、攒够 10 次、讲解 30 / 90 天、查词 90 天、反馈 12 组 × 150 字", () => {
   assert.equal(NIGHTLY_HOUR, 3);
   assert.equal(NIGHTLY_MIN_NEW_EVENTS, 10);
   assert.equal(EXPLAIN_RETENTION_DAYS, 30);
   assert.equal(EXPLAIN_RETENTION_MAX_DAYS, 90);
   assert.equal(LOOKUP_RETENTION_DAYS, 90);
+  assert.equal(NIGHTLY_ANSWERED_MAX, 12);
+  assert.equal(NIGHTLY_ANSWER_EXCERPT, 150);
 });
 
 test("北京时间：日期与小时按 Asia/Shanghai 计算", () => {
@@ -84,14 +86,14 @@ test("buildNightlyNotePrompt：插在旧笔记之前，写明完整重写、来�
   assert.ok(!p.user.includes("制卡建议"), "回答开头去掉建议行");
 });
 
-test("buildNightlyNotePrompt：没有带回答的反馈时写「暂无」；最多 30 组", () => {
+test("buildNightlyNotePrompt：没有带回答的反馈时写「暂无」；最多 12 组", () => {
   assert.ok(buildNightlyNotePrompt({ ...base, answered: [] }).user.includes("【带回答的反馈（来自所有文章，从新到旧）】\n暂无。"));
   const many = Array.from({ length: 40 }, () => ({ feedback: "right", askKind: "auto", askLabel: null, isPhrase: false, answerText: null }));
   const u = buildNightlyNotePrompt({ ...base, answered: many }).user;
   assert.equal((u.match(/→ 刚好/g) ?? []).length, NIGHTLY_ANSWERED_MAX);
 });
 
-test("answerExcerpt：去掉建议行、压成一行、截到 300 字", () => {
+test("answerExcerpt：去掉建议行、压成一行、截到 150 字", () => {
   assert.equal(answerExcerpt(null), "");
   assert.equal(answerExcerpt("释义：x\n第二行\n制卡建议：y"), "释义：x 第二行");
   const long = "字".repeat(NIGHTLY_ANSWER_EXCERPT + 5);

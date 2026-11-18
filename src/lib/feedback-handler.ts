@@ -3,6 +3,7 @@
  * 路由文件只能导出 HTTP 方法，所以放这里；网站与插件各用自己的鉴权。
  */
 import { setFeedback } from "./learner-store";
+import { normalizeFeedbackReason } from "./learner/feedback-reason";
 import type { Feedback } from "./learner/types";
 
 export const FEEDBACK_RATINGS: readonly Feedback[] = ["shallow", "right", "deep"];
@@ -17,11 +18,12 @@ export function submitFeedback(
   const o = body as Record<string, unknown>;
   const answerId = typeof o.answerId === "string" ? o.answerId.trim().slice(0, 120) : "";
   const rating = o.rating;
+  const reason = normalizeFeedbackReason(o.reason);
   if (!answerId || typeof rating !== "string" || !(FEEDBACK_RATINGS as readonly string[]).includes(rating)) {
     return { ok: false, status: 400, error: "反馈取值不对" };
   }
   // 事件不存在 / 不属于当前用户 / 不是一段讲解，一律 404，不透露数据是否存在
-  if (!setFeedback(userId, answerId, rating as Feedback)) {
+  if (!setFeedback(userId, answerId, rating as Feedback, reason)) {
     return { ok: false, status: 404, error: "找不到这段讲解" };
   }
   return { ok: true };

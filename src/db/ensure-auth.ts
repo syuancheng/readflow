@@ -88,6 +88,15 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
       memory_reset_at INTEGER NOT NULL DEFAULT 0,  -- F6 清空记忆：画像只算这之后的事件
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS learner_note_history (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      note TEXT NOT NULL,
+      kind TEXT NOT NULL,                   -- 'nightly' | 'user' | 'restore'
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_note_history_user_time ON learner_note_history(user_id, created_at);
+
     CREATE TABLE IF NOT EXISTS explain_events (
       id TEXT PRIMARY KEY,                  -- 同时就是「这段回答」的 id，反馈靠它定位
       user_id TEXT NOT NULL,
@@ -168,8 +177,24 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
   // P35 句子音频：tts_audio / markji_media，push_jobs.audio_missing
   ensureAudioTables(sqlite);
 
-  // P33 F7：查词事件里记录「这个词当时是否已有推送成功的卡片」
+  // 2026-11-18：记忆分层与反馈原因。全部只新增列，老数据保持原样。
+  const profileCols = sqlite.prepare("PRAGMA table_info(learner_profiles)").all() as { name: string }[];
+  for (const [col, ddl] of [
+    ["teaching_rules", "TEXT"],             // JSON {can:string[], cannot:string[]}，只由用户写
+    ["level_override_cefr", "TEXT"],        // 用户手填水平，覆盖推断值
+    ["level_override_vocab", "INTEGER"],    // 用户手填词汇量，覆盖推断值
+  ] as const) {
+    if (!profileCols.some((c) => c.name === col)) {
+      addColumnIfMissing(sqlite, `ALTER TABLE learner_profiles ADD COLUMN ${col} ${ddl}`, "learner_profiles", col);
+    }
+  }
+
   const evCols = sqlite.prepare("PRAGMA table_info(explain_events)").all() as { name: string }[];
+  if (!evCols.some((c) => c.name === "feedback_reason")) {
+    addColumnIfMissing(sqlite, "ALTER TABLE explain_events ADD COLUMN feedback_reason TEXT", "explain_events", "feedback_reason");
+  }
+
+  // P33 F7：查词事件里记录「这个词当时是否已有推送成功的卡片」
   if (!evCols.some((c) => c.name === "carded_before")) {
     addColumnIfMissing(sqlite, "ALTER TABLE explain_events ADD COLUMN carded_before INTEGER", "explain_events", "carded_before");
   }

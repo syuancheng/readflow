@@ -68,8 +68,8 @@ test("「以往反馈」至少 5 次、且某一类占比超过 50% 才显示", 
   assert.ok(!buildLearnerBlock({ ...full, stats: stats({ feedback: { shallow: 3, right: 1, deep: 0 } }) }).includes("以往反馈"));
 });
 
-test("总长不超过 600 字符", () => {
-  const huge = buildLearnerBlock({ ...full, note: "技术词汇明显强于日常词汇。".repeat(80) });
+test("总长不超过预算", () => {
+  const huge = buildLearnerBlock({ ...full, note: "技术词汇明显强于日常词汇。".repeat(120) });
   assert.ok(huge.length <= LEARNER_BLOCK_MAX_CHARS, `实际 ${huge.length}`);
 });
 
@@ -96,14 +96,14 @@ test("超长时先截老师笔记，再截常见难点，最后才动反馈", ()
   assert.ok(veryLong.includes("估计水平"), "主要依据不能被截掉");
 });
 
-test("前面固定行本身就超长时：补充行整行丢掉，最后硬切到 600 字符", () => {
+test("前面固定行本身就超长时：补充行整行丢掉，最后按预算让位", () => {
   // 用异常长的水平字段模拟「固定行吃掉了全部预算」，验证兜底分支不会把长度放出去
-  const huge = { vocab: 5000, cefr: "C".repeat(700) } as unknown as LearnerLevel;
+  const huge = { vocab: 5000, cefr: "C".repeat(1000) } as unknown as LearnerLevel;
   const out = buildLearnerBlock({
     level: huge,
     survey: { stylePref: "concise" },
     stats: stats({ difficulties: ["long_sentence"], feedback: { shallow: 0, right: 0, deep: 9 } }),
-    note: "笔记".repeat(100),
+    note: "笔记".repeat(200),
   });
   assert.equal(out.length, LEARNER_BLOCK_MAX_CHARS);
   assert.ok(out.includes("估计水平"), "主要依据保留");
@@ -138,20 +138,20 @@ test("P34：没有最近反馈时不出现这一段；空白行被忽略", () =>
   assert.ok(!buildLearnerBlock({ ...full, recentFeedback: ["  "] }).includes("最近的反馈"));
 });
 
-test("P34：上限 720 字；超长时先截老师笔记，最后才从最旧的一条整行去掉最近反馈", () => {
-  assert.equal(LEARNER_BLOCK_MAX_CHARS, 720);
+test("P34：上限 850 字；超长时先截老师笔记，最后才从最旧的一条整行去掉最近反馈", () => {
+  assert.equal(LEARNER_BLOCK_MAX_CHARS, 850);
   const recent = ["单词，自动讲解：约 180 字，画了句子地图 → 太深", "短语，只讲这个词 → 刚好", "单词，再给个例句 → 太浅"];
-  const longNote = "技术词汇明显强于日常词汇。".repeat(80);
+  const longNote = "技术词汇明显强于日常词汇。".repeat(120);
   const t = buildLearnerBlock({ ...full, note: longNote, recentFeedback: recent });
-  assert.ok(t.length <= 720);
+  assert.ok(t.length <= LEARNER_BLOCK_MAX_CHARS);
   assert.ok(recent.every((r) => t.includes(r)), "笔记截短后最近反馈完整保留");
   // 极端情况：只有大量最近反馈也超长 → 从最旧的一条（最后一行）开始整行去掉
-  const huge = Array.from({ length: 3 }, (_, i) => `单词，${"很长的问题".repeat(50)}${i} → 太深`);
+  const huge = Array.from({ length: 3 }, (_, i) => `单词，${"很长的问题".repeat(80)}${i} → 太深`);
   const t2 = buildLearnerBlock({ level: null, survey: null, stats: null, note: null, recentFeedback: huge });
-  assert.ok(t2.length <= 720);
+  assert.ok(t2.length <= LEARNER_BLOCK_MAX_CHARS);
   assert.ok(t2.includes("0 → 太深") && !t2.includes("2 → 太深"), "最旧的先去掉");
-  const all = buildLearnerBlock({ level: null, survey: null, stats: null, note: null, recentFeedback: ["x".repeat(800)] });
-  assert.ok(all.length <= 720 && !all.includes("最近的反馈"), "全部去光时标题也去掉");
+  const all = buildLearnerBlock({ level: null, survey: null, stats: null, note: null, recentFeedback: ["x".repeat(1000)] });
+  assert.ok(all.length <= LEARNER_BLOCK_MAX_CHARS && !all.includes("最近的反馈"), "全部去光时标题也去掉");
 });
 
 test("P34 hasUsableProfile：最近 30 天反馈 ≥3 次也算有档案（2 次不算）", () => {

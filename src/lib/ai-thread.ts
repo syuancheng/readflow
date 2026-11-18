@@ -62,14 +62,14 @@ export function defaultTurnText(raw: string | null | undefined): string {
  */
 export function attachAnswers<T extends ThreadTurn>(
   turns: readonly T[],
-  answers: readonly { answerId: string; text: string; feedback: string | null }[],
-): (T & { answerId?: string; feedback?: string | null })[] {
+  answers: readonly { answerId: string; text: string; feedback: string | null; feedbackReason?: string | null }[],
+): (T & { answerId?: string; feedback?: string | null; feedbackReason?: string | null })[] {
   const used = new Set<number>();
   return turns.map((t) => {
     const want = t.text.trim();
     const i = answers.findIndex((a, j) => !used.has(j) && a.text.trim() === want);
     if (i < 0) return { ...t };
     used.add(i);
-    return { ...t, answerId: answers[i].answerId, feedback: answers[i].feedback };
+    return { ...t, answerId: answers[i].answerId, feedback: answers[i].feedback, feedbackReason: answers[i].feedbackReason ?? null };
   });
 }

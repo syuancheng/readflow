@@ -6,8 +6,8 @@
  */
 import type { BehaviorStats } from "./types";
 
-/** 笔记最多 300 个汉字（PRD F3 / 实现说明 §4.4） */
-export const NOTE_MAX_CHARS = 300;
+/** 笔记最多 500 个汉字（2026-11-18 从 300 放宽：分层后笔记是软参考，可容纳更多观察） */
+export const NOTE_MAX_CHARS = 500;
 /*
  * P34：老师笔记改为「新动静攒够 10 次后的每晚整理」（learner/nightly.ts），
  * 原来的「新增查词 25 次 + 24 小时」规则（shouldUpdateNote）已删除。

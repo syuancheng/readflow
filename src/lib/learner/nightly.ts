@@ -16,6 +16,16 @@ export const EXPLAIN_RETENTION_DAYS = 30;
 export const EXPLAIN_RETENTION_MAX_DAYS = 90;
 /** 查词记录：保留 90 天（P32 行为推断的统计窗口） */
 export const LOOKUP_RETENTION_DAYS = 90;
+/** 2026-11-18：多实例夜间任务的租约键与有效期 */
+export const NIGHTLY_CLAIM_KEY = "learner.nightlyClaim";
+export const CLAIM_LEASE_MS = 60 * 60 * 1000;
+
+/** 租约值形如 `2026-11-18@1790000000000`；同一天且未过期才算有人持有 */
+export function claimIsFresh(raw: string | null | undefined, now: number, day = shanghaiDay(now)): boolean {
+  if (!raw) return false;
+  const at = Number(raw.split("@")[1]);
+  return raw.startsWith(`${day}@`) && Number.isFinite(at) && now - at < CLAIM_LEASE_MS;
+}
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -68,10 +78,10 @@ export function formatNoteTime(at: number, now: number): string {
   return `${m}月${day}日 ${hm}`;
 }
 
-/** 每晚整理最多带几组「问题、回答、反馈」 */
-export const NIGHTLY_ANSWERED_MAX = 30;
-/** 每段回答截取前多少字 */
-export const NIGHTLY_ANSWER_EXCERPT = 300;
+/** 每晚整理最多带几组「问题、回答、反馈」：同类至少 3 次才写笔记，12 组足够归纳偏好 */
+export const NIGHTLY_ANSWERED_MAX = 12;
+/** 每段回答只截取开头，够看出讲法特征即可（字数、地图、整句大意、例句） */
+export const NIGHTLY_ANSWER_EXCERPT = 150;
 /** 同一类情况至少几次才写进笔记 */
 export const NOTE_PATTERN_MIN = 3;
 

@@ -18,6 +18,7 @@ import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 import type { AskKind, Feedback } from "@/lib/learner/types";
+import type { FeedbackReason } from "@/lib/learner/feedback-reason";
 import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
 import MakeCardButton from "@/components/MakeCardButton";
 import FeedbackRow from "@/components/FeedbackRow";
@@ -86,6 +87,7 @@ type Turn = ThreadTurn & {
   /** P32：这段回答的 id（X-RF-Answer-Id），回看历史时没有 */
   answerId?: string;
   feedback?: Feedback;
+  feedbackReason?: string | null;
   feedbackError?: string;
 };
 
@@ -1664,7 +1666,7 @@ function PickCard({
       if (contextId && feedbackEnabled) {
         bgFetch(`/api/explain/answers?contextId=${encodeURIComponent(contextId)}`)
           .then((r) => (r.ok ? r.json() : null))
-          .then((data: { answers?: { answerId: string; text: string; feedback: string | null }[] } | null) => {
+          .then((data: { answers?: { answerId: string; text: string; feedback: string | null; feedbackReason?: string | null }[] } | null) => {
             if (stale || !data?.answers?.length) return;
             const answers = data.answers;
             updateTurns((prev) =>
@@ -1675,6 +1677,7 @@ function PickCard({
                       ...t,
                       answerId: t.answerId,
                       feedback: isFeedback(t.feedback) ? t.feedback : undefined,
+                      feedbackReason: t.feedbackReason,
                     },
               ),
             );
@@ -1876,25 +1879,26 @@ function PickCard({
   }
 
   /** P32 F5：乐观更新，失败恢复原状并把原因放进 title */
-  async function rate(index: number, rating: Feedback) {
+  async function rate(index: number, rating: Feedback, reason: string | null = null) {
     const prev = turnsRef.current[index]?.feedback;
+    const prevReason = turnsRef.current[index]?.feedbackReason;
     const answerId = turnsRef.current[index]?.answerId;
     if (!answerId) return;
     const patchTurn = (p: Partial<Turn>) =>
       updateTurns((list) => list.map((t, i) => (i === index ? { ...t, ...p } : t)));
-    patchTurn({ feedback: rating, feedbackError: undefined });
+    patchTurn({ feedback: rating, feedbackReason: reason, feedbackError: undefined });
     try {
       const res = await fetch("/api/explain/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answerId, rating }),
+        body: JSON.stringify({ answerId, rating, reason }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => null);
         throw new Error(d?.error ?? "反馈没保存上");
       }
     } catch (err) {
-      patchTurn({ feedback: prev, feedbackError: err instanceof Error ? err.message : "反馈没保存上" });
+      patchTurn({ feedback: prev, feedbackReason: prevReason, feedbackError: err instanceof Error ? err.message : "反馈没保存上" });
     }
   }
 
@@ -2034,7 +2038,16 @@ function PickCard({
               )}
             </div>
             {feedbackEnabled && t.status === "done" && !isNotAGloss(t.text) && t.answerId && (
-              <FeedbackRow value={t.feedback} error={t.feedbackError} onRate={(r) => void rate(i, r)} />
+              <FeedbackRow
+                value={t.feedback}
+                reason={t.feedbackReason}
+                error={t.feedbackError}
+                onRate={(r) => void rate(i, r)}
+                onReason={(r: FeedbackReason | null) => {
+                  if (!t.feedback) return;
+                  void rate(i, t.feedback, r);
+                }}
+              />
             )}
           </div>
         );

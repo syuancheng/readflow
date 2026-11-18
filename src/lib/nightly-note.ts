@@ -12,7 +12,15 @@ import { GLOBAL_USER } from "@/db/ensure-auth";
 import { getSetting, setSetting } from "@/lib/settings-store";
 import { getProfileForPrompt, newEventsSinceNote, purgeExpiredEvents } from "@/lib/learner-store";
 import { generateNoteNow } from "@/lib/note-generator";
-import { NIGHTLY_HOUR, nightlyDue, nightlyEligible, retentionCutoffs, shanghaiDay } from "@/lib/learner/nightly";
+import {
+  NIGHTLY_CLAIM_KEY,
+  NIGHTLY_HOUR,
+  claimIsFresh,
+  nightlyDue,
+  nightlyEligible,
+  retentionCutoffs,
+  shanghaiDay,
+} from "@/lib/learner/nightly";
 
 export const NIGHTLY_RUN_DAY_KEY = "learner.nightlyRunDay";
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
@@ -35,12 +43,27 @@ export function startNightlyScheduler(): void {
   void tick();
 }
 
+/**
+ * 跨进程抢占今天的所有者。值形如 `2026-11-18@1790000000000`。
+ * 进程中途退出时不会写完成日期，租约过期后别的实例可以接管补做。
+ */
+function claimDay(now: number): boolean {
+  const day = shanghaiDay(now);
+  return sqlite.transaction(() => {
+    const raw = getSetting(NIGHTLY_CLAIM_KEY, GLOBAL_USER) ?? "";
+    if (claimIsFresh(raw, now, day)) return false;
+    setSetting(NIGHTLY_CLAIM_KEY, `${day}@${now}`, GLOBAL_USER);
+    return true;
+  })();
+}
+
 async function tick(): Promise<void> {
   const state = g.__rfNightly;
   if (!state || state.busy) return;
   const hour = envNumber("READFLOW_NIGHTLY_HOUR") ?? NIGHTLY_HOUR;
   const now = Date.now();
   if (!nightlyDue(now, getSetting(NIGHTLY_RUN_DAY_KEY, GLOBAL_USER), hour)) return;
+  if (!claimDay(now)) return;
   state.busy = true;
   try {
     await runNightlyOnce(now);

@@ -87,6 +87,8 @@ export type ExplainParams = {
    * 只有 askKind=domain 时才会带值；其他追问与默认讲解都为空，提示词逐字不变。
    */
   domainBlock?: string;
+  /** 学生本人写下的硬性讲解要求，作为独立 system message 注入；不改上面的逐字快照 */
+  teachingRules?: string;
   /**
    * 同一批注内本轮之前的对话（历史问答），由服务端白名单校验后传入。
    * 空/不传时 explainTurns 仍是原来的 [system, user] 两条，逐字不变。
@@ -415,9 +417,12 @@ export function explainTurns(params: ExplainParams): ChatTurn[] {
           personalized: params.personalized === true,
           cardsEnabled: params.cardsEnabled !== false,
         });
-  // 历史在前、本轮 user 在最后；无历史时就是你看到的原有两条，逐字不变。
+  // 学生明确要求放在人设之后、历史之前：既优先于一般偏好，又不碰 legacySystemPrompt 的逐字快照。
+  const rules = params.teachingRules?.trim();
+  // 历史在前、本轮 user 在最后；无历史、无规则时就是你看到的原有两条，逐字不变。
   return [
     { role: "system", content: system },
+    ...(rules ? [{ role: "system" as const, content: rules }] : []),
     ...historyTurns(params.history),
     { role: "user", content: buildUserMessage(params) },
   ];

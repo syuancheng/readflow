@@ -12,6 +12,15 @@ export const WINDOW_DAYS = 90;
 export const FOLLOWUP_WINDOW_MS = 10 * 60 * 1000;
 export const VOCAB_MIN = 1000;
 export const VOCAB_MAX = 20000;
+/** 2026-11-18：偏好类信号按半衰期加权，近期行为影响更大；90 天硬窗口与 vocab 门槛不变 */
+export const DECAY_HALF_LIFE_DAYS = 45;
+const DAY_MS = 24 * 3600 * 1000;
+
+/** 0–1 的时间权重：今天 1，45 天前 0.5，90 天前 0.25 */
+export function recencyWeight(createdAt: number, now: number, halfLifeDays = DECAY_HALF_LIFE_DAYS): number {
+  const ageDays = Math.max(0, now - createdAt) / DAY_MS;
+  return Math.pow(0.5, ageDays / halfLifeDays);
+}
 
 /** 排名的第 20 百分位（nearest-rank）：一个人连常用词都还在查，水平大致就在这附近 */
 export function percentile20(values: number[]): number | null {
@@ -41,33 +50,42 @@ export function computeBehaviorStats(
     : null;
   const cefr: Cefr | null = vocab === null ? null : cefrOfVocab(vocab);
 
-  // 读过最多的文章难度：出现次数最多的 CEFR（并列时按 A2→C2 的既定顺序取先者）
+  // 2026-11-18：难点/偏好按时间衰减加权；词汇量门槛与 P20 仍用未加权的原始计数
   const cefrOrder: Cefr[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
-  const textCefrCount = new Map<string, number>();
-  for (const e of lookups) {
-    if (!e.textCefr) continue;
-    const key = e.textCefr.toUpperCase();
-    textCefrCount.set(key, (textCefrCount.get(key) ?? 0) + 1);
+  const weighted = (e: LearnerEvent) => recencyWeight(e.createdAt, now);
+  const cefrWeighted = new Map<string, number>();
+  let structureWeighted = 0;
+  let repeatedWeighted = 0;
+  let phraseWeighted = 0;
+  let lookupWeight = 0;
+  for (const e of all) {
+    const w = weighted(e);
+    if (e.kind !== "lookup") continue;
+    lookupWeight += w;
+    if (e.textCefr) cefrWeighted.set(e.textCefr.toUpperCase(), (cefrWeighted.get(e.textCefr.toUpperCase()) ?? 0) + w);
+    if (e.isPhrase) phraseWeighted += w;
+    if ((e.repeatCount ?? 0) >= 2) repeatedWeighted += w;
   }
   let typicalTextCefr: Cefr | null = null;
   for (const level of cefrOrder) {
-    if (textCefrCount.has(level) && (typicalTextCefr === null ||
-      (textCefrCount.get(level) ?? 0) > (textCefrCount.get(typicalTextCefr) ?? 0))) {
+    if (cefrWeighted.has(level) && (typicalTextCefr === null ||
+      (cefrWeighted.get(level) ?? 0) > (cefrWeighted.get(typicalTextCefr) ?? 0))) {
       typicalTextCefr = level;
     }
   }
 
   const total = lookups.length;
-  const structureAsks = all.filter(
-    (e) => e.kind === "explain" && (e.askKind === "whole_sentence" || e.askKind === "structure"),
-  ).length;
-  const repeated = lookups.filter((e) => (e.repeatCount ?? 0) >= 2).length;
-  const longRatio = total > 0 ? (structureAsks + repeated) / total : 0;
-  const phraseRatio = total > 0 ? lookups.filter((e) => e.isPhrase).length / total : 0;
+  for (const e of all) {
+    if (e.kind === "explain" && (e.askKind === "whole_sentence" || e.askKind === "structure")) {
+      structureWeighted += weighted(e);
+    }
+  }
+  const longRatioWeighted = lookupWeight > 0 ? (structureWeighted + repeatedWeighted) / lookupWeight : 0;
+  const phraseRatioWeighted = lookupWeight > 0 ? phraseWeighted / lookupWeight : 0;
 
   const hits: { key: BehaviorStats["difficulties"][number]; score: number }[] = [];
-  if (longRatio >= 0.1) hits.push({ key: "long_sentence", score: longRatio });
-  if (phraseRatio >= 0.25) hits.push({ key: "phrases", score: phraseRatio });
+  if (longRatioWeighted >= 0.1) hits.push({ key: "long_sentence", score: longRatioWeighted });
+  if (phraseRatioWeighted >= 0.25) hits.push({ key: "phrases", score: phraseRatioWeighted });
   if (vocab !== null && vocab < 4000) hits.push({ key: "vocabulary", score: 1 - vocab / 4000 });
   const difficulties = hits.sort((a, b) => b.score - a.score).slice(0, 3).map((h) => h.key);
 

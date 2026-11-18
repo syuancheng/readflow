@@ -271,8 +271,21 @@ export const learnerProfiles = sqliteTable("learner_profiles", {
   noteUpdateKind: text("note_update_kind"),
   noteLastError: text("note_last_error"),
   memoryResetAt: integer("memory_reset_at").notNull().default(0),
+  /** 2026-11-18：教学规则 JSON、用户手填水平 */
+  teachingRules: text("teaching_rules"),
+  levelOverrideCefr: text("level_override_cefr"),
+  levelOverrideVocab: integer("level_override_vocab"),
   updatedAt: integer("updated_at").notNull(),
 });
+
+/** 2026-11-18：老师笔记历史（AI 重写 / 用户手改 / 回滚都留版本） */
+export const learnerNoteHistory = sqliteTable("learner_note_history", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  note: text("note").notNull(),
+  kind: text("kind").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => [index("idx_note_history_user_time").on(t.userId, t.createdAt)]);
 
 export const explainEvents = sqliteTable(
   "explain_events",
@@ -293,6 +306,9 @@ export const explainEvents = sqliteTable(
     contextId: text("context_id"),
     feedback: text("feedback"),
     feedbackAt: integer("feedback_at"),
+    /** 2026-11-18：反馈原因白名单，见 learner/feedback-reason.ts */
+    feedbackReason: text("feedback_reason"),
+    cardedBefore: integer("carded_before"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("idx_explain_events_user_time").on(t.userId, t.createdAt)],

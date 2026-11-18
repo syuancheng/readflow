@@ -3772,6 +3772,31 @@ a:focus-visible,
   font-size: var(--rf-text-xs);
   color: var(--rf-text-secondary);
 }
+.rf-override-vocab {
+  width: 120px;
+}
+.rf-note-history {
+  margin-top: 16px;
+}
+.rf-note-history summary {
+  font-size: var(--rf-text-sm);
+  color: var(--rf-text-secondary);
+  cursor: pointer;
+}
+.rf-note-history-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.rf-note-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+}
 
 /* ===== P33：阅读页「做成卡片」（紫色 = AI，只做点缀；右栏已有主操作，不用绿色）===== */
 /* 建议条：浅紫底 + 次要灰正文，只有「建议做成卡片」几个字用 AI 紫；排到按钮组上方，整句完整显示 */
