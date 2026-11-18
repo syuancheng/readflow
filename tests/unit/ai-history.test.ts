@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildDomainSystemPrompt,
+  buildSentenceStructureMethodPrompt,
   buildSystemPrompt,
   buildUserMessage,
   EXPLAIN_HISTORY_MAX_CHARS,
@@ -70,6 +71,75 @@ test("领域追问仍是领域人设，历史照带", () => {
   });
   assert.equal(turns[0].content, buildDomainSystemPrompt());
   assert.ok(turns.some((t) => t.role === "assistant" && t.content === "上一次回答"));
+});
+
+/* P44：「讲讲句子结构」这一轮的拆句方法 */
+test("structure 轮次：人设不变，方法提示作为第二条 system 注入", () => {
+  const turns = explainTurns({ ...BASE, askKind: "structure" });
+  assert.equal(turns.length, 3);
+  assert.equal(turns[0].role, "system");
+  assert.equal(turns[0].content, buildSystemPrompt("en", false, BASE.word, { cardsEnabled: false }));
+  assert.equal(turns[1].role, "system");
+  assert.equal(turns[1].content, buildSentenceStructureMethodPrompt());
+  assert.equal(turns[2].role, "user");
+  assert.equal(turns[2].content, buildUserMessage({ ...BASE, askKind: "structure" }));
+});
+
+test("方法提示含三步与找谓语锚点，且不要求整句翻译", () => {
+  const m = buildSentenceStructureMethodPrompt();
+  for (const s of ["谓语动词", "标点", "that", "插入成分", "Were / Had / Should", "if 从句"]) {
+    assert.ok(m.includes(s), `方法提示缺少「${s}」`);
+  }
+  // 学生的硬要求：先挪一边再回来，不是直接扔；不给逐字整句翻译
+  assert.ok(m.includes("抓完主干再回来看"));
+  assert.ok(m.includes("不是整句逐字翻译"));
+  // 不能写成给学生的编号步骤清单
+  assert.ok(m.includes("不要把这些步骤写成编号说明念给他"));
+});
+
+test("控制变量：其他 askKind 与默认讲解都不含方法提示，逐字不变", () => {
+  const plain = explainTurns(BASE);
+  for (const kind of ["auto", "default", "word_only", "whole_sentence", "example", "domain", "custom"]) {
+    const turns = explainTurns({ ...BASE, askKind: kind });
+    assert.equal(turns.length, plain.length, `${kind} 消息条数不应变化`);
+    assert.ok(
+      !turns.some((t) => t.role === "system" && t.content.includes("这一轮：带学生拆开这个长句")),
+      `${kind} 不应注入拆句方法`,
+    );
+  }
+  assert.deepEqual(explainTurns({ ...BASE, askKind: "structure" }).slice(2), plain.slice(1));
+});
+
+test("structure 轮次：学生硬规则仍在方法提示之后，优先级更高", () => {
+  const turns = explainTurns({
+    ...BASE,
+    askKind: "structure",
+    teachingRules: "学生本人明确写下的讲解要求，优先于其它讲解偏好，必须遵守；回答里不要提到这些要求。\n学生不希望老师做的：\n- 不要给整句翻译",
+  });
+  assert.equal(turns.length, 4);
+  assert.equal(turns[0].role, "system");
+  assert.equal(turns[1].content, buildSentenceStructureMethodPrompt());
+  assert.ok(turns[2].content.includes("学生本人明确写下的讲解要求"));
+  assert.ok(turns[2].content.indexOf("不要给整句翻译") > -1);
+  assert.equal(turns[3].role, "user");
+});
+
+test("structure 轮次带历史：方法在人设之后、规则之前，本轮 user 在最后", () => {
+  const turns = explainTurns({
+    ...BASE,
+    askKind: "structure",
+    prompt: "讲讲这句话的结构",
+    teachingRules: "学生规则",
+    history: [{ text: "上一次回答" }],
+  });
+  assert.deepEqual(
+    turns.map((t) => t.role),
+    ["system", "system", "system", "user", "assistant", "user"],
+  );
+  assert.equal(turns[1].content, buildSentenceStructureMethodPrompt());
+  assert.equal(turns[2].content, "学生规则");
+  assert.equal(turns[turns.length - 1].role, "user");
+  assert.ok(turns[turns.length - 1].content.includes("学生的问题: 讲讲这句话的结构"));
 });
 
 test("历史截断：最多 MAX_TURNS 轮，单轮回答最多 MAX_CHARS 字；空文本轮次丢弃", () => {

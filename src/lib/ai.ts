@@ -185,6 +185,34 @@ export function buildDomainSystemPrompt(): string {
 - 用中文作答；专业术语、缩写、原文引用保留英文。`;
 }
 
+/**
+ * P44：「讲讲句子结构」这一轮专用的拆句方法（只作为独立 system message 注入）。
+ *
+ * 参考 B 站 UP 主李文庆长难句四规则，按学生画像做了三处取舍：
+ * - 「跳过插入成分」改成「先挪一边，抓完主干再回来看」——他是 A2，把限定当废话会读反；
+ * - 「虚拟倒装」只留「Were/Had/Should 开头先还原成 if」一句识别提示，不展开语法；
+ * - 补上「先找谓语动词」这个锚点——比找 that/wh- 更稳，且他没有这个习惯。
+ *
+ * 「生词美语：积累」不进这一轮讲解，走词库与长期记忆，见后续改动。
+ *
+ * 关键：不碰 legacySystemPrompt 的逐字快照，也不改输出格式（句子地图仍由人设管）。
+ * 只教「怎么拆」，让学生保留自己分析的机会——这是他明确写下的硬要求。
+ */
+export function buildSentenceStructureMethodPrompt(): string {
+  return `【这一轮：带学生拆开这个长句】
+学生点「讲讲句子结构」，要学的不是一个答案，是一套自己能重复用的拆解动作。你在心里按下面的顺序拆，最后用你本来的句子地图格式呈现；不要把这些步骤写成编号说明念给他。
+
+先定锚：先找谓语动词，不要先找中文意思。一句里有几个谓语，就有几个从句或并列分句；先定主句那个谓语，它的主语和宾语／表语就是主干。谓语比 that / wh- 更可靠。
+
+再切两处干扰：
+- 从句与分句：在标点和信号词（that / wh- / because / although 等）处切开，先看主句。
+- 插入成分：逗号、括号、破折号隔开的补充说明先挪到一边，抓完主干再回来看它补了什么、限定的是谁。不要直接扔掉——他水平还不高，把关键限定当废话跳过去会读反。
+
+最后复原变形：Were / Had / Should 开头的条件句，先在心里还原成 if 从句再读；只点一句「这里是倒装，还原后是……」就够，不要展开虚拟语气语法。
+
+一次只带他走最卡的一两处，拆完把主干标到句子地图上。给的是标注和判断的抓手，不是整句逐字翻译——他要保留自己分析句型结构的机会。`;
+}
+
 /** 导出供单测断言输出结构（不对外承诺稳定性） */
 export function buildSystemPrompt(
   language: string,
@@ -419,9 +447,13 @@ export function explainTurns(params: ExplainParams): ChatTurn[] {
         });
   // 学生明确要求放在人设之后、历史之前：既优先于一般偏好，又不碰 legacySystemPrompt 的逐字快照。
   const rules = params.teachingRules?.trim();
-  // 历史在前、本轮 user 在最后；无历史、无规则时就是你看到的原有两条，逐字不变。
+  // P44：「讲讲句子结构」这一轮追加拆句方法；放在学生规则之前，硬规则仍然优先。
+  // 其他 askKind 与默认讲解一个字符都不变。
+  const structureMethod = params.askKind === "structure" ? buildSentenceStructureMethodPrompt() : "";
+  // 历史在前、本轮 user 在最后；无历史、无规则、非 structure 时就是你看到的原有两条，逐字不变。
   return [
     { role: "system", content: system },
+    ...(structureMethod ? [{ role: "system" as const, content: structureMethod }] : []),
     ...(rules ? [{ role: "system" as const, content: rules }] : []),
     ...historyTurns(params.history),
     { role: "user", content: buildUserMessage(params) },
