@@ -18,7 +18,6 @@ import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 import type { AskKind, Feedback } from "@/lib/learner/types";
-import type { FeedbackReason } from "@/lib/learner/feedback-reason";
 import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
 import MakeCardButton from "@/components/MakeCardButton";
 import FeedbackRow from "@/components/FeedbackRow";
@@ -2043,7 +2042,7 @@ function PickCard({
                 reason={t.feedbackReason}
                 error={t.feedbackError}
                 onRate={(r) => void rate(i, r)}
-                onReason={(r: FeedbackReason | null) => {
+                onReason={(r: string | null) => {
                   if (!t.feedback) return;
                   void rate(i, t.feedback, r);
                 }}

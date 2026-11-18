@@ -76,6 +76,33 @@
   border-radius: var(--rf-radius-sm);
 }
 
+/* 「其他…」比预设选项更弱：同字号、字色更浅，只在 hover 时提到主文字色（C-06 不抢重点） */
+.rf-feedback-custom-open {
+  color: var(--rf-text-secondary);
+  border-bottom: 1px dashed var(--rf-border-strong);
+  border-radius: 0;
+}
+
+/* 自定义原因输入：与反馈行同左对齐线，占满可用宽度，窄屏自动换行（TIP-05 / A-03） */
+.rf-feedback-custom {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rf-space-1);
+}
+
+.rf-feedback-custom input {
+  width: min(240px, 100%);
+  min-height: 24px;
+  padding: 0 var(--rf-space-2);
+  border: 1px solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-sm);
+  background: var(--rf-bg-surface);
+  color: var(--rf-text-primary);
+  font-size: var(--rf-text-xs);
+  font-family: inherit;
+}
+
 @keyframes rf-check-pop {
   0% { transform: scale(0.2); opacity: 0; }
   70% { transform: scale(1.25); opacity: 1; }

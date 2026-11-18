@@ -11,10 +11,13 @@ import {
   rulesToJson,
 } from "../../src/lib/learner/teaching-rules";
 import {
+  CUSTOM_REASON_MAX_CHARS,
   FEEDBACK_REASON_LABEL,
   FEEDBACK_REASONS,
   formatReasonLine,
   normalizeFeedbackReason,
+  reasonForFeedback,
+  reasonsForFeedback,
 } from "../../src/lib/learner/feedback-reason";
 import { recencyWeight, DECAY_HALF_LIFE_DAYS } from "../../src/lib/learner/model";
 import { claimIsFresh, CLAIM_LEASE_MS } from "../../src/lib/learner/nightly";
@@ -57,13 +60,47 @@ test("水平覆盖：CEFR 白名单、词汇量范围，非法值忽略", () => 
   assert.deepEqual(normalizeOverride(null), { cefr: null, vocab: null });
 });
 
-test("反馈原因：白名单与中文标签，未知原因不写进档案", () => {
-  assert.deepEqual([...FEEDBACK_REASONS], ["gave_answer", "too_much", "missed_point", "unnecessary"]);
-  assert.equal(normalizeFeedbackReason("deep"), null);
+test("反馈原因：预设 code 仍可统计与翻译成中文", () => {
+  assert.ok(FEEDBACK_REASONS.includes("gave_answer"));
+  assert.ok(FEEDBACK_REASONS.includes("missed_point"));
   assert.equal(normalizeFeedbackReason("gave_answer"), "gave_answer");
   assert.equal(FEEDBACK_REASON_LABEL.gave_answer, "直接给了答案或整句翻译");
   assert.equal(formatReasonLine("gave_answer"), "原因：直接给了答案或整句翻译");
-  assert.equal(formatReasonLine("bogus"), "");
+});
+
+test("反馈原因按档位分组：刚好不追问，太浅/太深各一套", () => {
+  assert.deepEqual(reasonsForFeedback("right"), []);
+  assert.deepEqual(reasonsForFeedback(null), []);
+  const shallow = reasonsForFeedback("shallow");
+  const deep = reasonsForFeedback("deep");
+  assert.ok(shallow.length > 0 && deep.length > 0);
+  assert.ok(shallow.includes("missed_point") && !shallow.includes("gave_answer"));
+  assert.ok(deep.includes("gave_answer") && !deep.includes("missed_point"));
+  // 两档不重叠，语义不拧
+  assert.equal(shallow.filter((r) => deep.includes(r)).length, 0);
+});
+
+test("切档清原因：刚好一律清空，跨档预设清掉，自由文本保留", () => {
+  assert.equal(reasonForFeedback("gave_answer", "right"), null);
+  assert.equal(reasonForFeedback("自己写的原因", "right"), null);
+  // gave_answer 属于 deep、不属于 shallow → 切到 shallow 要清掉
+  assert.equal(reasonForFeedback("gave_answer", "shallow"), null);
+  assert.equal(reasonForFeedback("gave_answer", "deep"), "gave_answer");
+  // 自由文本无档位归属，跟着走
+  assert.equal(reasonForFeedback("that 从句讲错了", "shallow"), "that 从句讲错了");
+  assert.equal(reasonForFeedback(null, "deep"), null);
+});
+
+test("反馈原因：自定义文本可落库、限长去换行、原样进档案文本", () => {
+  const raw = "  that 从句讲成\n定语从句了  ";
+  const saved = normalizeFeedbackReason(raw) ?? "";
+  assert.equal(saved, "that 从句讲成 定语从句了");
+  assert.equal((normalizeFeedbackReason("x".repeat(CUSTOM_REASON_MAX_CHARS + 20)) ?? "").length, CUSTOM_REASON_MAX_CHARS);
+  assert.equal(normalizeFeedbackReason("   "), null);
+  assert.equal(normalizeFeedbackReason(42), null);
+  // 关键：自定义原因要能一路走到学生档案，不能是摆设
+  assert.equal(formatReasonLine(saved), "原因：that 从句讲成 定语从句了");
+  assert.equal(formatReasonLine(""), "");
 });
 
 test("时间衰减：今天 1，45 天前 0.5，未来与过去同样远不对称", () => {

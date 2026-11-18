@@ -85,7 +85,7 @@ test("某一档特别多时不会把另外两档挤出候选池", () => {
   assert.equal(got.count, 61);
 });
 
-test("反馈原因：写入反馈时保存，档案行里带原因；未知原因忽略", () => {
+test("反馈原因：写入反馈时保存，档案行里带原因；自定义原样进档案文本", () => {
   db.prepare("INSERT INTO learner_profiles (user_id, memory_reset_at, updated_at) VALUES ('D', 0, ?)").run(NOW);
   add({ id: "d-reason", user: "D", feedback: "deep", feedbackAt: NOW - 10 });
   assert.equal(store.setFeedback("D", "d-reason", "deep", "gave_answer"), true);
@@ -96,10 +96,27 @@ test("反馈原因：写入反馈时保存，档案行里带原因；未知原�
   const got = store.recentFeedbackFor("D", NOW);
   assert.equal(got.lines[0], "单词，自动讲解：原因：直接给了答案或整句翻译 → 太深");
 
-  store.setFeedback("D", "d-reason", "deep", "bogus");
+  store.setFeedback("D", "d-reason", "deep", "that 从句讲成了定语从句");
   assert.equal(
     (db.prepare("SELECT feedback_reason FROM explain_events WHERE id = 'd-reason'").get() as { feedback_reason: string | null }).feedback_reason,
-    null,
+    "that 从句讲成了定语从句",
+  );
+  const custom = store.recentFeedbackFor("D", NOW);
+  assert.equal(custom.lines[0], "单词，自动讲解：原因：that 从句讲成了定语从句 → 太深");
+});
+
+test("自定义原因必须走到下一次 AI 读到的学生档案，不能只是存了不用", () => {
+  // 档案要 3 次反馈才启用（RECENT_FEEDBACK_FOR_PROFILE），补足前提
+  db.prepare("INSERT INTO learner_profiles (user_id, memory_reset_at, updated_at) VALUES ('E', 0, ?)").run(NOW);
+  for (let i = 0; i < 3; i++) {
+    add({ id: `e-${i}`, user: "E", feedback: i === 2 ? "deep" : "right", feedbackAt: NOW - 100 + i });
+  }
+  store.setFeedback("E", "e-2", "deep", "that 从句讲成了定语从句");
+  const block = store.learnerBlockFor("E");
+  assert.equal(block.personalized, true, "3 次反馈应启用档案");
+  assert.ok(
+    block.block.includes("that 从句讲成了定语从句"),
+    `学生档案里应能看到自定义原因，实际：${block.block}`,
   );
 });
 
