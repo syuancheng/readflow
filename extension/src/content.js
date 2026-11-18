@@ -643,7 +643,7 @@
           )
           .join("")}
         <div class="rf-ask-custom">
-          <input class="rf-ask-input" placeholder="自己写个问题…" />
+          <input class="rf-ask-input" placeholder="我有别的问题…" />
           <button class="rf-ask-send" data-act="ask-custom" title="发送" aria-label="发送" disabled>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
               stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">

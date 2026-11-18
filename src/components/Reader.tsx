@@ -2101,7 +2101,7 @@ function PickCard({
             <div className="rf-ask-custom">
               <textarea
                 className="duo-input rf-ask-input"
-                placeholder="自己写个问题…"
+                placeholder="我有别的问题…"
                 rows={1}
                 value={askPrompt}
                 onChange={(e) => setAskPrompt(e.target.value)}

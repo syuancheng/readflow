@@ -48,15 +48,12 @@ export default async function Home() {
   const showSurvey = needsSurvey(getLearner(user.id));
 
   return (
-    <div className="rf-container rf-page">
-      {/* ===== 页面头：不套卡片（规范 §5 不嵌套框），右侧是游戏化徽章 ===== */}
-      <div className="flex items-end justify-between gap-6 flex-wrap mb-8">
-        <div>
-          <h1 className="rf-home-hero">今天读点什么？</h1>
-          <p className="text-sm text-ink-soft mt-2">
-            导入想读的文章，边读边查词，生词会带着原句收进词库。
-          </p>
-        </div>
+    <div className="rf-container rf-page rf-page-home">
+      {/* ===== 页面头：不套卡片（规范 §5 不嵌套框）；只留一句引导，标题让位给「我的文本」列表 ===== */}
+      <div className="flex items-end justify-between gap-6 flex-wrap mb-4">
+        <p className="text-sm text-ink-soft">
+          导入想读的文章，边读边查词，生词会带着原句收进词库。
+        </p>
         <div className="flex items-center gap-2 shrink-0">
           <span className="duo-xp">⚡ {stats.todayCount * 10} XP</span>
           <span className="duo-streak">🔥 {stats.savedCount}</span>
@@ -100,8 +97,10 @@ export default async function Home() {
           )}
         </div>
 
-        {/* ===== 右：导入 + 统计 ===== */}
-        <div className="space-y-6 lg:sticky lg:top-24">
+        {/* ===== 右：导入 + 统计 =====
+            宽屏两栏时钉住右栏（top-20 = 80px，紧贴 64px 顶栏下方）；
+            窄屏退回单列，sticky 自然失效、右栏正常排在列表下方（TIP-05）。 */}
+        <div className="space-y-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-96px)] lg:overflow-y-auto">
           <ImportForm />
 
           {/* 统计卡 */}

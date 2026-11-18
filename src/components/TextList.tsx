@@ -206,7 +206,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
           </div>
         )
       ) : (
-        <ul className="space-y-3">
+        <ul className="space-y-4">
           {shown.map((t, i) => {
             const style = SOURCE_STYLE[t.sourceType] ?? SOURCE_STYLE.paste;
             const cefrDetail = parseCefrDetail(t.cefrDetail);
@@ -217,7 +217,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
                     <span className="duo-level-dot">{i + 1}</span>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline justify-between gap-4 mb-2 pr-9">
+                      <div className="flex items-baseline justify-between gap-4 mb-1 pr-9">
                         <h2 className="text-base font-bold truncate">{t.title}</h2>
                         <span className="text-sm text-ink-soft shrink-0">
                           {t.wordCount.toLocaleString()} 词

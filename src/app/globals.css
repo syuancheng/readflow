@@ -590,7 +590,8 @@ body {
   background: var(--duo-bg);
   border: 2px solid var(--duo-border);
   border-radius: var(--rf-radius-lg);
-  padding: 20px 24px;
+  /* 只收上下内边距让列表更紧凑；左右仍 24px，卡片宽度不变（用户明确要求） */
+  padding: 12px 24px;
   cursor: pointer;
   transition: border-color 120ms ease, transform 80ms ease;
 }
@@ -3507,6 +3508,10 @@ body {
 .rf-page {
   padding-top: 32px;
   padding-bottom: 48px;
+}
+/* 首页：删掉大标题后内容本就上移，再收顶部留白（24px 仍在 4 的倍数阶梯内，P-05） */
+.rf-page-home {
+  padding-top: 24px;
 }
 /* 表单类页面（导出）：内容左对齐收窄，不居中，左边缘仍对齐 */
 .rf-page-narrow > * {
