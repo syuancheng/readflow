@@ -213,6 +213,8 @@ apt-get install -y certbot python3-certbot-nginx
 certbot --nginx -d 你的域名
 ```
 
+配好 HTTPS 之后再跑 `deploy.sh setup` 是安全的：`server-setup.sh` 检测到 `readflow.conf` 里已有 `listen 443` 就保留现有配置、不覆盖。
+
 之后访问 `https://你的域名`。nginx 已经设了 `proxy_set_header X-Forwarded-Proto $scheme`，登录 cookie 会自动带上 `Secure`；`TRUST_PROXY=1` 也在 `/etc/readflow/readflow.env` 里配好了，登录限速按真实访客 IP 计数，客户端伪造 `X-Forwarded-For` 无效。
 
 ---

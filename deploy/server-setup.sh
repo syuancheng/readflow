@@ -124,7 +124,16 @@ fi
 
 # ---------- 7. Nginx ----------
 server_name="${DOMAIN:-_}"
-sed "s/__SERVER_NAME__/$server_name/g" "$HERE/nginx.conf.template" > /etc/nginx/conf.d/readflow.conf
+NGINX_CONF=/etc/nginx/conf.d/readflow.conf
+# 已经配过 HTTPS（certbot 往这个文件里加了 listen 443 和证书路径）就不要重新生成：
+# 模板只有 80 端口，覆盖掉会让 https:// 直接打不开。
+if [ -f "$NGINX_CONF" ] && grep -qE 'listen[^;]*443' "$NGINX_CONF"; then
+  warn "检测到 $NGINX_CONF 里已配置 HTTPS，保留现有 Nginx 配置，不覆盖（避免丢掉证书配置）。"
+  warn "想改 Nginx 配置请直接编辑该文件；确实要按模板重新生成，先删掉它，跑完 setup 后执行：certbot install --cert-name 你的域名"
+  KEEP_NGINX_CONF=1
+else
+  sed "s/__SERVER_NAME__/$server_name/g" "$HERE/nginx.conf.template" > "$NGINX_CONF"
+fi
 # Ubuntu 自带的 default 站点占着 80 端口的默认 server，删掉（只是软链接）
 rm -f /etc/nginx/sites-enabled/default
 nginx -t -q
@@ -134,7 +143,11 @@ if pidof systemd >/dev/null 2>&1 || [ -d /run/systemd/system ]; then
 else
   (pgrep -x nginx >/dev/null && nginx -s reload) || nginx
 fi
-ok "Nginx 反代：${DOMAIN:-任意域名 / IP} :80 → 127.0.0.1:3000"
+if [ "${KEEP_NGINX_CONF:-}" = 1 ]; then
+  ok "Nginx 反代：沿用现有 HTTPS 配置（未覆盖）"
+else
+  ok "Nginx 反代：${DOMAIN:-任意域名 / IP} :80 → 127.0.0.1:3000"
+fi
 
 # ---------- 8. 每日备份 ----------
 install -m 755 "$HERE/backup.sh" /usr/local/bin/readflow-backup
