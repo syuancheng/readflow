@@ -17,7 +17,6 @@ export default function CardRunBlock({
   eta,
   error,
   onRetry,
-  onAgain,
 }: {
   status: CardStatus;
   st: CardState | null;
@@ -26,12 +25,7 @@ export default function CardRunBlock({
   error: string;
   /** 失败后重试 */
   onRetry: () => void;
-  /** 再做一组（已确认过） */
-  onAgain: () => void;
 }) {
-  const again = () => {
-    if (window.confirm("再做一组新的卡吗？")) onAgain();
-  };
   return (
     <div className="rf-run-block" data-state={status} aria-live="polite" aria-busy={status === "generating"}>
       {status === "generating" && (
@@ -53,9 +47,6 @@ export default function CardRunBlock({
           >
             已做成 {st?.count} 张卡 · 查看
           </a>
-          <button type="button" className="rf-run-action" onClick={again}>
-            再做一组
-          </button>
         </>
       )}
       {status === "failed" && (
@@ -70,9 +61,6 @@ export default function CardRunBlock({
         <>
           <span aria-hidden>✓</span>
           <span>已在墨墨</span>
-          <button type="button" className="rf-run-action" onClick={again}>
-            再做一组
-          </button>
         </>
       )}
       {error && status !== "failed" && (

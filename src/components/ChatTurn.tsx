@@ -18,11 +18,12 @@ export type ChatTurnData = {
 
 /**
  * 对话流里的一轮（P44）：用户的提问靠右（浅灰气泡），AI 的回答在左边、满宽、没有气泡。
- * 首次讲解没有用户气泡；它下面有「太浅 / 刚好 / 太深」，追问的回答下面没有反馈。
+ * 每条回答都有一条用户问题（首次讲解是统一的默认问题）；首次讲解下面有「太浅 / 刚好 / 太深」，追问的回答下面没有反馈。
  * 制卡建议显示在这条回答的末尾。
  */
 export default function ChatTurn({
   turn,
+  question,
   showFeedback,
   suggestion,
   onMakeCard,
@@ -31,6 +32,8 @@ export default function ChatTurn({
   onReason,
 }: {
   turn: ChatTurnData;
+  /** 这条回答对应的用户问题：显示在右边。每条 AI 回答都有，首次讲解用统一的默认问题 */
+  question: string;
   showFeedback: boolean;
   /** 这条回答末尾的制卡建议理由；不显示传 null */
   suggestion: string | null;
@@ -42,7 +45,7 @@ export default function ChatTurn({
   const failed = turn.status === "error" || (turn.status === "done" && isNotAGloss(turn.text));
   return (
     <div className="rf-chat-turn">
-      {turn.ask && <div className="rf-bubble-user">{turn.ask}</div>}
+      <div className="rf-bubble-user">{question}</div>
       <div className="rf-ai-reply">
         {(turn.status === "loading" || turn.status === "streaming" || failed) && (
           <div className="rf-chat-status">

@@ -35,6 +35,16 @@ export type AskPresetInput = {
   sentence: string;
 };
 
+/**
+ * 首次讲解隐含的那个问题。每条 AI 回答右边都要有一条用户问题（对话式界面的约定），
+ * 首次讲解不是用户打字问的（点词自动触发、或词典查不到时自动问），所以统一用这句话：
+ * 按选中的内容分三种——整句 / 短语 / 单词。自动触发、手动点快捷问题、回看，显示的都是它。
+ */
+export function defaultQuestion(sel: { isPhrase: boolean; isWholeSentence: boolean }): string {
+  if (sel.isWholeSentence) return "这句话是什么意思";
+  return sel.isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思";
+}
+
 export function buildAskPresets(input: AskPresetInput): AskPreset[] {
   const { isPhrase, isWholeSentence, hasDefault, quote, sentence } = input;
   const list: AskPreset[] = [];
@@ -42,7 +52,7 @@ export function buildAskPresets(input: AskPresetInput): AskPreset[] {
   if (!hasDefault) {
     list.push({
       key: "default",
-      label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思",
+      label: defaultQuestion({ isPhrase, isWholeSentence }),
       req: { askKind: "default" },
     });
   }
