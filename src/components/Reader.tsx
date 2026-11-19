@@ -1243,7 +1243,7 @@ export default function Reader({
     };
   }, []);
 
-  /** 词与短语已在 mouseup 里处理；click 只负责「点空白处收起」和挡住链接跳转 */
+  /** 词与短语已在 mouseup 里处理；click 只负责挡住链接跳转 */
   function onClick(e: React.MouseEvent) {
     const target = e.target as HTMLElement;
     // 链接里的词：点词优先弹释义，别直接跳走
@@ -1252,9 +1252,10 @@ export default function Reader({
       suppressClickRef.current = false;
       return;
     }
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return; // Option 拖动出来的原生选区：留给复制
-    if (!target.closest(".w")) close();
+    // 点正文空白不再收起右栏：学生查完词继续读、顺手点一下空白，
+    // 不该让翻译卡和绿色标记一起消失（尤其慢网络下持久批注还没回来时，
+    // 那看起来就像「白查了」，刷新又冒出来，非常迷惑）。
+    // 收起仍走明确的两种方式：再点同一个词（pickWord 里 close）、Esc（close）。
   }
 
   /** 悬停到已存批注里的任意位置：整条区间一起亮（走 rangeKey 渲染，不命令式改 class）。
