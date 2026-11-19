@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { scrollElementIntoReading } from "@/lib/reader-scroll";
 import CefrBadge from "./CefrBadge";
 import { useReadProgress } from "@/lib/use-read-progress";
 import type { CefrDetail, CefrLevel } from "@/lib/cefr";
@@ -57,9 +58,10 @@ export default function ReadingChrome(props: Props) {
       }
       setActiveId(cur);
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    // 捕获阶段挂在 document 上：整页滚动和正文自己滚动（P44 的双栏）都能收到
+    document.addEventListener("scroll", onScroll, { passive: true, capture: true });
     onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => document.removeEventListener("scroll", onScroll, { capture: true });
     // headings 来自服务端 RSC props，引用稳定；用长度兜住极端情况
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasToc]);
@@ -70,8 +72,7 @@ export default function ReadingChrome(props: Props) {
     if (!el) return;
     // 手动减掉 sticky 顶栏高度：不用 scroll-margin-top，免得影响 Reader 里
     // focusParaId 的 scrollIntoView({block:"center"}) 续读定位。
-    const top = el.getBoundingClientRect().top + window.scrollY - 78;
-    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    scrollElementIntoReading(el, 24);
     if (window.innerWidth <= 720) setTocOpen(false);
   }
 

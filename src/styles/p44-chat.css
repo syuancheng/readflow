@@ -375,3 +375,45 @@
   orphans: 2;
   widows: 2;
 }
+
+/* ===== 阅读页宽屏：正文和 AI 栏是并排的两个独立滚动区（和 ChatGPT / Claude 的布局一样） =====
+   正文的滚动条在两栏之间，AI 栏的滚动条在窗口最右边，中间不再空出一大块；
+   整个页面不再有第三条滚动条。滚动位置通过 src/lib/reader-scroll.ts 读取（读进度、目录都用它）。
+   窄屏（右栏堆到文章下面）仍是整页滚动，不在这条规则里。 */
+@media (min-width: 1024px) {
+  .rf-reading-layout { height: calc(100vh - var(--rf-bar-h)); overflow: hidden; }
+  .rf-reading-main { height: 100%; min-height: 0; }
+  .rf-reading-main > div { max-width: none; height: 100%; margin: 0; padding: 0; }
+  .rf-reading-hint { display: none; } /* 提示行放不进固定高度；Esc 关闭等提示在右栏空状态里 */
+
+  .rf-reading-layout .reader-split { height: 100%; gap: 0; align-items: stretch; }
+
+  .rf-reading-layout .reader-main {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--rf-space-6);
+    scrollbar-width: thin;
+    scrollbar-color: var(--rf-gray-300) transparent;
+  }
+
+  .rf-reading-layout .reader-aside {
+    position: static;
+    height: 100%;
+    max-height: none;
+    padding: var(--rf-space-6) 0 0 var(--rf-space-5);
+    border-left: var(--rf-border-width) solid var(--rf-border);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--rf-gray-300) transparent;
+  }
+  .rf-reading-layout .reader-aside-chat { height: 100%; overflow: hidden; padding-bottom: 0; }
+  .rf-reading-layout .reader-aside-chat .rf-chat { height: 100%; max-height: none; }
+  /* AI 栏的滚动条贴窗口最右边：右侧留白放进里面的内容上，不放在滚动容器上 */
+  .rf-reading-layout .reader-aside-chat .rf-chat-log { padding-right: var(--rf-space-4); }
+  .rf-reading-layout .reader-aside-chat .rf-composer { margin-right: var(--rf-space-4); margin-bottom: var(--rf-space-4); }
+}
+
+/* 滚动条细一点、淡一点（Claude 的做法）：对话区和 AI 栏统一 */
+.reader-aside .rf-chat-log, .rf-chat-log { scrollbar-width: thin; scrollbar-color: var(--rf-gray-300) transparent; }
+.rf-chat-log::-webkit-scrollbar { width: var(--rf-space-1); }

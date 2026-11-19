@@ -102,7 +102,7 @@ try {
     const c = document.querySelector(".rf-composer").getBoundingClientRect();
     return { gap: Math.round(a.bottom - c.bottom), inView: c.bottom <= innerHeight };
   });
-  check("C2 输入区固定在右栏底部、在可视区域内", lay.gap <= 8 && lay.inView, JSON.stringify(lay));
+  check("C2 输入区固定在右栏底部、在可视区域内", lay.gap <= 24 && lay.inView, JSON.stringify(lay));
   await page.locator(".rf-composer-input").fill("abc");
   const sendShown = (await page.locator(".rf-composer-send").count()) === 1;
   const sbox = await page.evaluate(() => { const b = document.querySelector(".rf-composer-box").getBoundingClientRect(), x = document.querySelector(".rf-composer-send").getBoundingClientRect(); return { right: Math.round(b.right - x.right), mid: Math.abs((b.top + b.bottom) / 2 - (x.top + x.bottom) / 2) }; });
@@ -138,7 +138,7 @@ try {
     const b = document.querySelector(".rf-bubble-user"), r = document.querySelectorAll(".rf-ai-reply")[1];
     return { bubbleRight: Math.round(logR.right - b.getBoundingClientRect().right), bubbleBg: getComputedStyle(b).backgroundColor, replyBg: getComputedStyle(r).backgroundColor, replyW: Math.round(r.getBoundingClientRect().width), logW: Math.round(logR.width) };
   });
-  check("C10 用户气泡靠右、浅灰底；AI 回答无底色、满宽", g.bubbleRight <= 12 && g.bubbleBg !== "rgba(0, 0, 0, 0)" && g.replyBg === "rgba(0, 0, 0, 0)" && g.replyW >= g.logW - 12, JSON.stringify(g));
+  check("C10 用户气泡靠右、浅灰底；AI 回答无底色、满宽", g.bubbleRight <= 20 && g.bubbleBg !== "rgba(0, 0, 0, 0)" && g.replyBg === "rgba(0, 0, 0, 0)" && g.replyW >= g.logW - 24, JSON.stringify(g));
 
   // 回答期间：快捷问题和发送暂停；往上翻时不抢滚动
   await ask("讲讲句子结构");
@@ -235,6 +235,33 @@ try {
   const autoBubbles = await page.locator(".rf-bubble-user").allInnerTexts();
   check("C22 自动触发的回答（拖选短语，词典没有）：右边也有统一的用户问题", autoBubbles[0] === "这个短语在这句里什么意思" && (await page.locator(".rf-ai-reply").count()) >= 1, autoBubbles.join("|"));
   await page.screenshot({ path: path.join(SHOTS, "chat-auto-1440.png") });
+
+  // ===== 双栏各自滚动：正文的滚动条在两栏之间，AI 栏的滚动条在窗口最右边 =====
+  const longBody = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} talks about database tracks and skills over time, with enough words to wrap onto several lines in the article column.`).join("\n\n");
+  const lt = await api("/api/texts", { cookie, method: "POST", body: { title: "Long text", text: longBody } });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${BASE}/texts/${lt.data.id ?? lt.data.textId}`, { waitUntil: "networkidle" });
+  const pane = await page.evaluate(() => {
+    const m = document.querySelector(".reader-main"), a = document.querySelector(".reader-aside");
+    return {
+      pageScrolls: document.documentElement.scrollHeight > document.documentElement.clientHeight + 1,
+      mainScrolls: getComputedStyle(m).overflowY === "auto" && m.scrollHeight > m.clientHeight,
+      mainBar: m.offsetWidth - m.clientWidth,
+      asideRightGap: Math.round(innerWidth - a.getBoundingClientRect().right),
+      mainRight: Math.round(m.getBoundingClientRect().right), asideLeft: Math.round(a.getBoundingClientRect().left),
+    };
+  });
+  check("C23 宽屏双栏：整页不滚动，正文自己是滚动区，AI 栏贴到窗口最右边，两栏紧挨着（中间没有空档）", !pane.pageScrolls && pane.mainScrolls && pane.asideRightGap <= 1 && Math.abs(pane.asideLeft - pane.mainRight) <= 1, JSON.stringify(pane));
+  check("C23b 滚动条细（≤ 8px）", pane.mainBar <= 8, `正文滚动条宽=${pane.mainBar}`);
+  await page.evaluate(() => { const m = document.querySelector(".reader-main"); m.scrollTo({ top: m.scrollHeight }); });
+  await page.waitForTimeout(900);
+  const prog = await page.evaluate(() => parseFloat(document.querySelector(".rf-tb-progress i").style.width));
+  check("C23c 正文滚到底：顶栏读进度走到 100%（读进度跟着正文滚动区走）", prog >= 99, `进度=${prog}`);
+  await page.evaluate(() => { document.querySelector(".reader-main").scrollTo({ top: 0 }); });
+  await page.waitForTimeout(700);
+  const prog0 = await page.evaluate(() => parseFloat(document.querySelector(".rf-tb-progress i").style.width));
+  check("C23d 滚回顶部：读进度回到 0", prog0 <= 1, `进度=${prog0}`);
+  await page.screenshot({ path: path.join(SHOTS, "chat-panes-1440.png") });
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });

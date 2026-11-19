@@ -170,7 +170,7 @@ try {
     const aside = document.querySelector(".reader-aside").getBoundingClientRect();
     return { bubbleRight: Math.round(log.right - bub.right), replyLeft: Math.round(reply.left - log.left), composerBottom: Math.round(aside.bottom - composer.bottom) };
   });
-  check("5a 用户消息靠右、AI 回答靠左，输入区贴在右栏底部", geo.bubbleRight <= 12 && geo.replyLeft <= 12 && geo.composerBottom <= 8, JSON.stringify(geo));
+  check("5a 用户消息靠右、AI 回答靠左，输入区贴在右栏底部", geo.bubbleRight <= 20 && geo.replyLeft <= 12 && geo.composerBottom <= 24, JSON.stringify(geo));
   if (process.env.SHOT_DIR) await page.locator(".reader-aside").screenshot({ path: path.join(process.env.SHOT_DIR, "ask-thread.png") });
   const stored = q("select ai_gloss g from contexts where text_id = ? and quote = 'database'", textId)?.g ?? "";
   check("5b 整串存进这条记录（格式不变）", (stored.match(/【追问】/g) ?? []).length === 3, `【追问】×${(stored.match(/【追问】/g) ?? []).length}`);

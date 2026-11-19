@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { currentBlockIdx, scrollProgress, type BlockPosition } from "@/lib/read-progress";
 import { bgFetch } from "@/lib/bg-fetch";
 import { createCoalescer } from "@/lib/request-gate";
+import { readScrollMetrics } from "@/lib/reader-scroll";
 
 /**
  * 阅读进度的计算与上报（P18 逻辑，P19 从 ReadProgressPill 抽成 hook）。
@@ -50,11 +51,7 @@ export function useReadProgress({
 
     const measure = () => {
       if (disposed) return;
-      const metrics = {
-        scrollY: window.scrollY,
-        innerHeight: window.innerHeight,
-        scrollHeight: document.documentElement.scrollHeight,
-      };
+      const metrics = readScrollMetrics();
       const nextRatio = scrollProgress(metrics);
 
       // 只算「读到线」以上的块：视口 75% 深度对应的文档坐标。
@@ -64,7 +61,7 @@ export function useReadProgress({
       document.querySelectorAll<HTMLElement>("[data-idx]").forEach((el) => {
         const idx = Number(el.dataset.idx);
         if (Number.isInteger(idx)) {
-          positions.push({ idx, top: el.getBoundingClientRect().top + metrics.scrollY });
+          positions.push({ idx, top: el.getBoundingClientRect().top - metrics.originTop + metrics.scrollY });
         }
       });
       const nextIdx = currentBlockIdx(positions, readLine);
@@ -146,7 +143,8 @@ export function useReadProgress({
       }, 350);
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
+    // 捕获阶段挂在 document 上：整页滚动和正文自己滚动（P44 的双栏）都能收到，scroll 事件本身不冒泡
+    document.addEventListener("scroll", onScroll, { passive: true, capture: true });
     window.addEventListener("resize", onScroll);
     measure(); // 打开页面先按真实位置校准
 
@@ -162,7 +160,7 @@ export function useReadProgress({
       disposed = true;
       if (timer) clearTimeout(timer);
       clearInterval(reportTimer);
-      window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", onScroll);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onHide);

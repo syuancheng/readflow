@@ -356,3 +356,9 @@
 - 对齐：菜单文字、「我的常用问题」标题、添加按钮全部落在菜单内左边线；「＋」与发送同为 32px 圆形，分居容器两端。
 - 对比：发送是整个输入区里**唯一的实心色块**（AI 紫），只有输入后才出现，所以它是焦点；「＋」是无底色的次要灰。
 - 新增色值：无。
+
+### 11.5 双栏各自滚动（PRD §14，D17–D19）
+- 新文件 `src/lib/reader-scroll.ts`：`readerScroller()`（正文自己是滚动容器时返回 `.reader-main`，否则 null）、`readScrollMetrics()`、`scrollElementIntoReading()`。
+- `use-read-progress.ts`、`ReadingChrome.tsx`（目录高亮、目录点击跳转）改用它；`scroll` 监听改挂在 `document` 的**捕获阶段**（scroll 事件不冒泡，这样整页滚动和正文滚动都能收到）。块位置换算为「滚动区内容坐标」：`rect.top - originTop + scrollY`。
+- 样式在 `p44-chat.css` 末尾的 `@media (min-width: 1024px)`：`.rf-reading-layout` 固定为 `100vh - 顶栏`；`.reader-main` `overflow-y:auto`；`.reader-aside` 不再 sticky，高度 100%、贴窗口右边；AI 栏右侧留白放在里面的内容上，滚动条才能贴边。选择器带 `.rf-reading-layout` 前缀，因为 `globals.css` 的同名规则排在 `@import` 之后，同权重会覆盖。
+- 测试：`e2e-chat-panel.mjs` C23–C23d（整页不滚动、两栏紧挨、AI 栏贴右、正文滚到底进度 100%、回顶 0%）。
