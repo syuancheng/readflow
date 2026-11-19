@@ -93,7 +93,7 @@ try {
   check("C1 输入区是一个圆角容器：左「＋」、中输入框；没有输入时右边没有发送按钮，也没有语音按钮", (await page.locator(".rf-composer-plus").count()) === 1 && (await page.locator(".rf-composer-send").count()) === 0 && (await page.locator(".rf-quick").count()) === 0);
   await page.locator(".rf-composer-plus").click();
   const chips = await page.locator(".rf-menu-item").allInnerTexts();
-  check("C1b 点「＋」展开常用问题：含「这个词在这句里什么意思」「整句没看懂」「做成卡片」和「添加常用问题」", ["这个词在这句里什么意思", "整句没看懂", "做成卡片"].every((x) => chips.includes(x)) && chips.some((c) => c.includes("添加常用问题")), chips.join(" / "));
+  check("C1b 点「＋」展开常用问题：含「这个词在这句里什么意思」「整句没看懂」「做成卡片」，底部是一个提示词为「添加常用问题」的输入框（没有多余的说明和大按钮）", ["这个词在这句里什么意思", "整句没看懂", "做成卡片"].every((x) => chips.includes(x)) && (await page.locator(".rf-menu-input").getAttribute("placeholder")) === "添加常用问题" && (await page.locator(".rf-menu-empty, .rf-menu-save, .rf-menu-addbtn").count()) === 0, chips.join(" / "));
   const menuBox = await page.evaluate(() => { const m = document.querySelector(".rf-menu").getBoundingClientRect(), c = document.querySelector(".rf-composer").getBoundingClientRect(); return { w: Math.round(m.width), cw: Math.round(c.width), row: Math.round(document.querySelector(".rf-menu-item").getBoundingClientRect().height) }; });
   check("C1d 菜单窄而紧凑：宽度 ≤ 288px 且比输入区窄，每行高度 ≤ 32px", menuBox.w <= 288 && menuBox.w < menuBox.cw && menuBox.row <= 32, JSON.stringify(menuBox));
   await page.screenshot({ path: path.join(SHOTS, "chat-menu-1440.png") });
@@ -201,11 +201,15 @@ try {
 
   // ===== 我的常用问题：添加、使用、刷新后还在、删除 =====
   await page.locator(".rf-composer-plus").click();
-  await page.getByRole("button", { name: /添加常用问题/ }).click();
+  await page.locator(".rf-menu-input").fill("有什么近义词？");
+  await page.getByRole("button", { name: "保存常用问题" }).click();
+  await page.locator(".rf-menu-row", { hasText: "有什么近义词？" }).waitFor({ timeout: 5000 });
+  check("C20a0 点输入框右边的勾保存：出现在列表里，输入框清空", (await page.locator(".rf-menu-input").inputValue()) === "");
+  await page.locator(".rf-menu-del").click();
+  await page.waitForTimeout(300);
   await page.locator(".rf-menu-input").fill("有什么近义词？");
   await page.keyboard.press("Enter");
   await page.locator(".rf-menu-row", { hasText: "有什么近义词？" }).waitFor({ timeout: 5000 });
-  await page.locator(".rf-menu-addbtn").click();
   await page.locator(".rf-menu-input").fill("有什么近义词？");
   await page.keyboard.press("Enter");
   const dupErr = await page.locator(".rf-menu-error").innerText();
@@ -261,6 +265,8 @@ try {
     };
   });
   check("C23 宽屏双栏：整页不滚动，正文自己是滚动区，AI 栏贴到窗口最右边，两栏紧挨着（中间没有空档）", !pane.pageScrolls && pane.mainScrolls && pane.asideRightGap <= 1 && Math.abs(pane.asideLeft - pane.mainRight) <= 1, JSON.stringify(pane));
+  const card = await page.evaluate(() => { const c = getComputedStyle(document.querySelector(".reader-article-card")); return { b: c.borderTopWidth, shadow: c.boxShadow }; });
+  check("C23a 宽屏下正文外面没有卡片框（只剩两栏之间一条分隔线）", card.b === "0px" && card.shadow === "none", JSON.stringify(card));
   check("C23b 滚动条细（≤ 8px）", pane.mainBar <= 8, `正文滚动条宽=${pane.mainBar}`);
   await page.evaluate(() => { const m = document.querySelector(".reader-main"); m.scrollTo({ top: m.scrollHeight }); });
   await page.waitForTimeout(900);
