@@ -289,6 +289,13 @@ try {
   check("C23d 滚回顶部：读进度回到 0", prog0 <= 1, `进度=${prog0}`);
   await page.screenshot({ path: path.join(SHOTS, "chat-panes-1440.png") });
 
+  // ===== 页脚：ICP 备案号 =====
+  const footerOnReader = await page.locator(".rf-site-footer").isVisible();
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const foot = page.locator(".rf-site-footer a");
+  check("C24 普通页面底部有 ICP 备案号，链接到 beian.miit.gov.cn（新标签页）；阅读页宽屏不显示页脚", (await foot.innerText()) === "陕ICP备2026034202号" && (await foot.getAttribute("href")) === "https://beian.miit.gov.cn/" && (await foot.getAttribute("target")) === "_blank" && !footerOnReader, `阅读页可见=${footerOnReader}`);
+  await page.screenshot({ path: path.join(SHOTS, "footer-home-1440.png"), fullPage: true });
+
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });
   await page.waitForTimeout(400);
