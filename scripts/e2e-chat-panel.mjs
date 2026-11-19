@@ -31,6 +31,8 @@ const model = http.createServer((req, res) => {
     const chunk = (t) => res.write(`data: ${JSON.stringify({ id: "f", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta: { content: t }, finish_reason: null }] })}\n\n`);
     const end = () => { res.write(`data: ${JSON.stringify({ id: "s", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`); res.write("data: [DONE]\n\n"); res.end(); };
     chunk("释义：测试讲解。\n");
+    const sug = /为什么用/.test(b); // 自己提的那个问题的回答末尾带制卡建议
+    if (sug) { chunk("这是一段回答。\n"); chunk("制卡建议：技术文档高频词，与 generalization 同源，值得放在一起记，别和名词混了"); end(); return; }
     if (slow) { setTimeout(() => { chunk("这是一段较长的回答。\n".repeat(30)); end(); }, 1500); }
     else { chunk("这是一段回答。\n".repeat(8)); end(); }
   });
@@ -141,10 +143,19 @@ try {
   check("C13 自己发消息后停在底部（对话溢出时输入区仍在原处）", bottom.over && bottom.atBottom, JSON.stringify(bottom));
   await page.screenshot({ path: path.join(SHOTS, "chat-thread-1440.png") });
 
+  // ===== 制卡建议：在这条回答的末尾 =====
+  const sugLine = page.locator(".rf-suggest-line");
+  const answerText = await page.locator(".rf-ai-reply").last().locator(".rf-md").innerText();
+  const sug = await sugLine.evaluate((e) => ({ bg: getComputedStyle(e).backgroundColor, inLast: e.closest(".rf-ai-reply") === [...document.querySelectorAll(".rf-ai-reply")].at(-1), afterBody: Boolean(e.previousElementSibling?.classList.contains("rf-md")) }));
+  check("C13b 制卡建议显示在这条回答的末尾（正文之后）、浅紫底；理由超过 30 字也完整显示", (await sugLine.count()) === 1 && sug.inLast && sug.afterBody && sug.bg === "rgb(245, 236, 255)" && (await sugLine.innerText()).includes("别和名词混了"), JSON.stringify(sug));
+  check("C13c 正文里没有「制卡建议」那一行", !answerText.includes("制卡建议"), answerText.slice(0, 40));
+  await page.screenshot({ path: path.join(SHOTS, "chat-suggest-1440.png") });
+
   // ===== 做成卡片：像一次工具调用 =====
-  await page.getByRole("button", { name: "做成卡片" }).click();
+  await page.locator(".rf-suggest-act").click();
   await page.locator('.rf-run-block[data-state="generating"]').waitFor({ timeout: 5000 });
-  check("C14 点「做成卡片」：右边出现用户消息，左边出现进行中的状态块", (await page.locator(".rf-bubble-user").last().innerText()) === "做成卡片" && (await page.locator(".rf-run-block .rf-progress-ring").count()) === 1);
+  check("C14a 开始做卡后建议行消失", (await page.locator(".rf-suggest-line").count()) === 0);
+  check("C14 点建议里的「做成卡片」：右边出现用户消息，左边出现进行中的状态块", (await page.locator(".rf-bubble-user").last().innerText()) === "做成卡片" && (await page.locator(".rf-run-block .rf-progress-ring").count()) === 1);
   const failed = page.locator('.rf-run-block[data-state="failed"]');
   await failed.waitFor({ timeout: 20000 });
   check("C15 失败：原因留在对话里，有「重试」", /做卡失败：模型没有返回合法的 JSON/.test(await failed.innerText()) && (await failed.getByRole("button", { name: "重试" }).count()) === 1);

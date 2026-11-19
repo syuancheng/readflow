@@ -96,7 +96,7 @@ try {
   const page = await ctx.newPage();
   const reqs = [];
   page.on("request", (r) => {
-    if (/\/api\/(dict|explain)/.test(r.url())) reqs.push(r.url());
+    if (/\/api\/(dict|explain(?!\/answers))/.test(r.url())) reqs.push(r.url());
   });
 
   const open = async (id) => {

@@ -27,13 +27,12 @@ const check = (n, ok, d = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PA
 const S = "The ephemeral joy faded quickly.";
 const cards = {
   cards: [
-    { kind: "context_meaning", target: "t", front: [
+    { kind: "rephrase", target: "t", front: [
       { t: "sentence", source: "original", text: S, mark: { start: 4, end: 13, as: "highlight" } },
-      { t: "instruction", text: "ephemeral is closest in meaning to" },
-      { t: "choice", options: [{ text: "brief", correct: true }, { text: "large", correct: false }, { text: "loud", correct: false }] }],
-      back: { answer: [{ t: "text", text: "brief" }], explanation: [{ t: "text", text: "转瞬即逝" }] } },
-    { kind: "layered_cloze", target: "t2", front: [{ t: "sentence", source: "original", text: S, mark: { start: 4, end: 13, as: "blank" } }],
-      hints: [{ t: "text", text: "首字母 e" }], back: { answer: [{ t: "fill", answer: "ephemeral" }] } },
+      { t: "instruction", text: "不用 ephemeral，换个说法把这句话再说一遍" }],
+      back: { answer: [{ t: "sentence", source: "paraphrase", text: "The brief joy faded quickly." }, { t: "text", text: "短暂的喜悦很快消失了。" }], explanation: [{ t: "text", text: "转瞬即逝" }] } },
+    { kind: "custom", customLabel: "提示卡", target: "t2", front: [{ t: "sentence", source: "original", text: S, mark: { start: 4, end: 13, as: "highlight" } }, { t: "instruction", text: "回忆这个词怎么拼" }],
+      hints: [{ t: "text", text: "首字母 e" }], back: { answer: [{ t: "text", text: "ephemeral" }] } },
     { kind: "situation_say", target: "在场景里用 ephemeral", front: [
       { t: "text", text: "朋友说他升职后的兴奋只持续了几天。" }, { t: "instruction", text: "用 ephemeral 说一句" }],
       back: { answer: [
