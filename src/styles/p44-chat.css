@@ -57,6 +57,25 @@
   overflow-wrap: anywhere;
 }
 
+/* 用户气泡里的引用行：这次提问针对 AI 回答里的哪段话，回看也能追溯 */
+.rf-bubble-quote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--rf-space-1);
+  margin-bottom: var(--rf-space-1);
+  padding-bottom: var(--rf-space-1);
+  border-bottom: var(--rf-border-width) solid var(--rf-border);
+  color: var(--rf-text-secondary);
+}
+.rf-bubble-quote svg { flex: none; margin-top: 2px; }
+.rf-bubble-quote span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
 .rf-ai-reply { min-width: 0; }
 
 .rf-chat-status {
@@ -237,44 +256,76 @@
 }
 .rf-composer-input::placeholder { color: var(--rf-text-secondary); }
 
-/* 引用片段 chip：划选 AI 回答后贴在输入框上方，可删除 */
-.rf-quote-chip {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--rf-space-2);
-  margin: 0 var(--rf-space-1) var(--rf-space-1);
-  padding: var(--rf-space-2);
-  border-left: 3px solid var(--rf-ai-text, var(--duo-green));
-  border-radius: var(--rf-radius-sm);
-  background: var(--rf-bg-subtle, var(--duo-surface));
-  font-size: var(--rf-text-sm);
-  line-height: var(--rf-leading-md);
-  color: var(--rf-text-secondary);
+/* 划选浮层：复用 .rf-menu 的白底细边框语言（R-01 重复），不另造实心色块 */
+.rf-selection-ask {
+  display: inline-flex;
+  padding: var(--rf-space-1);
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  box-shadow: var(--rf-shadow-md);
 }
-.rf-quote-chip-mark { color: var(--rf-ai-text, var(--duo-green)); font-weight: 600; }
-.rf-quote-chip-text {
-  flex: 1;
-  min-width: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-word;
-}
-.rf-quote-chip-del {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  padding: 0;
+.rf-selection-ask-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rf-space-1);
+  padding: var(--rf-space-1) var(--rf-space-2);
   border: 0;
   border-radius: var(--rf-radius-sm);
   background: transparent;
-  color: var(--rf-text-secondary);
-  font-size: var(--rf-text-md);
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  font-weight: 400;
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
+}
+.rf-selection-ask-btn svg { width: var(--rf-space-4); height: var(--rf-space-4); }
+.rf-selection-ask-btn:hover { background: var(--rf-ai-soft); color: var(--rf-ai-text); }
+.rf-selection-ask-btn:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+
+/* 引用 chip：按需宽度的小胶囊（对齐 WorkBuddy 参考），单行截断，紧贴输入框上方 */
+.rf-quote-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-1);
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0 var(--rf-space-1) var(--rf-space-1);
+  padding: var(--rf-space-1) var(--rf-space-2);
+  border: 0;
+  border-radius: var(--rf-radius-full);
+  background: var(--rf-ai-soft);
+  color: var(--rf-ai-text);
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+}
+.rf-quote-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rf-quote-chip-del {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rf-space-5);
+  height: var(--rf-space-5);
+  padding: 0;
+  border: 0;
+  border-radius: var(--rf-radius-full);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--rf-text-sm);
   line-height: 1;
   cursor: pointer;
 }
-.rf-quote-chip-del:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-quote-chip-del:hover { background: var(--rf-bg-hover); }
 .rf-quote-chip-del:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
 /* 左右两个按钮同尺寸（32px），重复 */

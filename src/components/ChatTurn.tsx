@@ -10,6 +10,8 @@ import type { Feedback } from "@/lib/learner/types";
 
 export type ChatTurnData = {
   ask?: string;
+  /** 这次提问针对的、用户在 AI 回答里划选的原文片段 */
+  quote?: string;
   text: string;
   status: "loading" | "streaming" | "done" | "error";
   answerId?: string;
@@ -67,7 +69,8 @@ export default function ChatTurn({
     setSelection({
       text,
       top: above ? rect.top - 8 : rect.bottom + 8,
-      left: Math.max(90, Math.min(window.innerWidth - 90, rect.left + rect.width / 2)),
+      // 左边缘贴选区起点，且不出视口右界（A-03：浮层是选区的附属，不是独立居中弹窗）
+      left: Math.max(8, Math.min(window.innerWidth - 120, rect.left)),
       below: !above,
     });
   }, [turn.status, onQuote]);
@@ -82,7 +85,17 @@ export default function ChatTurn({
   );
   return (
     <div className="rf-chat-turn">
-      <div className="rf-bubble-user">{question}</div>
+      <div className="rf-bubble-user">
+        {turn.quote && (
+          <div className="rf-bubble-quote" title={turn.quote}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="12" height="12" aria-hidden>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            <span>{turn.quote}</span>
+          </div>
+        )}
+        {question}
+      </div>
       <div className="rf-ai-reply" ref={replyRef} onMouseUp={captureSelection}>
         {(turn.status === "loading" || turn.status === "streaming" || failed) && (
           <div className="rf-chat-status">

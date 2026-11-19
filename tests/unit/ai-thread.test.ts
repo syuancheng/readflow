@@ -18,6 +18,30 @@ test("往返：默认讲解 + 两次追问，存进去再读出来一字不差",
   assert.deepEqual(parseThread(raw), turns);
 });
 
+test("引用片段随追问往返保存：划选的原话在回看时仍在", () => {
+  const turns = [
+    { text: "释义：超智能的" },
+    { ask: "它的作用是什么", quote: "when 引导时间状语从句", text: "when 是从属连词……" },
+  ];
+  const raw = serializeThread(turns);
+  assert.ok(raw.includes("【引用】when 引导时间状语从句"));
+  assert.deepEqual(parseThread(raw), turns);
+});
+
+test("引用里的换行压成一行；没有引用的追问不受影响", () => {
+  const raw = serializeThread([
+    { ask: "这句", quote: "第一行\n第二行", text: "答" },
+    { ask: "普通追问", text: "答2" },
+  ]);
+  assert.ok(raw.includes("【引用】第一行 第二行"));
+  const back = parseThread(raw);
+  assert.equal(back[0].quote, "第一行 第二行");
+  assert.equal(back[1].quote, undefined, "没有引用的追问不凭空多出 quote 字段");
+  assert.equal(back[0].text, "答", "引用行不混进回答正文");
+  // 这条串第一turn就是追问，本来就没有默认讲解
+  assert.equal(defaultTurnText(raw), "");
+});
+
 test("旧记录（没有追问标记）就是一段默认讲解", () => {
   assert.deepEqual(parseThread("「弱点挖掘」——指找出薄弱环节。"), [{ text: "「弱点挖掘」——指找出薄弱环节。" }]);
   assert.deepEqual(parseThread(""), []);

@@ -15,17 +15,24 @@
 export type ThreadTurn = {
   /** 用户这次问的是什么；默认讲解为空 */
   ask?: string;
+  /** 用户在 AI 回答里划选、这次提问所针对的原文片段（可空） */
+  quote?: string;
   text: string;
 };
 
 const ASK_LINE = /^【追问】(.*)$/;
+const QUOTE_LINE = /^【引用】(.*)$/;
+/** 引用片段压成一行存：换行换成空格，避免破坏「一行一标记」的格式 */
+const oneLine = (s: string) => s.replace(/\s*\r?\n\s*/g, " ").trim();
 
 export function serializeThread(turns: readonly ThreadTurn[]): string {
   return turns
     .filter((t) => t.text.trim())
-    .map((t, i) =>
-      i === 0 && !t.ask ? t.text.trim() : `【追问】${(t.ask ?? "").trim()}\n${t.text.trim()}`,
-    )
+    .map((t, i) => {
+      if (i === 0 && !t.ask) return t.text.trim();
+      const quote = t.quote?.trim() ? `【引用】${oneLine(t.quote)}\n` : "";
+      return `${quote}【追问】${(t.ask ?? "").trim()}\n${t.text.trim()}`;
+    })
     .join("\n\n");
 }
 
@@ -33,11 +40,22 @@ export function parseThread(raw: string | null | undefined): ThreadTurn[] {
   if (!raw || !raw.trim()) return [];
   const turns: ThreadTurn[] = [];
   let cur: ThreadTurn = { text: "" };
+  let pendingQuote: string | undefined;
   for (const line of raw.split(/\r?\n/)) {
+    const q = line.match(QUOTE_LINE);
+    if (q) {
+      // 引用行一定紧跟在【追问】之前；暂存到下一条追问用
+      if (q[1].trim()) pendingQuote = q[1].trim();
+      continue;
+    }
     const m = line.match(ASK_LINE);
     if (m) {
       if (cur.text.trim() || cur.ask !== undefined) turns.push({ ...cur, text: cur.text.trim() });
       cur = { ask: m[1].trim(), text: "" };
+      if (pendingQuote) {
+        cur.quote = pendingQuote;
+        pendingQuote = undefined;
+      }
     } else {
       cur.text += (cur.text ? "\n" : "") + line;
     }

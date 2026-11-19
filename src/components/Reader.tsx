@@ -1768,7 +1768,16 @@ function PickCard({
       .map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text }));
 
     const index = turnsRef.current.length;
-    updateTurns((prev) => [...prev, { ask: req.ask, text: "", status: "loading", req }]);
+    updateTurns((prev) => [
+      ...prev,
+      {
+        ask: req.ask,
+        ...(askQuote ? { quote: askQuote.text } : {}),
+        text: "",
+        status: "loading",
+        req,
+      },
+    ]);
     const patch = (p: Partial<Turn>) =>
       updateTurns((prev) => prev.map((t, i) => (i === index ? { ...t, ...p } : t)));
 
