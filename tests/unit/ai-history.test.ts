@@ -142,20 +142,33 @@ test("structure 轮次带历史：方法在人设之后、规则之前，本轮 
   assert.ok(turns[turns.length - 1].content.includes("学生的问题: 讲讲这句话的结构"));
 });
 
-test("历史截断：最多 MAX_TURNS 轮，单轮回答最多 MAX_CHARS 字；空文本轮次丢弃", () => {
-  const many = Array.from({ length: EXPLAIN_HISTORY_MAX_TURNS + 5 }, (_, i) => ({
-    ask: `问题${i}`,
-    text: `回答${i}`,
+test("历史压缩（P45）：首次讲解一直保留，最近 3 轮完整，中间压成要点；空文本轮次丢弃", () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    ...(i === 0 ? {} : { ask: `问题${i}` }),
+    text: `回答${i}\n` + "字".repeat(300),
   }));
   const out = historyTurns(many);
-  assert.equal(out.length, EXPLAIN_HISTORY_MAX_TURNS * 2, "只保留最近的上限轮数");
-  assert.equal(out[0].content, `学生的问题: 问题5`, "丢掉最早的，保留最近的");
+  assert.equal(out.length, 20, "10 轮都在（没超预算，没有整轮丢掉）");
+  assert.ok(out[1].content.startsWith("回答0"), "首次讲解排第一、完整");
+  assert.equal(out[1].content.length, 304, "首次讲解没被压缩");
+  assert.ok(out[3].content.startsWith("[要点] 回答1"), "中间的轮次是要点");
+  assert.ok(out[3].content.length < 320, "要点很短");
+  assert.ok(out[19].content.startsWith("回答9") && out[19].content.length === 304, "最近几轮完整");
 
   const long = historyTurns([{ text: "字".repeat(EXPLAIN_HISTORY_MAX_CHARS + 500) }]);
-  assert.equal(long[1].content.length, EXPLAIN_HISTORY_MAX_CHARS);
+  assert.equal(long[1].content.length, 2000, "单条回答最多 2000 字（从中间截）");
 
   assert.deepEqual(historyTurns([{ text: "   " }, { ask: "问", text: "" }]), []);
   assert.deepEqual(historyTurns(undefined), []);
+});
+
+test("历史压缩：超预算时丢掉最早的要点，并在开头说明省略了几轮", () => {
+  const big = Array.from({ length: 30 }, (_, i) => ({ ask: `问题${i}`, text: "回答。".repeat(900) }));
+  const out = historyTurns(big);
+  assert.equal(out[0].role, "system");
+  assert.match(out[0].content, /更早的 \d+ 轮对话已省略/);
+  assert.ok(out[1].content.startsWith("学生没有说出具体问题") || out[1].content.startsWith("学生的问题: 问题0"), "首次讲解仍在最前");
+  assert.equal(out.at(-1)?.role, "assistant");
 });
 
 test("服务端白名单 narrowHistory：只取 {ask?,text}，丢额外字段、裁字数、限量", () => {

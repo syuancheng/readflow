@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AskPreset, AskReq } from "@/lib/ask-presets";
+import { ASK_MAX_CHARS, type AskPreset, type AskReq } from "@/lib/ask-presets";
 import { MAX_QUICK_QUESTION_CHARS } from "@/lib/quick-questions";
 import { useQuickQuestions } from "@/lib/use-quick-questions";
 
@@ -194,6 +194,7 @@ export default function AskComposer({
           aria-label="向 AI 提问"
           placeholder="我有别的问题…"
           rows={1}
+          maxLength={ASK_MAX_CHARS}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

@@ -131,6 +131,15 @@
 .rf-btn-solid:focus-visible,
 .rf-btn-quiet:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
+/* 上下文压缩提示（P45）：很淡的一行小字，放在第一条被压缩的对话上面 */
+.rf-compress-note {
+  margin: 0;
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+  text-wrap: pretty;
+}
+
 /* ===== 做卡状态块：AI 一侧的一次「工具调用」 ===== */
 .rf-run-block {
   display: flex;

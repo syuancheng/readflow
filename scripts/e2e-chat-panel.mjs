@@ -139,6 +139,7 @@ try {
   await page.locator(".rf-bubble-user", { hasText: "再给个例句" }).waitFor();
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 2 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   check("C9 追问：右边用户气泡 + 左边回答；追问的回答下面没有反馈（只有首次讲解有）", (await page.locator(".rf-feedback-row").count()) === 1);
+  check("C9b 对话还短（2 轮）时没有「已压缩」提示；输入框限制 500 字", (await page.locator(".rf-compress-note").count()) === 0 && (await page.locator(".rf-composer-input").getAttribute("maxlength")) === "500");
   const g = await page.evaluate(() => {
     const logR = document.querySelector(".rf-chat-log").getBoundingClientRect();
     const b = document.querySelector(".rf-bubble-user"), r = document.querySelectorAll(".rf-ai-reply")[1];
@@ -200,6 +201,13 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 7 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const seq = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].map((b) => b.textContent));
   check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|为什么用 skills？|做成卡片|整句没看懂", seq.join("|"));
+  const note = await page.evaluate(() => {
+    const n = document.querySelector(".rf-compress-note");
+    const replies = [...document.querySelectorAll(".rf-chat-turns .rf-ai-reply")];
+    const firstReply = replies[0], third = replies.at(-3);
+    return { count: document.querySelectorAll(".rf-compress-note").length, text: n?.textContent ?? "", afterFirst: Boolean(n && firstReply && (firstReply.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)), beforeRecent: Boolean(n && third && (n.compareDocumentPosition(third) & Node.DOCUMENT_POSITION_FOLLOWING)) };
+  });
+  check("C18b 对话超过「首次讲解 + 最近 3 轮」后出现一行提示：更早的对话已压缩，位置在首次讲解之后、最近几轮之前", note.count === 1 && /已压缩/.test(note.text) && note.afterFirst && note.beforeRecent, JSON.stringify(note));
   await page.screenshot({ path: path.join(SHOTS, "chat-card-ready-1440.png") });
 
   // ===== 我的常用问题：添加、使用、刷新后还在、删除 =====

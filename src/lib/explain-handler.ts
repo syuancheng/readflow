@@ -5,6 +5,7 @@
 import {
   streamExplain,
   explainTurns,
+  EXPLAIN_PROMPT_MAX_CHARS,
   narrowHistory,
   type ExplainParams,
 } from "@/lib/ai";
@@ -291,7 +292,7 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     suffix: str(body.suffix),
     language: str(body.language) ?? "en",
     monolingual: body.monolingual === true,
-    prompt: str(body.prompt)?.trim() || undefined,
+    prompt: str(body.prompt)?.trim().slice(0, EXPLAIN_PROMPT_MAX_CHARS) || undefined,
     withPrevSentence: body.withPrevSentence === true,
     signals: narrowSignals((body as { signals?: unknown }).signals),
     // P32：白名单收 askKind；非法值一律按 default，前端说什么都不直接信
