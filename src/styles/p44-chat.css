@@ -256,6 +256,8 @@
   border-color: var(--rf-border-focus);
   box-shadow: var(--rf-focus-ring);
 }
+/* 有引用时输入框略微放大：内边距更松、最小高度更高，撤销引用即恢复原样 */
+.rf-composer-box-expanded { padding: var(--rf-space-2); }
 .rf-composer-input {
   flex: 1;
   min-width: 0;
@@ -372,8 +374,8 @@
 .rf-composer-plus svg { transition: transform var(--rf-duration-fast) var(--rf-ease); }
 
 /* 发送：只有输入了文字才出现，实心 AI 紫，向上的箭头 */
-.rf-composer-send { background: var(--rf-ai-text); color: var(--rf-bg-surface); }
-.rf-composer-send:hover:not(:disabled) { filter: brightness(1.15); }
+.rf-composer-send { background: var(--rf-text-primary); color: var(--rf-bg-surface); }
+.rf-composer-send:hover:not(:disabled) { opacity: .82; }
 .rf-composer-send:active:not(:disabled) { transform: translateY(1px); }
 .rf-composer-send:disabled { opacity: 0.45; cursor: default; }
 .rf-composer-plus:focus-visible,
