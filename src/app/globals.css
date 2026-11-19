@@ -6,6 +6,7 @@
 @import "../styles/p43-toast.css";
 @import "../styles/p44-chat.css";
 @import "../styles/p46-footer.css";
+@import "../styles/p49-scrollbar.css";
 
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）
@@ -1204,17 +1205,7 @@ body {
   max-height: calc(100vh - var(--rf-bar-h) - 32px);
   overflow-y: auto;
   min-width: 0;
-  scrollbar-width: thin;
   padding-bottom: 4px;
-}
-
-.reader-aside::-webkit-scrollbar {
-  width: 6px;
-}
-
-.reader-aside::-webkit-scrollbar-thumb {
-  background: var(--duo-border);
-  border-radius: var(--rf-radius-full);
 }
 
 /* 批注卡：右栏内无框平铺，直接展示词/音标/释义 */

@@ -21,3 +21,40 @@
   body:has(.rf-reading-layout) .rf-site-footer { display: none; }
 }
 @media print { .rf-site-footer { display: none; } }
+
+/* ===== P49：回到顶部按钮 ===== */
+.rf-totop {
+  position: fixed;
+  right: var(--rf-space-6);
+  bottom: var(--rf-space-6);
+  z-index: var(--rf-z-sticky);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rf-space-10);
+  height: var(--rf-space-10);
+  padding: 0;
+  border: var(--rf-border-width) solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  color: var(--rf-text-secondary);
+  box-shadow: var(--rf-shadow-md);
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease, transform var(--rf-duration-fast) ease;
+}
+.rf-totop svg { width: var(--rf-space-5); height: var(--rf-space-5); }
+.rf-totop:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-totop:active { transform: translateY(1px); }
+.rf-totop:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+/* 阅读页宽屏：挂在正文栏里。外层是高度为 0 的粘性容器（不增加滚动高度），按钮浮在它上面 */
+.rf-totop-slot { position: sticky; bottom: 0; height: 0; z-index: var(--rf-z-sticky); }
+.rf-totop-in {
+  position: absolute;
+  right: var(--rf-space-2);
+  bottom: var(--rf-space-4);
+}
+/* 手机有底部导航（64px），按钮抬到它上面 */
+@media (max-width: 767px) {
+  .rf-totop:not(.rf-totop-in) { bottom: calc(64px + var(--rf-space-4)); right: var(--rf-space-4); }
+}
+@media print { .rf-totop { display: none; } }

@@ -6,6 +6,7 @@ import BottomNav from "@/components/BottomNav";
 import SiteHeader from "@/components/SiteHeader";
 import CardToasts from "@/components/CardToasts";
 import SiteFooter from "@/components/SiteFooter";
+import BackToTop from "@/components/BackToTop";
 
 /**
  * 字体（设计规范 v1，docs/design-system.md）：全站只用 DM Sans 一套西文字族，
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SiteFooter />
         <BottomNav />
         <CardToasts />
+        <BackToTop />
       </body>
     </html>
   );
