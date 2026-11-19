@@ -19,8 +19,12 @@ import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
 import type { AskKind, Feedback } from "@/lib/learner/types";
 import { LEARNER_CHANGED_EVENT } from "@/lib/settings-form";
-import MakeCardButton from "@/components/MakeCardButton";
-import FeedbackRow from "@/components/FeedbackRow";
+import ChatTurn from "@/components/ChatTurn";
+import AskComposer from "@/components/AskComposer";
+import CardRunBlock from "@/components/CardRunBlock";
+import { useCardJob } from "@/lib/use-card-job";
+import { buildAskPresets, type AskReq } from "@/lib/ask-presets";
+import { nearBottom, cardBlockVisible, cardPresetState, showFeedback as showTurnFeedback, suggestionActionable, suggestionHolderIndex } from "@/lib/chat-view";
 import { splitCardSuggestion } from "@/lib/cards/suggestion";
 
 /**
@@ -68,18 +72,7 @@ type Pick = {
   signals?: SelectionSignals;
 };
 
-/** 右栏 AI 对话串里的一段（P26） */
-type AskReq = {
-  /** 问题标题（显示为「你问：…」）；默认讲解为空 */
-  ask?: string;
-  /** 送给模型的具体问题 */
-  prompt?: string;
-  /** 整句提问时送给模型的选区（整句原文） */
-  word?: string;
-  wholeSentence?: boolean;
-  /** P32：这次讲解的种类，随 /api/explain 送给服务端记事件 */
-  askKind?: AskKind;
-};
+/** 右栏 AI 对话串里的一段（P26）；AskReq 在 src/lib/ask-presets.ts */
 type Turn = ThreadTurn & {
   status: "loading" | "streaming" | "done" | "error";
   req?: AskReq;
@@ -89,16 +82,6 @@ type Turn = ThreadTurn & {
   feedbackReason?: string | null;
   feedbackError?: string;
 };
-
-/**
- * 讲解末尾的「制卡建议：」行不属于正文（P33 F1）：显示时去掉，理由单独放到按钮上方。
- * 流式输出时这一行可能只到一半（「制卡」「制卡建议」），也一并先藏起来，免得闪一下。
- */
-function shownText(t: { text: string; status: string }): string {
-  const { body } = splitCardSuggestion(t.text);
-  if (t.status !== "streaming") return body;
-  return body.replace(/\n+制(卡(建(议(：.*)?)?)?)?$/, "");
-}
 
 function isFeedback(v: unknown): v is Feedback {
   return v === "shallow" || v === "right" || v === "deep";
@@ -1517,7 +1500,7 @@ export default function Reader({
       </div>
 
       {/* 右栏（38.2%）：查词卡在顶，已存批注随之下移；滚动时吸附在顶栏下方 */}
-      <aside className="reader-aside">
+      <aside className={`reader-aside${pick ? " reader-aside-chat" : ""}`}>
         {pick ? (
           <PickCard
             key={`${pick.paragraphId}:${pick.anchor.start}:${pick.anchor.end}:${pick.source}`}
@@ -1616,10 +1599,32 @@ function PickCard({
     turnsRef.current = fn(turnsRef.current);
     setTurns(turnsRef.current);
   };
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [askPrompt, setAskPrompt] = useState("");
   const busy = turns.some((t) => t.status === "loading" || t.status === "streaming");
   const hasDefault = turns.some((t) => !t.ask);
+
+  // P44：做卡是对话里的一条消息 + 一个状态块（像一次工具调用）。
+  // cardAt = 点击当时对话有几轮，状态块插在那里；回看时服务端状态 ≠ none，则放在对话最后。
+  const card = useCardJob({
+    contextId: pick.contextId,
+    word: quote,
+    answerId: [...turns].reverse().find((t) => t.answerId)?.answerId,
+  });
+  const [cardAt, setCardAt] = useState<number | null>(null);
+  const cardShown = card.enabled && cardBlockVisible(card.status);
+  const cardIndex = cardAt ?? turns.length;
+  const cardPreset = !card.enabled
+    ? "hidden"
+    : cardPresetState(card.status) === "enabled" && !pick.contextId
+      ? "disabled"
+      : cardPresetState(card.status);
+
+  // 自动滚动：用户自己发消息后停在底部；往上翻时新内容不抢滚动
+  const logRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(false);
+  useEffect(() => {
+    const el = logRef.current;
+    if (el && stickRef.current) el.scrollTo({ top: el.scrollHeight });
+  }, [turns, card.status, cardAt]);
 
   // 进行中的 AI 流：切到别的词（弹层按锚点 key 卸载）或重新提问时中止，
   // 服务端随之关掉上游模型流，不再为没人看的答案付费。
@@ -1654,8 +1659,6 @@ function PickCard({
     setDictLoading(!recall);
     turnsRef.current = turnsFrom(initialGloss);
     setTurns(turnsRef.current);
-    setMenuOpen(false);
-    setAskPrompt("");
 
     // 回看：词典 / AI 都不查，直接展示存下来的结果。
     // P34 F4：只额外取一次这条批注保存过的回答，给每段对上 answerId 和当时的反馈，
@@ -1732,63 +1735,15 @@ function PickCard({
   ).trim();
   const isWholeSentence = sentence.length > 0 && quote.length >= sentence.length - 2;
 
-  /** 「问 AI」里的选项：只列这一刻有意义的 */
-  const askOptions: { label: string; req: AskReq }[] = [
-    ...(!hasDefault
-      ? [{ label: isPhrase ? "这个短语在这句里什么意思" : "这个词在这句里什么意思", req: { askKind: "default" as const } }]
-      : []),
-    ...(!isWholeSentence
-      ? [
-          {
-            label: "整句没看懂",
-            req: {
-              ask: "整句没看懂",
-              askKind: "whole_sentence" as const,
-              word: sentence,
-              wholeSentence: true,
-              prompt:
-                "这句话里的词我基本都认识，但整句没看懂。第一行按「释义：」格式给出整句的中文翻译；" +
-                "然后用一两行点明这句难在哪里（结构、指代、搭配或背景知识），帮我下次自己能拆开；必要时再给句子地图。",
-            },
-          },
-        ]
-      : []),
-    {
-      label: "讲讲句子结构",
-      req: {
-        ask: "讲讲句子结构",
-        askKind: "structure" as const,
-        prompt: `讲讲这句话的结构：主干（主语、谓语、宾语或表语）是什么，「${quote}」在其中充当什么、修饰谁。`,
-      },
-    },
-    {
-      label: "再给个例句",
-      req: {
-        ask: "再给个例句",
-        askKind: "example" as const,
-        prompt: `用「${quote}」在这句里的这个意思，再给一个简单的英文例句，并附中文翻译。`,
-      },
-    },
-    {
-      label: "从内容角度讲讲",
-      req: {
-        ask: "从内容角度讲讲",
-        askKind: "domain" as const,
-        // 整句提问：讲的是这句话，不是划中的那个词
-        word: sentence,
-        wholeSentence: true,
-        prompt:
-          "这句话我已经知道中文意思了。请先跳出英语学习本身，从这篇文章讲的内容出发，" +
-          "讲讲这句话涉及的概念、做法或设计取舍，以及作者为什么这么写、它在文章的论证里起什么作用。",
-      },
-    },
-  ];
+  /** 输入框上方的快捷问题：只列这一刻有意义的（P44，逻辑在 src/lib/ask-presets.ts） */
+  const presets = buildAskPresets({ isPhrase, isWholeSentence, hasDefault, quote, sentence });
 
   /**
    * 向 AI 提一个问题（流式），回答追加在对话串末尾。
    * req 为空 = 默认讲解（点词自动触发的那次）。
    */
   async function triggerAI(req: AskReq = {}) {
+    if (req.askKind && req.askKind !== "default" && req.askKind !== "auto") stickRef.current = true;
     // 同一条批注上连续追问时，先中止上一条流：否则多条 SSE 同时挂着，
     // 每条都占一个连接，累积到 6 条就会让整页请求停在 Stalled。
     aiAbortRef.current?.abort();
@@ -1909,20 +1864,29 @@ function PickCard({
     void triggerAI(req);
   }
 
-  function askCustom() {
-    const q = askPrompt.trim();
-    if (!q || busy) return;
-    setAskPrompt("");
-    setMenuOpen(false);
-    void triggerAI({ ask: q, prompt: q, askKind: "custom" as const });
+  /** 做成卡片：对话里追加一条消息和状态块（做卡本身在服务端后台跑，切走也不中断） */
+  function makeCard() {
+    if (!pick.contextId || busy) return;
+    if (cardAt === null) setCardAt(turnsRef.current.length);
+    stickRef.current = true;
+    void card.start(false);
   }
 
   return (
     <div
-      className="reader-note duo-anim-pop"
+      className="reader-note rf-chat duo-anim-pop"
       onClick={(e) => e.stopPropagation()}
       onMouseUp={(e) => e.stopPropagation()}
     >
+      {/* 对话区：唯一的滚动区。词头、词典、对话都在里面，输入区固定在下面（P44） */}
+      <div
+        className="rf-chat-log"
+        ref={logRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickRef.current = nearBottom({ scrollHeight: el.scrollHeight, scrollTop: el.scrollTop, clientHeight: el.clientHeight });
+        }}
+      >
       {/* 标题行：词 + 音标 + 发音，右侧收词/关闭 */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -2000,152 +1964,8 @@ function PickCard({
         </p>
       )}
 
-      {/* AI 对话串：每段一个问题，新回答追加在下面，不覆盖词典和之前的回答 */}
-      {turns.map((t, i) => {
-        const failed = t.status === "error" || (t.status === "done" && isNotAGloss(t.text));
-        return (
-          <div className="mt-4" key={i}>
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              {t.ask ? (
-                <>
-                  <span className="duo-badge duo-badge-ai">💬 追问</span>
-                  <span className="rf-turn-ask">{t.ask}</span>
-                </>
-              ) : (
-                <span className="duo-badge duo-badge-green">AI 释义</span>
-              )}
-              {t.status === "loading" && (
-                <span className="text-xs font-bold text-ink-faint">正在思考…</span>
-              )}
-              {t.status === "streaming" && (
-                <span className="text-xs font-bold" style={{ color: "var(--duo-green-dark)" }}>
-                  生成中…
-                </span>
-              )}
-              {failed && (
-                <button className="rf-ask-mini" onClick={() => retry(i)}>
-                  {t.status === "error" ? "重试" : "配置好模型后重试"}
-                </button>
-              )}
-            </div>
-            <div className="rf-md text-sm leading-relaxed text-ink">
-              <MarkdownText text={shownText(t)} />
-              {t.status === "streaming" && (
-                <span
-                  className="inline-block w-1.5 h-4 ml-1 align-middle animate-pulse"
-                  style={{ background: "var(--duo-green)" }}
-                />
-              )}
-            </div>
-            {feedbackEnabled && t.status === "done" && !isNotAGloss(t.text) && t.answerId && (
-              <FeedbackRow
-                value={t.feedback}
-                reason={t.feedbackReason}
-                error={t.feedbackError}
-                onRate={(r) => void rate(i, r)}
-                onReason={(r: string | null) => {
-                  if (!t.feedback) return;
-                  void rate(i, t.feedback, r);
-                }}
-              />
-            )}
-          </div>
-        );
-      })}
-
-      {/* 唯一的 AI 入口（P26）：合并原来的「AI 释义」和「追问」。展开后选一个常见问题，或自己输入 */}
-      <div className="rf-ai-section">
-        <div className="rf-ai-actions">
-          <button
-            type="button"
-            className="duo-btn duo-btn-sm duo-btn-white rf-ai-btn"
-            disabled={busy}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            ✨ 问 AI {menuOpen ? "▴" : "▾"}
-          </button>
-          {/* P33 F2：做成卡片。建议理由取最后一段讲解末尾的「制卡建议：」；answerId 取最近一段，让做卡接着讲解对话走 */}
-          {!busy && (
-            <MakeCardButton
-              contextId={pick.contextId}
-              word={quote}
-              answerId={[...turns].reverse().find((t) => t.answerId)?.answerId}
-              suggestion={
-                splitCardSuggestion(
-                  [...turns].reverse().find((t) => t.status === "done" && !isNotAGloss(t.text))?.text ?? "",
-                ).suggestion
-              }
-            />
-          )}
-        </div>
-        {menuOpen && !busy && (
-          <div className="rf-ask-menu">
-            {/* 亲密性：4 个快捷追问同属一组，横排紧凑标签，组内 8px */}
-            <div className="rf-ask-chips">
-              {askOptions.map((o) => (
-                <button
-                  key={o.label}
-                  className="rf-ask-chip"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void triggerAI(o.req);
-                  }}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            {/* 用一条线分隔两组，而不是再套一层框（P-10 / TIP-15 / APX-12） */}
-            <div className="rf-ask-sep" role="separator" />
-            {/* 自定义提问：发送图标内嵌在输入框右下角；随输入行数自动增高 */}
-            <div className="rf-ask-custom">
-              <textarea
-                className="duo-input rf-ask-input"
-                placeholder="我有别的问题…"
-                rows={1}
-                value={askPrompt}
-                onChange={(e) => setAskPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter 发送，Shift+Enter 换行——多行输入的标准约定
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    askCustom();
-                  }
-                }}
-                ref={(el) => {
-                  if (!el) return;
-                  // 先归零再按内容撑高，超过上限改为内部滚动，避免无限撑大弹层
-                  el.style.height = "auto";
-                  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-                }}
-              />
-              <button
-                className="rf-ask-send"
-                disabled={!askPrompt.trim()}
-                onClick={askCustom}
-                aria-label="发送问题"
-                title="发送"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M21 3 10.5 13.5" />
-                  <path d="M21 3 14.5 21l-4-7.5L3 9.5 21 3Z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* 锚点信息 */}
-      <details className="mt-4">
+      <details className="rf-anchor">
         <summary className="text-xs font-bold uppercase tracking-wide text-ink-faint cursor-pointer">
           上下文锚点
         </summary>
@@ -2155,6 +1975,64 @@ function PickCard({
           <Row label="位置" value={`第 ${paragraphIdx + 1} 段 · ${anchor.start}–${anchor.end}`} />
         </div>
       </details>
+
+        {(turns.length > 0 || cardShown) && (
+          <div className="rf-chat-turns">
+            {(() => {
+              const holder = suggestionHolderIndex(turns);
+              const cardNode = (
+                <div className="rf-chat-turn" key="card-run">
+                  <div className="rf-bubble-user">做成卡片</div>
+                  <div className="rf-ai-reply">
+                    <CardRunBlock
+                      status={card.status}
+                      st={card.st}
+                      pct={card.pct}
+                      eta={card.eta}
+                      error={card.error}
+                      onRetry={() => void card.start(true)}
+                      onAgain={() => void card.start(true)}
+                    />
+                  </div>
+                </div>
+              );
+              const nodes = turns.map((t, i) => (
+                <Fragment key={i}>
+                  {cardShown && cardIndex === i && cardNode}
+                  <ChatTurn
+                    turn={t}
+                    showFeedback={showTurnFeedback(t, feedbackEnabled)}
+                    suggestion={
+                      i === holder && card.enabled && suggestionActionable(card.status)
+                        ? splitCardSuggestion(t.text).suggestion
+                        : null
+                    }
+                    onMakeCard={makeCard}
+                    onRetry={() => retry(i)}
+                    onRate={(r) => void rate(i, r)}
+                    onReason={(r: string | null) => {
+                      if (!t.feedback) return;
+                      void rate(i, t.feedback, r);
+                    }}
+                  />
+                </Fragment>
+              ));
+              if (cardShown && cardIndex >= turns.length) nodes.push(cardNode);
+              return nodes;
+            })()}
+          </div>
+        )}
+      </div>
+
+      {/* 唯一的 AI 入口（P44）：快捷问题 + 输入框，「做成卡片」和「整句没看懂」同级 */}
+      <AskComposer
+        presets={presets}
+        busy={busy}
+        card={cardPreset}
+        cardTitle={pick.contextId ? undefined : "正在保存这条记录…"}
+        onAsk={(req) => void triggerAI(req)}
+        onMakeCard={makeCard}
+      />
     </div>
   );
 }
@@ -2189,14 +2067,10 @@ function DictView({
       )}
 
       {entry.definition && entry.definition.length > 0 && (
-        <details className="mt-2">
-          <summary className="text-xs font-bold text-ink-faint cursor-pointer">
-            英文释义
-          </summary>
-          <p className="text-sm leading-relaxed text-ink-soft mt-2 whitespace-pre-line">
-            {normalizeTranslation(entry.definition)}
-          </p>
-        </details>
+        <div className="rf-en-def">
+          <p className="rf-en-def-label">英文释义</p>
+          <p className="rf-en-def-text">{normalizeTranslation(entry.definition)}</p>
+        </div>
       )}
 
       {entry.collins && entry.collins > 0 && (

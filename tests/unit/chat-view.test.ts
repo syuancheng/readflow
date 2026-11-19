@@ -63,3 +63,12 @@ test("nearBottom：在底部附近才算", () => {
   assert.equal(nearBottom({ scrollHeight: 1000, scrollTop: 530, clientHeight: 400 }), true);
   assert.equal(nearBottom({ scrollHeight: 1000, scrollTop: 530, clientHeight: 400 }, 40), false);
 });
+
+import { shownText } from "../../src/lib/chat-view";
+
+test("shownText：去掉末尾的制卡建议行；流式时半截的也藏起来", () => {
+  assert.equal(shownText({ text: "正文\n制卡建议：很常用", status: "done" }), "正文");
+  assert.equal(shownText({ text: "正文\n制卡建", status: "streaming" }), "正文");
+  assert.equal(shownText({ text: "正文\n制卡建议：很常", status: "streaming" }), "正文");
+  assert.equal(shownText({ text: "正文", status: "streaming" }), "正文");
+});

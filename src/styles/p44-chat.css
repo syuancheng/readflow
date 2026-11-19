@@ -1,0 +1,286 @@
+/*
+ * P44：阅读页右栏对话式界面（版式参照 ChatGPT / Claude Code，只取结构，不照抄像素）。
+ * 设计简报：docs/specs/P44-chat-style-ai-panel.md §9。只用设计令牌（--rf-*），间距走 4px 阶梯。
+ *
+ * - 亲密性：一轮对话里「气泡 → 回答」12px，轮与轮之间 24px；输入区与对话区之间一条 1px 线。
+ * - 对齐：主对齐线是对话区左边缘，文字一律左对齐；唯一的破格是用户气泡整体靠右（例外 E-44-01，
+ *   产品要求「追问放右边」；补偿：气泡内文字仍左对齐，右边缘落在内边线上，且只有这一种元素靠右）。
+ * - 重复：圆角 md、1px 边线、xs / sm 两档字号、AI 紫只做点缀，全部沿用已有形态。
+ * - 对比：回答正文 14px 主文字色 vs 状态与反馈 12px 次要灰（字号 + 颜色两个维度）；
+ *   用户气泡靠「浅灰底 + 靠右」与无底色满宽的回答区分（位置 + 底色两个维度）。
+ */
+
+/* ===== 版面：右栏 = 对话区（唯一的滚动区）+ 贴底的输入区 ===== */
+.reader-aside-chat {
+  height: calc(100vh - var(--rf-bar-h) - 32px);
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.rf-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+.rf-chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--rf-space-1) var(--rf-space-4);
+  scrollbar-width: thin;
+}
+.rf-chat-log::-webkit-scrollbar { width: 6px; }
+.rf-chat-log::-webkit-scrollbar-thumb {
+  background: var(--rf-border);
+  border-radius: var(--rf-radius-full);
+}
+@media (max-width: 1023px) {
+  /* 窄屏右栏堆到文章下面：不固定高度（手机端不在本期范围） */
+  .reader-aside-chat { height: auto; max-height: 70vh; }
+  .rf-chat { height: auto; max-height: 70vh; }
+}
+
+/* ===== 词典区与对话之间：两组之间留一个组间距 ===== */
+.rf-chat-turns { margin-top: var(--rf-space-6); display: flex; flex-direction: column; gap: var(--rf-space-6); }
+
+/* ===== 英文释义：直接展开 ===== */
+.rf-en-def { margin-top: var(--rf-space-3); }
+.rf-en-def-label {
+  margin: 0;
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  font-weight: 700;
+  color: var(--rf-text-secondary);
+}
+.rf-en-def-text {
+  margin: var(--rf-space-1) 0 0;
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-secondary);
+  white-space: pre-line;
+}
+/* 上下文锚点：紧跟英文释义下面 */
+.rf-anchor { margin-top: var(--rf-space-3); }
+
+/* ===== 一轮对话 ===== */
+.rf-chat-turn { display: flex; flex-direction: column; gap: var(--rf-space-3); }
+
+.rf-bubble-user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: var(--rf-space-2) var(--rf-space-3);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-subtle);
+  color: var(--rf-text-primary);
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.rf-ai-reply { min-width: 0; }
+
+.rf-chat-status {
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-2);
+  margin-bottom: var(--rf-space-2);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+}
+.rf-chat-status-live { color: var(--rf-accent-text); font-weight: 700; }
+
+.rf-stream-caret {
+  display: inline-block;
+  width: var(--rf-space-1);
+  height: var(--rf-space-4);
+  margin-left: var(--rf-space-1);
+  vertical-align: middle;
+  background: var(--rf-accent);
+  animation: rf-caret 1s steps(2, start) infinite;
+}
+@keyframes rf-caret { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .rf-stream-caret { animation: none; } }
+
+/* 制卡建议：这条回答的末尾，浅紫底、次要灰正文，只有「建议做成卡片」和按钮用 AI 紫 */
+.rf-suggest-line {
+  margin: var(--rf-space-3) 0 0;
+  padding: var(--rf-space-2) var(--rf-space-3);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-ai-soft);
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-secondary);
+  overflow-wrap: anywhere;
+}
+.rf-suggest-line b { font-weight: 700; color: var(--rf-ai-text); }
+.rf-suggest-act {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--rf-ai-text);
+  cursor: pointer;
+}
+.rf-suggest-act:hover { filter: brightness(0.85); }
+.rf-suggest-act:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); border-radius: var(--rf-radius-xs); }
+
+/* ===== 做卡状态块：AI 一侧的一次「工具调用」 ===== */
+.rf-run-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rf-space-2);
+  padding: var(--rf-space-2) var(--rf-space-3);
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-md);
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+}
+.rf-run-block[data-state="ready"] > span:first-child,
+.rf-run-block[data-state="pushed"] > span:first-child { color: var(--rf-accent-text); font-weight: 700; }
+.rf-run-block[data-state="failed"] { color: var(--rf-danger-text); }
+.rf-run-note {
+  font-size: var(--rf-text-xs);
+  color: var(--rf-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.rf-run-error { flex: 1 0 100%; font-size: var(--rf-text-xs); color: var(--rf-danger-text); }
+.rf-run-link { font-weight: 700; color: var(--rf-text-primary); }
+.rf-run-link:hover { color: var(--rf-accent-text); }
+.rf-run-action {
+  margin-left: auto;
+  border: 0;
+  padding: var(--rf-space-1) var(--rf-space-2);
+  border-radius: var(--rf-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--rf-text-xs);
+  font-weight: 700;
+  color: var(--rf-text-secondary);
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) var(--rf-ease), color var(--rf-duration-fast) var(--rf-ease);
+}
+.rf-run-action:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-run-action:focus-visible,
+.rf-run-link:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); border-radius: var(--rf-radius-xs); }
+
+/* 做卡进度环（P33 起沿用） */
+@property --rf-pct {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+.rf-progress-ring {
+  --rf-pct: 0;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: var(--rf-radius-full);
+  background: conic-gradient(
+    currentColor calc(var(--rf-pct) * 1%),
+    color-mix(in srgb, currentColor 18%, transparent) 0
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black 0);
+  transition: --rf-pct 0.25s linear;
+}
+@media (prefers-reduced-motion: reduce) { .rf-progress-ring { transition: none; } }
+
+/* ===== 底部输入区 ===== */
+.rf-composer {
+  flex: none;
+  padding: var(--rf-space-3) var(--rf-space-1) var(--rf-space-1);
+  border-top: var(--rf-border-width) solid var(--rf-border);
+  background: var(--rf-bg-surface);
+}
+
+.rf-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rf-space-2);
+  margin-bottom: var(--rf-space-3);
+}
+.rf-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--rf-space-1) var(--rf-space-2);
+  border-radius: var(--rf-radius-sm);
+  border: var(--rf-border-width) solid transparent; /* 占住 1px，hover 不跳动 */
+  background: var(--rf-bg-subtle);
+  font-size: var(--rf-text-xs);
+  font-weight: 400;
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
+}
+.rf-quick-chip:hover:not(:disabled) {
+  border-color: var(--rf-purple-500);
+  background: var(--rf-ai-soft);
+  color: var(--rf-ai-text);
+}
+.rf-quick-chip:active:not(:disabled) { background: var(--rf-bg-selected); }
+.rf-quick-chip:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+.rf-quick-chip:disabled { opacity: 0.55; cursor: default; }
+
+/* 输入框是一个圆角容器，发送图标在框内右下角（ChatGPT / Claude 的做法） */
+.rf-composer-box {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  border: var(--rf-border-width) solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-lg);
+  background: var(--rf-bg-surface);
+  transition: border-color var(--rf-duration-fast) ease, box-shadow var(--rf-duration-fast) ease;
+}
+.rf-composer-box:focus-within {
+  border-color: var(--rf-border-focus);
+  box-shadow: var(--rf-focus-ring);
+}
+.rf-composer-input {
+  flex: 1;
+  min-width: 0;
+  min-height: calc(var(--rf-leading-md) + var(--rf-space-4));
+  padding: var(--rf-space-2) var(--rf-space-12) var(--rf-space-2) var(--rf-space-4);
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  font-weight: 400;
+  line-height: var(--rf-leading-md);
+  color: var(--rf-text-primary);
+}
+.rf-composer-input::placeholder { color: var(--rf-text-secondary); }
+.rf-composer-send {
+  position: absolute;
+  right: var(--rf-space-2);
+  bottom: var(--rf-space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rf-space-8);
+  height: var(--rf-space-8);
+  padding: 0;
+  border: 0;
+  border-radius: var(--rf-radius-full);
+  background: var(--rf-ai-soft);
+  color: var(--rf-ai-text);
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) ease, transform var(--rf-duration-fast) ease;
+}
+.rf-composer-send svg { width: var(--rf-space-4); height: var(--rf-space-4); }
+.rf-composer-send:hover:not(:disabled) { background: var(--rf-purple-500); color: var(--rf-bg-surface); }
+.rf-composer-send:active:not(:disabled) { transform: translateY(1px); }
+.rf-composer-send:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+.rf-composer-send:disabled { opacity: 0.45; cursor: default; }
+
+@media print { .rf-composer { display: none; } }

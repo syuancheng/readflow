@@ -4,6 +4,7 @@
 @import "../styles/p34-feedback.css";
 @import "../styles/p35-cards.css";
 @import "../styles/p43-toast.css";
+@import "../styles/p44-chat.css";
 
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）
@@ -1219,124 +1220,6 @@ body {
 .reader-note {
   width: 100%;
   padding: 0 2px;
-}
-
-/* 提问区与词典结果之间的一条分隔，避免上下内容糊成一片 */
-.rf-ai-section {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--duo-border);
-}
-
-/* 「问 AI」与「做成卡片」并排：同一个按钮底盘（.duo-btn-sm.duo-btn-white），紫色只做点缀（规范 §1.1） */
-.rf-ai-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.rf-ai-btn { color: var(--rf-ai-text); }
-
-/* 「问 AI」展开后的面板（PR-04 重设计）：
-   亲密性——标签组与输入框分两组，组内 8px / 组间 12px + 一条线；
-   对齐——标签与输入框左边界都落在面板左线；对比——无嵌套框，焦点唯一。
-   全部数值走设计令牌，不新增色值。 */
-.rf-ask-menu {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rf-space-3);
-  margin-top: var(--rf-space-2);
-}
-
-/* 组 A：4 个快捷追问，横排紧凑标签，自动换行 */
-.rf-ask-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rf-space-2);
-}
-
-/* 组间的分隔线：全站统一 1px（C-09），靠留白而非加粗边框分区 */
-.rf-ask-sep {
-  height: var(--rf-border-width);
-  background: var(--rf-border);
-}
-
-/* 次级操作：与「问 AI」实体按钮形成主次对比——字号 12/14、字重 400/700、
-   浅底无描边 vs 白底粗边。四个选项彼此共享同一形态（R-01）。 */
-.rf-ask-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--rf-space-1) var(--rf-space-2);
-  border-radius: var(--rf-radius-sm);
-  border: var(--rf-border-width) solid transparent; /* 占住 1px，hover 不跳动 */
-  background: var(--rf-bg-subtle);
-  font-size: var(--rf-text-xs);
-  font-weight: 400; /* = --rf-weight-regular；项目 check-tokens 只认字面字重 */
-  line-height: var(--rf-leading-xs); /* 重置正文大行距，避免标签虚胖 */
-  color: var(--rf-text-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
-}
-.rf-ask-chip:hover {
-  border-color: var(--rf-purple-500);
-  background: var(--rf-ai-soft);
-  color: var(--rf-ai-text);
-}
-
-/* 组 B：自定义提问。发送图标内嵌在输入框右下角，随内容增高 */
-.rf-ask-custom {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-}
-.rf-ask-input {
-  display: block;
-  width: 100%;
-  min-height: calc(var(--rf-leading-md) + var(--rf-space-3));
-  padding: var(--rf-space-2) var(--rf-space-10) var(--rf-space-2) var(--rf-space-3);
-  border-radius: var(--rf-radius-md);
-  font-size: var(--rf-text-sm);
-  font-weight: 400; /* = --rf-weight-regular；项目 check-tokens 只认字面字重 */
-  line-height: var(--rf-leading-md);
-  resize: none;
-  overflow-y: auto;
-}
-.rf-ask-send {
-  position: absolute;
-  right: var(--rf-space-2);
-  bottom: var(--rf-space-2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--rf-radius-sm);
-  background: transparent;
-  color: var(--rf-ai-text);
-  cursor: pointer;
-  transition: background-color var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
-}
-.rf-ask-send svg {
-  width: 16px;
-  height: 16px;
-}
-.rf-ask-send:hover:not(:disabled) {
-  background: var(--rf-ai-soft);
-}
-.rf-ask-send:disabled {
-  color: var(--duo-ink-faint);
-  opacity: 0.55;
-  cursor: default;
-}
-
-/* 对话串里追问那一段的标题：你问：整句没看懂 */
-.rf-turn-ask {
-  font-size: var(--rf-text-xs);
-  font-weight: 800;
-  color: var(--duo-ink-soft);
 }
 
 /* 重试小按钮（AI 内容标题行右侧） */
@@ -3803,43 +3686,6 @@ a:focus-visible,
   color: var(--rf-text-secondary);
 }
 
-/* ===== P33：阅读页「做成卡片」（紫色 = AI，只做点缀；右栏已有主操作，不用绿色）===== */
-/* 建议条：浅紫底 + 次要灰正文，只有「建议做成卡片」几个字用 AI 紫；排到按钮组上方，整句完整显示 */
-.rf-card-suggest {
-  order: -1;
-  flex: 1 0 100%;
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: var(--rf-radius-md);
-  background: var(--rf-ai-soft);
-  font-size: var(--rf-text-sm);
-  line-height: 1.5;
-  color: var(--rf-text-secondary);
-  overflow-wrap: anywhere;
-}
-.rf-card-suggest b { font-weight: 700; color: var(--rf-ai-text); }
-.rf-card-btn-suggest {
-  background: var(--rf-ai-soft);
-  color: var(--rf-ai-text);
-}
-.rf-card-btn[disabled] { opacity: 0.7; cursor: default; }
-.rf-card-again {
-  border: 0;
-  background: none;
-  padding: 0 4px;
-  font: inherit;
-  font-size: var(--rf-text-sm);
-  font-weight: 600;
-  color: var(--rf-text-secondary);
-  text-decoration: underline;
-  cursor: pointer;
-}
-.rf-card-error {
-  flex: 1 0 100%;
-  margin: 0;
-  font-size: var(--rf-text-xs);
-  color: var(--rf-danger-text);
-}
 /* 生成中的小转圈 */
 .rf-spin {
   width: 12px;
@@ -3851,38 +3697,6 @@ a:focus-visible,
 }
 @keyframes rf-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .rf-spin { animation-duration: 2.4s; } }
-
-/* 做卡进度：服务端只有「生成中」，百分比是按已等待时间给的估算，最高到 95%，
-   真正完成由状态切换收尾。@property 让 conic-gradient 的角度能平滑过渡。 */
-@property --rf-pct {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
-.rf-progress-ring {
-  --rf-pct: 0;
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  border-radius: var(--rf-radius-full);
-  background: conic-gradient(
-    currentColor calc(var(--rf-pct) * 1%),
-    color-mix(in srgb, currentColor 18%, transparent) 0
-  );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black 0);
-  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black 0);
-  transition: --rf-pct 0.25s linear;
-}
-.rf-card-progress-note {
-  flex: 1 0 100%;
-  margin: 0;
-  font-size: var(--rf-text-xs);
-  color: var(--rf-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-@media (prefers-reduced-motion: reduce) {
-  .rf-progress-ring { transition: none; }
-}
 
 /* ===== P33：待推送（词库）/ 卡片预览 / 卡片修改 ===== */
 .pc-wrap { display: flex; flex-direction: column; gap: 16px; }

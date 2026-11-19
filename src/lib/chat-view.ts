@@ -70,3 +70,13 @@ export function cardProgress(elapsedSec: number): { pct: number; eta: number } {
 export function nearBottom(m: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 80): boolean {
   return m.scrollHeight - m.scrollTop - m.clientHeight < slack;
 }
+
+/**
+ * 讲解末尾的「制卡建议：」行不属于正文（P33 F1）：显示时去掉，理由单独显示在这条回答的末尾（P44）。
+ * 流式输出时这一行可能只到一半（「制卡」「制卡建议」），也一并先藏起来，免得闪一下。
+ */
+export function shownText(t: { text: string; status: string }): string {
+  const { body } = splitCardSuggestion(t.text);
+  if (t.status !== "streaming") return body;
+  return body.replace(/\n+制(卡(建(议(：.*)?)?)?)?$/, "");
+}
