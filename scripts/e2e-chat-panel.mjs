@@ -115,7 +115,8 @@ try {
   // ===== 对话 =====
   await page.getByRole("button", { name: "这个词在这句里什么意思" }).click();
   await page.locator(".rf-ai-reply .rf-feedback-row").waitFor({ timeout: 15000 });
-  check("C8 首次讲解：没有用户气泡，下面有「这次讲得」反馈", (await page.locator(".rf-bubble-user").count()) === 0 && (await page.locator(".rf-feedback-row").count()) === 1);
+  const b1 = await page.locator(".rf-bubble-user").allInnerTexts();
+  check("C8 手动点「这个词在这句里什么意思」：右边也出现这句话（不能只出现回答），下面有「这次讲得」反馈", b1.join("|") === "这个词在这句里什么意思" && (await page.locator(".rf-feedback-row").count()) === 1, b1.join("|"));
   await page.getByRole("button", { name: "再给个例句" }).click();
   await page.locator(".rf-bubble-user", { hasText: "再给个例句" }).waitFor();
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 2 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
@@ -165,11 +166,11 @@ try {
   const ready = page.locator('.rf-run-block[data-state="ready"]');
   await ready.waitFor({ timeout: 20000 });
   check("C16 重试后成功：「已做成 3 张卡 · 查看」，新标签页打开", (await ready.innerText()).includes("已做成 3 张卡") && (await ready.getByRole("link").getAttribute("target")) === "_blank");
-  check("C17 做完后「做成卡片」快捷项消失（状态块里有「再做一组」）", !(await page.locator(".rf-quick-chip").allInnerTexts()).includes("做成卡片") && (await ready.getByRole("button", { name: "再做一组" }).count()) === 1);
+  check("C17 做完后「做成卡片」快捷项消失，状态块里没有「再做一组」", !(await page.locator(".rf-quick-chip").allInnerTexts()).includes("做成卡片") && (await ready.getByRole("button").count()) === 0);
   await page.getByRole("button", { name: "整句没看懂" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 6 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const seq = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].map((b) => b.textContent));
-  check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "再给个例句|讲讲句子结构|为什么用 tracks？|做成卡片|整句没看懂", seq.join("|"));
+  check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|做成卡片|整句没看懂", seq.join("|"));
   await page.screenshot({ path: path.join(SHOTS, "chat-card-ready-1440.png") });
 
   // ===== 回看：对话串、做卡状态都能还原 =====
@@ -180,7 +181,17 @@ try {
   await page.locator(".rf-composer").waitFor();
   await page.waitForTimeout(1500);
   const re = await page.evaluate(() => ({ bubbles: document.querySelectorAll(".rf-bubble-user").length, block: document.querySelector(".rf-run-block")?.getAttribute("data-state") }));
-  check("C19 回看：追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 5 && re.block === "ready", JSON.stringify(re));
+  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 6 && re.block === "ready", JSON.stringify(re));
+
+  // ===== 自动触发的回答（词典查不到的短语）：右边同样有一条用户问题 =====
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const pts = await page.evaluate(() => { const w = [...document.querySelectorAll(".reading-body .w")]; const r = (t) => { const b = w.find((e) => e.textContent === t).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }; return { a: r("skill"), b: r("history") }; });
+  await page.mouse.move(pts.a.x, pts.a.y); await page.mouse.down(); await page.mouse.move(pts.b.x, pts.b.y, { steps: 6 }); await page.mouse.up();
+  await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length >= 1 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
+  const autoBubbles = await page.locator(".rf-bubble-user").allInnerTexts();
+  check("C22 自动触发的回答（拖选短语，词典没有）：右边也有统一的用户问题", autoBubbles[0] === "这个短语在这句里什么意思" && (await page.locator(".rf-ai-reply").count()) >= 1, autoBubbles.join("|"));
+  await page.screenshot({ path: path.join(SHOTS, "chat-auto-1440.png") });
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });

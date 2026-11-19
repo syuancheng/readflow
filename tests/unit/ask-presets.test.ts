@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAskPresets } from "../../src/lib/ask-presets";
+import { buildAskPresets, defaultQuestion } from "../../src/lib/ask-presets";
 
 const base = { isPhrase: false, isWholeSentence: false, hasDefault: false, quote: "vigorously", sentence: "A b c." };
 const labels = (o: Partial<typeof base>) => buildAskPresets({ ...base, ...o }).map((p) => p.label);
@@ -43,9 +43,18 @@ test("结构 / 例句的提示词带上选中的词，不走整句模式", () =>
   assert.equal(example.req.askKind, "example");
 });
 
-test("首次讲解的请求没有 ask 标题，askKind 是 default", () => {
+test("首次讲解的请求没有 ask 标题，askKind 是 default（它不是追问）", () => {
   const first = buildAskPresets(base)[0];
   assert.deepEqual(first.req, { askKind: "default" });
+});
+
+test("defaultQuestion：整句 / 短语 / 单词三种统一问题；快捷项文字与之一致", () => {
+  assert.equal(defaultQuestion({ isPhrase: false, isWholeSentence: true }), "这句话是什么意思");
+  assert.equal(defaultQuestion({ isPhrase: true, isWholeSentence: false }), "这个短语在这句里什么意思");
+  assert.equal(defaultQuestion({ isPhrase: false, isWholeSentence: false }), "这个词在这句里什么意思");
+  // 整句优先于短语（整句一定含空格）
+  assert.equal(defaultQuestion({ isPhrase: true, isWholeSentence: true }), "这句话是什么意思");
+  assert.equal(buildAskPresets({ ...base, isPhrase: true })[0].label, "这个短语在这句里什么意思");
 });
 
 test("提示词文本与搬运前逐字一致", () => {

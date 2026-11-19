@@ -170,6 +170,17 @@ try {
   check("N10 390px：通知完整落在屏幕里（左右各留 16px、在顶栏下方）", mb && mb.x >= 15 && mb.x + mb.width <= 391 - 15 && mb.y >= 64, JSON.stringify(mb));
   await page.screenshot({ path: path.join(TMP, "toast-390.png") });
   check("N10b 390px 页面无横向溢出", await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
+  // ===== 整页刷新 / 整页跳转后，做卡做完仍然提醒（跟踪记在 localStorage 里） =====
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await word("slowly").scrollIntoViewIfNeeded();
+  await word("slowly").click();
+  await page.waitForFunction(() => { const b = [...document.querySelectorAll("button")].find((x) => /做成卡片/.test(x.textContent || "")); return b && !b.disabled; }, null, { timeout: 15000 });
+  await page.getByRole("button", { name: /做成卡片/ }).click();
+  await page.getByText(/正在做卡 \d+%/).waitFor({ timeout: 8000 });
+  await page.reload({ waitUntil: "networkidle" });
+  const afterReload = page.locator(".rf-toast-ready");
+  await afterReload.waitFor({ timeout: 30000 });
+  check("N12 做卡进行中整页刷新：做完后仍然弹通知", /slowly/.test(await afterReload.innerText()), (await afterReload.innerText()).replace(/\n/g, " "));
   check("N11 服务端日志没有异常", !/unhandled|TypeError|ReferenceError/i.test(log));
 } catch (e) { fail++; console.log("FAIL  脚本异常:", e?.stack ?? e); }
 finally {

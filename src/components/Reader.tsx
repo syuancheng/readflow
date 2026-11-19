@@ -23,7 +23,7 @@ import ChatTurn from "@/components/ChatTurn";
 import AskComposer from "@/components/AskComposer";
 import CardRunBlock from "@/components/CardRunBlock";
 import { useCardJob } from "@/lib/use-card-job";
-import { buildAskPresets, type AskReq } from "@/lib/ask-presets";
+import { buildAskPresets, defaultQuestion, type AskReq } from "@/lib/ask-presets";
 import { nearBottom, cardBlockVisible, cardPresetState, showFeedback as showTurnFeedback, suggestionActionable, suggestionHolderIndex } from "@/lib/chat-view";
 import { splitCardSuggestion } from "@/lib/cards/suggestion";
 
@@ -1991,7 +1991,6 @@ function PickCard({
                       eta={card.eta}
                       error={card.error}
                       onRetry={() => void card.start(true)}
-                      onAgain={() => void card.start(true)}
                     />
                   </div>
                 </div>
@@ -2001,6 +2000,7 @@ function PickCard({
                   {cardShown && cardIndex === i && cardNode}
                   <ChatTurn
                     turn={t}
+                    question={t.ask ?? defaultQuestion({ isPhrase, isWholeSentence })}
                     showFeedback={showTurnFeedback(t, feedbackEnabled)}
                     suggestion={
                       i === holder && card.enabled && suggestionActionable(card.status)
