@@ -191,51 +191,22 @@
 }
 @media (prefers-reduced-motion: reduce) { .rf-progress-ring { transition: none; } }
 
-/* ===== 底部输入区 ===== */
+/* ===== 底部输入区（版式参照 Gemini / ChatGPT：一个圆角容器，左「＋」、中输入、右发送） ===== */
 .rf-composer {
+  position: relative; /* 常用问题菜单相对它定位，向上展开 */
   flex: none;
   padding: var(--rf-space-3) var(--rf-space-1) var(--rf-space-1);
   border-top: var(--rf-border-width) solid var(--rf-border);
   background: var(--rf-bg-surface);
 }
 
-.rf-quick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rf-space-2);
-  margin-bottom: var(--rf-space-3);
-}
-.rf-quick-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--rf-space-1) var(--rf-space-2);
-  border-radius: var(--rf-radius-sm);
-  border: var(--rf-border-width) solid transparent; /* 占住 1px，hover 不跳动 */
-  background: var(--rf-bg-subtle);
-  font-size: var(--rf-text-xs);
-  font-weight: 400;
-  line-height: var(--rf-leading-xs);
-  color: var(--rf-text-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
-}
-.rf-quick-chip:hover:not(:disabled) {
-  border-color: var(--rf-purple-500);
-  background: var(--rf-ai-soft);
-  color: var(--rf-ai-text);
-}
-.rf-quick-chip:active:not(:disabled) { background: var(--rf-bg-selected); }
-.rf-quick-chip:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
-.rf-quick-chip:disabled { opacity: 0.55; cursor: default; }
-
-/* 输入框是一个圆角容器，发送图标在框内右下角（ChatGPT / Claude 的做法） */
 .rf-composer-box {
-  position: relative;
   display: flex;
-  align-items: flex-end;
+  align-items: flex-end; /* 多行输入时「＋」和发送留在底部 */
+  gap: var(--rf-space-1);
+  padding: var(--rf-space-1);
   border: var(--rf-border-width) solid var(--rf-border-strong);
-  border-radius: var(--rf-radius-lg);
+  border-radius: var(--rf-radius-xl);
   background: var(--rf-bg-surface);
   transition: border-color var(--rf-duration-fast) ease, box-shadow var(--rf-duration-fast) ease;
 }
@@ -246,8 +217,8 @@
 .rf-composer-input {
   flex: 1;
   min-width: 0;
-  min-height: calc(var(--rf-leading-md) + var(--rf-space-4));
-  padding: var(--rf-space-2) var(--rf-space-12) var(--rf-space-2) var(--rf-space-4);
+  min-height: var(--rf-space-8);
+  padding: var(--rf-space-1) var(--rf-space-2);
   border: 0;
   outline: none;
   resize: none;
@@ -260,10 +231,11 @@
   color: var(--rf-text-primary);
 }
 .rf-composer-input::placeholder { color: var(--rf-text-secondary); }
+
+/* 左右两个圆形按钮同尺寸（32px），重复 */
+.rf-composer-plus,
 .rf-composer-send {
-  position: absolute;
-  right: var(--rf-space-2);
-  bottom: var(--rf-space-2);
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -272,16 +244,125 @@
   padding: 0;
   border: 0;
   border-radius: var(--rf-radius-full);
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease, transform var(--rf-duration-fast) ease;
+}
+.rf-composer-plus svg,
+.rf-composer-send svg { width: var(--rf-space-5); height: var(--rf-space-5); }
+
+.rf-composer-plus { background: transparent; color: var(--rf-text-secondary); }
+.rf-composer-plus:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-composer-plus[aria-expanded="true"] { background: var(--rf-bg-selected); color: var(--rf-text-primary); }
+.rf-composer-plus[aria-expanded="true"] svg { transform: rotate(45deg); }
+.rf-composer-plus svg { transition: transform var(--rf-duration-fast) var(--rf-ease); }
+
+/* 发送：只有输入了文字才出现，实心 AI 紫圆，向上的箭头 */
+.rf-composer-send { background: var(--rf-ai-text); color: var(--rf-bg-surface); }
+.rf-composer-send:hover:not(:disabled) { filter: brightness(1.15); }
+.rf-composer-send:active:not(:disabled) { transform: translateY(1px); }
+.rf-composer-send:disabled { opacity: 0.45; cursor: default; }
+.rf-composer-plus:focus-visible,
+.rf-composer-send:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+
+/* ===== 常用问题菜单：从「＋」向上展开 ===== */
+.rf-menu {
+  position: absolute;
+  left: var(--rf-space-1);
+  right: var(--rf-space-1);
+  bottom: calc(100% - var(--rf-space-2));
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--rf-space-2);
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-lg);
+  background: var(--rf-bg-surface);
+  box-shadow: var(--rf-shadow-md);
+  z-index: var(--rf-z-dropdown);
+}
+.rf-menu-group { display: flex; flex-direction: column; gap: var(--rf-space-1); }
+.rf-menu-sep { height: var(--rf-border-width); margin: var(--rf-space-2) 0; background: var(--rf-border); }
+.rf-menu-title {
+  margin: 0;
+  padding: var(--rf-space-1) var(--rf-space-2);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  font-weight: 700;
+  color: var(--rf-text-secondary);
+}
+.rf-menu-empty {
+  margin: 0;
+  padding: var(--rf-space-1) var(--rf-space-2);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+}
+.rf-menu-row { display: flex; align-items: center; gap: var(--rf-space-1); }
+.rf-menu-row .rf-menu-item { flex: 1; min-width: 0; }
+.rf-menu-item {
+  display: block;
+  width: 100%;
+  padding: var(--rf-space-2);
+  border: 0;
+  border-radius: var(--rf-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  font-weight: 400;
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
+}
+.rf-menu-item:hover:not(:disabled) { background: var(--rf-ai-soft); color: var(--rf-ai-text); }
+.rf-menu-item:disabled { opacity: 0.55; cursor: default; }
+.rf-menu-addbtn { color: var(--rf-text-secondary); }
+.rf-menu-del {
+  flex: none;
+  width: var(--rf-space-6);
+  height: var(--rf-space-6);
+  padding: 0;
+  border: 0;
+  border-radius: var(--rf-radius-full);
+  background: transparent;
+  font-size: var(--rf-text-md);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+  cursor: pointer;
+}
+.rf-menu-del:hover { background: var(--rf-danger-soft); color: var(--rf-danger-text); }
+.rf-menu-item:focus-visible,
+.rf-menu-del:focus-visible,
+.rf-menu-save:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+.rf-menu-add { display: flex; flex-wrap: wrap; gap: var(--rf-space-2); padding: var(--rf-space-1) var(--rf-space-2); }
+.rf-menu-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--rf-space-1) var(--rf-space-2);
+  border: var(--rf-border-width) solid var(--rf-border-strong);
+  border-radius: var(--rf-radius-sm);
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+  background: var(--rf-bg-surface);
+}
+.rf-menu-input:focus { outline: none; border-color: var(--rf-border-focus); box-shadow: var(--rf-focus-ring); }
+.rf-menu-save {
+  flex: none;
+  padding: var(--rf-space-1) var(--rf-space-3);
+  border: 0;
+  border-radius: var(--rf-radius-sm);
   background: var(--rf-ai-soft);
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  font-weight: 700;
   color: var(--rf-ai-text);
   cursor: pointer;
-  transition: background var(--rf-duration-fast) ease, transform var(--rf-duration-fast) ease;
 }
-.rf-composer-send svg { width: var(--rf-space-4); height: var(--rf-space-4); }
-.rf-composer-send:hover:not(:disabled) { background: var(--rf-purple-500); color: var(--rf-bg-surface); }
-.rf-composer-send:active:not(:disabled) { transform: translateY(1px); }
-.rf-composer-send:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
-.rf-composer-send:disabled { opacity: 0.45; cursor: default; }
+.rf-menu-save:disabled { opacity: 0.45; cursor: default; }
+.rf-menu-error { flex: 1 0 100%; margin: 0; font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); color: var(--rf-danger-text); }
 
 @media print { .rf-composer { display: none; } }
 
@@ -294,3 +375,45 @@
   orphans: 2;
   widows: 2;
 }
+
+/* ===== 阅读页宽屏：正文和 AI 栏是并排的两个独立滚动区（和 ChatGPT / Claude 的布局一样） =====
+   正文的滚动条在两栏之间，AI 栏的滚动条在窗口最右边，中间不再空出一大块；
+   整个页面不再有第三条滚动条。滚动位置通过 src/lib/reader-scroll.ts 读取（读进度、目录都用它）。
+   窄屏（右栏堆到文章下面）仍是整页滚动，不在这条规则里。 */
+@media (min-width: 1024px) {
+  .rf-reading-layout { height: calc(100vh - var(--rf-bar-h)); overflow: hidden; }
+  .rf-reading-main { height: 100%; min-height: 0; }
+  .rf-reading-main > div { max-width: none; height: 100%; margin: 0; padding: 0; }
+  .rf-reading-hint { display: none; } /* 提示行放不进固定高度；Esc 关闭等提示在右栏空状态里 */
+
+  .rf-reading-layout .reader-split { height: 100%; gap: 0; align-items: stretch; }
+
+  .rf-reading-layout .reader-main {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--rf-space-6);
+    scrollbar-width: thin;
+    scrollbar-color: var(--rf-gray-300) transparent;
+  }
+
+  .rf-reading-layout .reader-aside {
+    position: static;
+    height: 100%;
+    max-height: none;
+    padding: var(--rf-space-6) 0 0 var(--rf-space-5);
+    border-left: var(--rf-border-width) solid var(--rf-border);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--rf-gray-300) transparent;
+  }
+  .rf-reading-layout .reader-aside-chat { height: 100%; overflow: hidden; padding-bottom: 0; }
+  .rf-reading-layout .reader-aside-chat .rf-chat { height: 100%; max-height: none; }
+  /* AI 栏的滚动条贴窗口最右边：右侧留白放进里面的内容上，不放在滚动容器上 */
+  .rf-reading-layout .reader-aside-chat .rf-chat-log { padding-right: var(--rf-space-4); }
+  .rf-reading-layout .reader-aside-chat .rf-composer { margin-right: var(--rf-space-4); margin-bottom: var(--rf-space-4); }
+}
+
+/* 滚动条细一点、淡一点（Claude 的做法）：对话区和 AI 栏统一 */
+.reader-aside .rf-chat-log, .rf-chat-log { scrollbar-width: thin; scrollbar-color: var(--rf-gray-300) transparent; }
+.rf-chat-log::-webkit-scrollbar { width: var(--rf-space-1); }

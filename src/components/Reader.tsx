@@ -1526,7 +1526,7 @@ export default function Reader({
             onCancel={() => void cancelRecord(pick)}
           />
         ) : (
-          <p className="reader-hint">点击文中单词，或拖住一句话 —— 释义会显示在这里</p>
+          <p className="reader-hint">点击文中单词，或拖住一句话 —— 释义会显示在这里（再点一次收起，Esc 关闭）</p>
         )}
 
         {/* 右栏只放当前这一次的一句话释义；历史回看走正文的绿色标记 */}

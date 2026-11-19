@@ -94,6 +94,12 @@ try {
   });
 
   await page.goto(`${BASE}/texts/${textId}`, { waitUntil: "networkidle" });
+  // P44：「做成卡片」在输入框左边「＋」菜单里
+  const makeCard = async () => {
+    await page.locator(".rf-composer-plus").click();
+    await page.waitForFunction(() => { const b = [...document.querySelectorAll(".rf-menu-item")].find((x) => x.textContent === "做成卡片"); return b && !b.disabled; }, null, { timeout: 15000 });
+    await page.locator(".rf-menu-item", { hasText: /^做成卡片$/ }).click();
+  };
   const word = (w) => page.locator(".w", { hasText: new RegExp(`^${w}$`) }).first();
 
   // ===== 括号里的词：上下文锚点只取括号里面 =====
@@ -111,10 +117,7 @@ try {
   // ===== 做卡完成通知 =====
   await word("understand").scrollIntoViewIfNeeded();
   await word("understand").click();
-  const makeBtn = page.getByRole("button", { name: /做成卡片/ });
-  await makeBtn.waitFor({ timeout: 15000 });
-  await page.waitForFunction(() => { const b = [...document.querySelectorAll("button")].find((x) => /做成卡片/.test(x.textContent || "")); return b && !b.disabled; }, null, { timeout: 15000 });
-  await makeBtn.click();
+  await makeCard();
   await page.getByText(/做卡 \d+%/).waitFor({ timeout: 8000 });
   check("N1 点「做成卡片」后按钮进入生成中", true);
 
@@ -144,8 +147,7 @@ try {
   // ===== 失败的通知 + 手动关闭 =====
   await word("discipline").scrollIntoViewIfNeeded();
   await word("discipline").click();
-  await page.waitForFunction(() => { const b = [...document.querySelectorAll("button")].find((x) => /做成卡片/.test(x.textContent || "")); return b && !b.disabled; }, null, { timeout: 15000 });
-  await page.getByRole("button", { name: /做成卡片/ }).click();
+  await makeCard();
   await word("patience").scrollIntoViewIfNeeded();
   await word("patience").click();
   const bad = page.locator(".rf-toast-failed");
@@ -161,8 +163,7 @@ try {
   await page.waitForTimeout(400);
   await word("improve").scrollIntoViewIfNeeded();
   await word("improve").click();
-  await page.waitForFunction(() => { const b = [...document.querySelectorAll("button")].find((x) => /做成卡片/.test(x.textContent || "")); return b && !b.disabled; }, null, { timeout: 15000 });
-  await page.getByRole("button", { name: /做成卡片/ }).click();
+  await makeCard();
   await word("everybody").scrollIntoViewIfNeeded();
   await word("everybody").click();
   await page.locator(".rf-toast-ready").waitFor({ timeout: 30000 });
@@ -174,8 +175,7 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 });
   await word("slowly").scrollIntoViewIfNeeded();
   await word("slowly").click();
-  await page.waitForFunction(() => { const b = [...document.querySelectorAll("button")].find((x) => /做成卡片/.test(x.textContent || "")); return b && !b.disabled; }, null, { timeout: 15000 });
-  await page.getByRole("button", { name: /做成卡片/ }).click();
+  await makeCard();
   await page.getByText(/正在做卡 \d+%/).waitFor({ timeout: 8000 });
   await page.reload({ waitUntil: "networkidle" });
   const afterReload = page.locator(".rf-toast-ready");

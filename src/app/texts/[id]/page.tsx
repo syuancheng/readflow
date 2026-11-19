@@ -107,7 +107,7 @@ export default async function TextPage({
         savedWords={savedWords}
         focusParaId={resumeParaId}
       />
-      <p className="text-center text-sm font-bold text-ink-faint mt-6">
+      <p className="rf-reading-hint text-center text-sm font-bold text-ink-faint mt-6">
         点单词或拖选一句话 · 释义显示在右侧批注栏 · 再点一次收起 · Esc 关闭
       </p>
     </ReadingChrome>
