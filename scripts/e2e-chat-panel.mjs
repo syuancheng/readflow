@@ -95,11 +95,14 @@ try {
   const chips = await page.locator(".rf-menu-item").allInnerTexts();
   check("C1b 点「＋」展开常用问题：含「这个词在这句里什么意思」「整句没看懂」「做成卡片」，底部是一个提示词为「添加常用问题」的输入框（没有多余的说明和大按钮）", ["这个词在这句里什么意思", "整句没看懂", "做成卡片"].every((x) => chips.includes(x)) && (await page.locator(".rf-menu-input").getAttribute("placeholder")) === "添加常用问题" && (await page.locator(".rf-menu-empty, .rf-menu-save, .rf-menu-addbtn").count()) === 0, chips.join(" / "));
   const menuBox = await page.evaluate(() => { const m = document.querySelector(".rf-menu").getBoundingClientRect(), c = document.querySelector(".rf-composer").getBoundingClientRect(); return { w: Math.round(m.width), cw: Math.round(c.width), row: Math.round(document.querySelector(".rf-menu-item").getBoundingClientRect().height) }; });
+  check("C1e 菜单里没有「我的常用问题」小标题", (await page.locator(".rf-menu-title").count()) === 0 && !(await page.locator(".rf-menu").innerText()).includes("我的常用问题"));
   check("C1d 菜单窄而紧凑：宽度 ≤ 288px 且比输入区窄，每行高度 ≤ 32px", menuBox.w <= 288 && menuBox.w < menuBox.cw && menuBox.row <= 32, JSON.stringify(menuBox));
   await page.screenshot({ path: path.join(SHOTS, "chat-menu-1440.png") });
   await page.keyboard.press("Escape");
   check("C1c 按 Esc 收起菜单", (await page.locator(".rf-menu").count()) === 0);
   const line = await page.evaluate(() => getComputedStyle(document.querySelector(".rf-composer")).borderTopWidth);
+  const shape = await page.evaluate(() => ({ box: getComputedStyle(document.querySelector(".rf-composer-box")).borderTopLeftRadius, plus: getComputedStyle(document.querySelector(".rf-composer-plus")).borderTopLeftRadius }));
+  check("C2b 输入框是方一点的圆角（12px），里面的按钮 8px，不再是胶囊形", shape.box === "12px" && shape.plus === "8px", JSON.stringify(shape));
   check("C2a 输入框上面没有多余的横线", line === "0px", line);
   const lay = await page.evaluate(() => {
     const a = document.querySelector(".reader-aside").getBoundingClientRect();

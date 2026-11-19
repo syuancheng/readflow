@@ -125,7 +125,6 @@ export default function AskComposer({
             )}
           </div>
           <div className="rf-menu-group">
-            <p className="rf-menu-title">我的常用问题</p>
             {quick.items.map((q) => (
               <div className="rf-menu-row" key={q.id}>
                 <button
