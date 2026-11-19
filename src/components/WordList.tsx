@@ -15,6 +15,7 @@ import MarkdownText from "@/components/MarkdownText";
 import type { ExportBadge, Snippet } from "@/lib/word-library";
 import { textFragmentUrl } from "@/lib/web-anchor";
 import PendingCards, { fetchPendingTotal } from "@/components/PendingCards";
+import { groupByArticle } from "@/lib/word-groups";
 
 export type WordContextRow = {
   id: string;
@@ -131,7 +132,8 @@ export default function WordList({
   const [sort, setSort] = useState<SortKey>("recent");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  // P51：复选框平时不出现，点「选择」进入选择模式才出现（避免每行都摆一个控件）
+  const [selectMode, setSelectMode] = useState(false);
 
   const counts = useMemo(() => {
     const c = { all: 0, starred: 0, todo: 0, done: 0 };
@@ -150,6 +152,8 @@ export default function WordList({
     for (const w of words) if (w.articleKey) n.set(w.articleKey, (n.get(w.articleKey) ?? 0) + 1);
     return articles.filter((a) => n.get(a.key)).map((a) => ({ ...a, count: n.get(a.key) ?? 0 }));
   }, [words, articles]);
+
+  const articleTitleOf = useMemo(() => new Map(articles.map((a) => [a.key, a.title])), [articles]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -220,7 +224,6 @@ export default function WordList({
   }
 
   async function batch(action: "star" | "unstar" | "delete") {
-    setMenuOpen(false);
     const ids = shownSelected.map((w) => w.id);
     if (!ids.length) return;
     if (action === "delete") {
@@ -233,7 +236,7 @@ export default function WordList({
 
   const statusItems: [StatusFilter, string, number][] = [
     ["all", "全部", counts.all],
-    ["starred", "★ 星标", counts.starred],
+    ["starred", "星标", counts.starred],
     ["todo", "未导出", counts.todo],
     ["done", "已导出", counts.done],
     ...(cardsEnabled ? ([["pending", "待推送", pendingTotal ?? 0]] as [StatusFilter, string, number][]) : []),
@@ -280,7 +283,7 @@ export default function WordList({
             className={`wl-side-item${article === "" ? " wl-side-item-on" : ""}`}
             onClick={() => setArticle("")}
           >
-            <span className="truncate">📚 全部文章</span>
+            <span className="truncate">全部文章</span>
           </button>
           {articleList.map((a) => (
             <button
@@ -289,9 +292,7 @@ export default function WordList({
               onClick={() => setArticle(a.key)}
               title={a.title}
             >
-              <span className="truncate">
-                {a.key === DELETED_KEY ? "🗑" : a.kind === "web" ? "🌐" : "📖"} {a.title}
-              </span>
+              <span className="truncate">{a.title}</span>
               <span className="wl-side-count">{a.count}</span>
             </button>
           ))}
@@ -314,44 +315,38 @@ export default function WordList({
           <PendingCards articleKey={article} focusWordId={focusWordId} onTotal={setPendingTotal} />
         ) : (
         <div className="wl-table">
-          {/* 工具栏 */}
+          {/* 工具条：平时只有「选择 · 数量 · 排序」；选择模式下换成批量操作 */}
           <div className="wl-toolbar">
-            <label className="wl-check" title={allChecked ? "取消全选" : "全选"}>
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="全选" />
-              <span />
-            </label>
-            <div className="relative">
-              <button
-                className="wl-tool-btn"
-                disabled={!shownSelected.length}
-                onClick={() => setMenuOpen((v) => !v)}
-                aria-expanded={menuOpen}
-              >
-                批量操作{shownSelected.length ? `（${shownSelected.length}）` : ""} ▾
-              </button>
-              {menuOpen && shownSelected.length > 0 && (
-                <div className="wl-menu" role="menu">
-                  <button role="menuitem" onClick={() => batch("star")}>★ 加星标</button>
-                  <button role="menuitem" onClick={() => batch("unstar")}>☆ 取消星标</button>
-                  <button role="menuitem" className="wl-menu-danger" onClick={() => batch("delete")}>
-                    🗑 删除
+            {selectMode ? (
+              <>
+                <label className="wl-check" title={allChecked ? "取消全选" : "全选"}>
+                  <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="全选" />
+                  <span />
+                </label>
+                <div className="wl-batch" role="group" aria-label="批量操作">
+                  <span className="wl-batch-n">已选 {shownSelected.length} 个</span>
+                  <button type="button" className="rf-btn-text" disabled={!shownSelected.length} onClick={() => batch("star")}>加星标</button>
+                  <button type="button" className="rf-btn-text" disabled={!shownSelected.length} onClick={() => batch("unstar")}>取消星标</button>
+                  <button type="button" className="rf-btn-text rf-btn-text-danger" disabled={!shownSelected.length} onClick={() => batch("delete")}>删除</button>
+                  <button
+                    type="button"
+                    className="rf-btn-text"
+                    onClick={() => {
+                      setSelectMode(false);
+                      setSelected(new Set());
+                    }}
+                  >
+                    完成
                   </button>
                 </div>
-              )}
-            </div>
-            {/* P33：旧的「导出到墨墨」已并入「待推送」：先在阅读页做成卡片，再到这里检查、推送 */}
-            {cardsEnabled && (
-              <button type="button" className="duo-btn duo-btn-sm wl-export-btn" onClick={() => setStatus("pending")}>
-                🃏 待推送{pendingTotal ? ` (${pendingTotal})` : ""}
+              </>
+            ) : (
+              <button type="button" className="rf-btn-text" onClick={() => setSelectMode(true)}>
+                选择
               </button>
             )}
-            <span className="ml-auto text-sm font-bold text-ink-faint whitespace-nowrap">{shown.length} 个词</span>
-            <select
-              className="wl-tool-btn wl-sort"
-              aria-label="排序"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-            >
+            <span className="wl-count">{shown.length} 个词</span>
+            <select className="wl-sort" aria-label="排序" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
               <option value="recent">最近查的</option>
               <option value="oldest">最早查的</option>
               <option value="alpha">字母顺序</option>
@@ -368,195 +363,158 @@ export default function WordList({
               </Link>
             </div>
           ) : (
-            <ul>
-              {shown.map((w) => {
-                const c = w.contexts[0];
-                const open = openId === w.id;
-                return (
-                  <li key={w.id} className={`wl-row${open ? " wl-row-open" : ""}${selected.has(w.id) ? " wl-row-checked" : ""}`}>
-                    <div
-                      className="wl-row-main"
-                      onClick={() => setOpenId(open ? null : w.id)}
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={open}
-                      onKeyDown={(e) => {
-                        if (e.target !== e.currentTarget) return;
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setOpenId(open ? null : w.id);
-                        }
-                      }}
-                    >
-                      <label className="wl-check" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(w.id)}
-                          onChange={() => toggleOne(w.id)}
-                          aria-label={`选择 ${w.displayForm}`}
-                        />
-                        <span />
-                      </label>
-                      <button
-                        className="wl-round-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          speak(w.displayForm);
-                        }}
-                        aria-label="发音"
-                        title="发音"
-                      >
-                        <SpeakerIcon />
-                      </button>
-                      <button
-                        className={`wl-round-btn wl-star${w.starred ? " wl-star-on" : ""}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setStar([w.id], w.starred ? 0 : 1);
-                        }}
-                        aria-label={w.starred ? "取消星标" : "星标"}
-                        title={w.starred ? "取消星标" : "星标"}
-                      >
-                        {w.starred ? "★" : "☆"}
-                      </button>
-
-                      <p className="wl-snippet">
-                        {c && c.snippet.hit ? (
-                          <>
-                            {c.snippet.before}
-                            <b>{c.snippet.hit}</b>
-                            {c.snippet.after}
-                          </>
-                        ) : (
-                          <b>{w.displayForm}</b>
-                        )}
-                      </p>
-
-                      <span className="wl-meaning">
-                        {w.meaning || "—"}
-                        {w.exported.map((b) => (
-                          <span
-                            key={b.target}
-                            className="wl-export-tag"
-                            title={`已导出到${b.app}：${b.cardTypes.join("、")}`}
-                          >
-                            {b.app} ✓
-                          </span>
-                        ))}
-                      </span>
-
-                      <span className="wl-source">
-                        {c?.via === "extension" && (
-                          <span
-                            className="duo-badge wl-via-badge"
-                            title={`通过浏览器插件在网页上记录${c.sourceUrl ? `：${c.sourceUrl}` : ""}`}
-                          >
-                            🧩 插件
-                          </span>
-                        )}
-                        {(() => {
-                          const target = c ? sourceTarget(c) : null;
-                          if (target?.external) {
-                            return (
-                              <a
-                                href={target.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                title={`在原网页中打开：${c!.textTitle}`}
-                              >
-                                {c!.textTitle} ↗
-                              </a>
-                            );
-                          }
-                          if (target) {
-                            return (
-                              <Link
-                                href={target.href}
-                                onClick={(e) => e.stopPropagation()}
-                                title={`跳到原文：${c!.textTitle}`}
-                              >
-                                {c!.textTitle}
-                              </Link>
-                            );
-                          }
-                          return (
-                            <span className="text-ink-faint">
-                              {c?.textDeleted ? "已删除的文章" : ""}
-                            </span>
-                          );
-                        })()}
-                      </span>
-                    </div>
-
-                    {open && (
-                      <div className="wl-detail">
-                        <div className="flex items-baseline gap-2 flex-wrap mb-2">
-                          <h3 className="text-lg font-extrabold">{w.displayForm}</h3>
-                          {w.phonetic && (
-                            <span className="rf-ipa">
-                              /{normalizePhonetic(w.phonetic)}/
-                            </span>
+            // 「全部文章」视图：一篇文章一个分组标题（原来每行重复一列被截断的文章标题）；选了某篇文章就是平铺
+            (article === ""
+              ? groupByArticle(shown, (k) => (k === DELETED_KEY ? "已删除的文章" : (articleTitleOf.get(k ?? "") ?? "未归属文章")))
+              : [{ key: article, title: "", items: shown }]
+            ).map((g) => (
+              <div key={g.key || "none"}>
+                {g.title && (
+                  <h3 className="wl-group-title">
+                    {g.title}
+                    <span className="wl-group-count">{g.items.length}</span>
+                  </h3>
+                )}
+                <ul className="wl-list">
+                  {g.items.map((w) => {
+                    const c = w.contexts[0];
+                    const open = openId === w.id;
+                    return (
+                      <li key={w.id} className={`wl-row${open ? " wl-row-open" : ""}${selected.has(w.id) ? " wl-row-checked" : ""}`}>
+                        <div
+                          className="wl-row-main"
+                          onClick={() => setOpenId(open ? null : w.id)}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={open}
+                          onKeyDown={(e) => {
+                            if (e.target !== e.currentTarget) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setOpenId(open ? null : w.id);
+                            }
+                          }}
+                        >
+                          {selectMode && (
+                            <label className="wl-check" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selected.has(w.id)}
+                                onChange={() => toggleOne(w.id)}
+                                aria-label={`选择 ${w.displayForm}`}
+                              />
+                              <span />
+                            </label>
                           )}
-                          {w.isPhrase ? <span className="duo-badge duo-badge-blue">短语</span> : null}
-                          {w.pos && <span className="duo-badge duo-badge-purple">{w.pos}</span>}
-                          {w.exported.map((b) => (
-                            <span key={b.target} className="duo-badge duo-badge-green">
-                              {b.app} ✓ {b.cardTypes.join("·")}
-                            </span>
-                          ))}
-                          <button className="wl-delete" onClick={() => remove([w.id])} title="彻底删除">
-                            🗑 删除
+
+                          <div className="wl-row-body">
+                            <div className="wl-row-head">
+                              <b className="wl-word">{w.displayForm}</b>
+                              <button
+                                type="button"
+                                className="wl-icon-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  speak(w.displayForm);
+                                }}
+                                aria-label="发音"
+                                title="发音"
+                              >
+                                <SpeakerIcon />
+                              </button>
+                              <span className="wl-meaning">{w.meaning || "—"}</span>
+                              {c?.via === "extension" && (
+                                <span className="wl-tag" title={`通过浏览器插件在网页上记录${c.sourceUrl ? `：${c.sourceUrl}` : ""}`}>
+                                  插件
+                                </span>
+                              )}
+                              {w.exported.map((b) => (
+                                <span key={b.target} className="wl-tag wl-export-tag" title={`已导出到${b.app}：${b.cardTypes.join("、")}`}>
+                                  {b.app} ✓
+                                </span>
+                              ))}
+                            </div>
+                            <p className="wl-snippet">
+                              {c && c.snippet.hit ? (
+                                <>
+                                  {c.snippet.before}
+                                  <b>{c.snippet.hit}</b>
+                                  {c.snippet.after}
+                                </>
+                              ) : (
+                                <b>{w.displayForm}</b>
+                              )}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            className={`wl-star${w.starred ? " wl-star-on" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setStar([w.id], w.starred ? 0 : 1);
+                            }}
+                            aria-label={w.starred ? "取消星标" : "星标"}
+                            title={w.starred ? "取消星标" : "星标"}
+                          >
+                            {w.starred ? "★" : "☆"}
                           </button>
                         </div>
-                        {/* 释义：AI 释义是 Markdown（标题/加粗/列表），与阅读页批注卡同一套渲染 */}
-                        <div className="text-sm text-ink-soft font-semibold mb-2">
-                          <MarkdownText text={normalizeTranslation(w.translation)} />
-                        </div>
-                        <div className="space-y-2">
-                          {w.contexts.map((cx) => (
-                            <div key={cx.id} className="wl-sentence">
-                              <p className="italic">&ldquo;{cx.sentence}&rdquo;</p>
-                              <p className="text-xs font-bold text-ink-faint mt-1 flex items-center gap-2">
-                                <span>
-                                  {cx.textDeleted
-                                    ? "← 来自已删除的文章"
-                                    : `${cx.via === "extension" ? "🧩 " : ""}← ${cx.textTitle}`}
-                                </span>
-                                {(() => {
-                                  const target = sourceTarget(cx);
-                                  if (!target) return null;
-                                  if (target.external) {
-                                    return (
-                                      <a
-                                        href={target.href}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="hover:text-[var(--duo-green-dark)] underline underline-offset-2"
-                                      >
-                                        在原网页中打开 ↗
-                                      </a>
-                                    );
-                                  }
-                                  return (
-                                    <Link
-                                      href={target.href}
-                                      className="hover:text-[var(--duo-green-dark)] underline underline-offset-2"
-                                    >
-                                      跳到原文 →
-                                    </Link>
-                                  );
-                                })()}
+
+                        {open && (
+                          <div className="wl-detail">
+                            <div className="wl-detail-body">
+                              <p className="wl-detail-meta">
+                                {[
+                                  w.phonetic ? `/${normalizePhonetic(w.phonetic)}/` : null,
+                                  w.isPhrase ? "短语" : null,
+                                  w.pos,
+                                  ...w.exported.map((b) => `${b.app} ✓ ${b.cardTypes.join("·")}`),
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "\u00a0"}
                               </p>
+                              {/* 释义：AI 释义是 Markdown（标题/加粗/列表），与阅读页批注卡同一套渲染 */}
+                              <div className="wl-trans">
+                                <MarkdownText text={normalizeTranslation(w.translation)} />
+                              </div>
+                              {w.contexts.map((cx) => (
+                                <figure key={cx.id} className="wl-quote">
+                                  <p className="wl-quote-text">&ldquo;{cx.sentence}&rdquo;</p>
+                                  <figcaption className="wl-quote-src">
+                                    {cx.textDeleted ? "来自已删除的文章" : `${cx.via === "extension" ? "插件 · " : ""}来自 ${cx.textTitle}`}
+                                    {(() => {
+                                      const target = sourceTarget(cx);
+                                      if (!target) return null;
+                                      return target.external ? (
+                                        <>
+                                          {" · "}
+                                          <a href={target.href} target="_blank" rel="noopener noreferrer">在原网页中打开 ↗</a>
+                                        </>
+                                      ) : (
+                                        <>
+                                          {" · "}
+                                          <Link href={target.href}>跳到原文 →</Link>
+                                        </>
+                                      );
+                                    })()}
+                                  </figcaption>
+                                </figure>
+                              ))}
+                              <div className="wl-detail-actions">
+                                <button type="button" className="rf-btn-text rf-btn-text-danger" onClick={() => remove([w.id])} title="彻底删除">
+                                  删除
+                                </button>
+                              </div>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
           )}
         </div>
         )}

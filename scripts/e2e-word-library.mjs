@@ -126,7 +126,7 @@ try {
   const flat = sideTexts.map((t) => t.replace(/\s+/g, " ").trim());
   check(
     "1 左侧筛选：全部 / 星标 / 未导出 / 已导出，没有学习中 / 已掌握",
-    flat.includes("全部 3") && flat.includes("未导出 2") && flat.includes("已导出 1") && flat.some((t) => t.startsWith("★ 星标")) &&
+    flat.includes("全部 3") && flat.includes("未导出 2") && flat.includes("已导出 1") && flat.some((t) => t.startsWith("星标")) &&
       flat.every((t) => !t.includes("已掌握") && !t.includes("学习中")),
     flat.join(" / "),
   );
@@ -145,7 +145,7 @@ try {
   await side("全部").click();
 
   const arts = (await page.locator(".wl-side-articles .wl-side-item").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
-  check("6 文章列表：两篇文章带词数，最近的在前", arts[1] === "📖 Article Beta 2" && arts[2] === "📖 Article Alpha 1", arts.join(" / "));
+  check("6 文章列表：两篇文章带词数，最近的在前，文章名前没有重复的图标", arts[1] === "Article Beta 2" && arts[2] === "Article Alpha 1" && arts.every((t) => !/[📖📚🌐🗑]/u.test(t)), arts.join(" / "));
   await page.locator(".wl-side-articles .wl-side-item", { hasText: "Article Alpha" }).click();
   await page.waitForTimeout(300);
   check("7 选 Alpha：只有 skill（database 已归最近的 Beta）", JSON.stringify(await rows()) === '["skill"]', JSON.stringify(await rows()));
@@ -154,8 +154,8 @@ try {
   check("8 选 Beta：database、owner", JSON.stringify(await rows()) === '["database","owner"]', JSON.stringify(await rows()));
   const dbRow = await item("database").innerText();
   check(
-    "9 database 一行：原句片段来自 Beta、中文简短、来源链接",
-    dbRow.includes("Every") && !dbRow.includes("The skill") && dbRow.includes("数据库") && dbRow.includes("Article Beta"),
+    "9 database 一行：原句片段来自 Beta、中文简短；行里不再重复「来源文章」一列",
+    dbRow.includes("Every") && !dbRow.includes("The skill") && dbRow.includes("数据库") && !dbRow.includes("Article Beta"),
     dbRow.replace(/\s+/g, " ").slice(0, 90),
   );
   await page.locator(".wl-side-articles .wl-side-item", { hasText: "全部文章" }).click();
@@ -174,6 +174,7 @@ try {
   await page.selectOption('select[aria-label="排序"]', "recent");
 
   if (process.env.SHOT_DIR) {
+    await page.getByRole("button", { name: "选择", exact: true }).click();
     await item("owner").locator(".wl-check").click();
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(process.env.SHOT_DIR, "word-library.png"), fullPage: true });
@@ -186,13 +187,11 @@ try {
   }
 
   // ---- 旧的导出入口已并入「待推送」（P33）----
-  const pendBtn = page.locator(".wl-export-btn");
   check(
-    "14 工具栏没有「导出到墨墨」，换成「待推送」按钮",
-    (await pendBtn.count()) === 1 && (await pendBtn.innerText()).includes("待推送") && (await page.locator("text=导出到墨墨").count()) === 0,
-    await pendBtn.innerText(),
+    "14 工具条里没有「导出到墨墨」，也没有重复的「待推送」按钮（左侧已有入口）",
+    (await page.locator(".wl-export-btn").count()) === 0 && (await page.locator(".wl-toolbar", { hasText: "待推送" }).count()) === 0 && (await page.locator("text=导出到墨墨").count()) === 0,
   );
-  await pendBtn.click();
+  await side("待推送").click();
   await page.waitForSelector("text=没有待推送的卡片");
   check("15 点「待推送」切到待推送视图，左侧该项高亮", (await page.locator(".wl-side-item-on", { hasText: "待推送" }).count()) === 1);
   await page.goto(`${BASE}/export`, { waitUntil: "load" });
@@ -208,11 +207,39 @@ try {
   check("18 词的详情里不再有「导出这个词」", (await item("database").locator(".wl-export-one").count()) === 0 && (await page.locator("text=导出这个词").count()) === 0);
   await item("database").locator(".wl-snippet").click();
 
+  // ===== P51：界面结构 =====
+  await side("全部").click();
+  await page.waitForTimeout(300);
+  check("P51-1 平时没有复选框，工具条是「选择 · 数量 · 排序」", (await page.locator(".wl-row .wl-check").count()) === 0 && (await page.getByRole("button", { name: "选择", exact: true }).count()) === 1 && (await page.locator(".wl-count").innerText()).includes("3 个词"));
+  const titles = await page.locator(".wl-group-title").allInnerTexts();
+  check("P51-2 「全部文章」视图按文章分组：一篇一个标题，带词数", titles.length === 2 && titles.some((t) => t.includes("Article Beta") && t.includes("2")) && titles.some((t) => t.includes("Article Alpha") && t.includes("1")), titles.join(" | ").replace(/\s+/g, " "));
+  const look = await page.evaluate(() => {
+    const word = document.querySelector(".wl-word"), meaning = document.querySelector(".wl-meaning"), snip = document.querySelector(".wl-snippet");
+    const gs = (el) => getComputedStyle(el);
+    const btn = document.querySelector(".wl-toolbar .rf-btn-text");
+    return { wordPx: gs(word).fontSize, wordW: gs(word).fontWeight, meanPx: gs(meaning).fontSize, meanW: gs(meaning).fontWeight, snipColor: gs(snip).color, meanColor: gs(meaning).color, btnBorder: gs(btn).borderBottomWidth, duoInToolbar: document.querySelectorAll(".wl-toolbar .duo-btn").length };
+  });
+  check("P51-3 词是焦点：词 18px/700，释义 14px/400，原句 14px 且比释义浅；工具条没有 3D 实体按钮", look.wordPx === "18px" && look.wordW === "700" && look.meanPx === "14px" && look.meanW === "400" && look.snipColor !== look.meanColor && look.btnBorder === "0px" && look.duoInToolbar === 0, JSON.stringify(look));
+  await item("database").locator(".wl-snippet").click();
+  await page.waitForTimeout(250);
+  const flatDetail = await page.evaluate(() => {
+    const body = document.querySelector(".wl-detail-body"), quote = document.querySelector(".wl-quote");
+    const gs = (el) => getComputedStyle(el);
+    return { left: gs(body).borderLeftWidth, quoteBorder: gs(quote).borderTopWidth, quoteBg: gs(quote).backgroundColor };
+  });
+  check("P51-4 展开区不套框：只有左侧一条 2px 竖线，原句没有边框和底色", flatDetail.left === "2px" && flatDetail.quoteBorder === "0px" && flatDetail.quoteBg === "rgba(0, 0, 0, 0)", JSON.stringify(flatDetail));
+  await item("database").locator(".wl-snippet").click();
+  await page.getByRole("button", { name: "选择", exact: true }).click();
+  check("P51-5 点「选择」后每行出现复选框，工具条变成「已选 N 个 · 加星标 · 取消星标 · 删除 · 完成」", (await page.locator(".wl-row .wl-check").count()) === 3 && (await page.locator(".wl-batch").innerText()).includes("完成"));
+  if (process.env.SHOT_DIR) await page.screenshot({ path: path.join(process.env.SHOT_DIR, "words-select.png") });
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  check("P51-6 点「完成」退出选择模式，复选框消失", (await page.locator(".wl-row .wl-check").count()) === 0);
+
   // 批量：勾两个 → 加星标
+  await page.getByRole("button", { name: "选择", exact: true }).click();
   await item("owner").locator(".wl-check").click();
   await item("skill").locator(".wl-check").click();
-  await page.locator(".wl-tool-btn", { hasText: "批量操作" }).click();
-  await page.locator(".wl-menu button", { hasText: "加星标" }).click();
+  await page.locator(".wl-batch button", { hasText: "加星标" }).click();
   await page.waitForTimeout(800);
   const starredDb = q("select count(*) c from user_words where starred = 1").c;
   const starSide = (await side("星标").innerText()).replace(/\s+/g, " ");
@@ -220,8 +247,7 @@ try {
 
   // 批量删除（确认框点确定）
   page.once("dialog", (d) => d.accept());
-  await page.locator(".wl-tool-btn", { hasText: "批量操作" }).click();
-  await page.locator(".wl-menu button", { hasText: "删除" }).click();
+  await page.locator(".wl-batch button", { hasText: "删除" }).click();
   await page.waitForTimeout(1000);
   const left = q("select group_concat(lemma) l from user_words").l;
   check("22 批量删除：选中的两个词删掉，只剩 database", left === "database" && JSON.stringify(await rows()) === '["database"]', `库里=${left}`);

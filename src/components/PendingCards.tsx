@@ -293,7 +293,7 @@ export default function PendingCards({
                       <li key={f.cardId}>{f.error}</li>
                     ))}
                   </ul>
-                  <button type="button" className="duo-btn-sm duo-btn-white" onClick={() => void push(job.failures.map((f) => f.cardId))}>
+                  <button type="button" className="rf-btn-quiet" onClick={() => void push(job.failures.map((f) => f.cardId))}>
                     重试失败的 {job.failures.length} 张
                   </button>
                 </div>
@@ -313,8 +313,8 @@ export default function PendingCards({
       ) : (
         texts.map((t) => (
           <section key={t.textId} className="pc-text">
-            <h3 className="pc-text-title">📖 {t.title}</h3>
-            <ul>
+            <h3 className="pc-text-title">{t.title}</h3>
+            <ul className="wl-list">
               {t.words.map((w) => {
                 const open = openWord === w.wordId;
                 const review = w.cards.some((c) => c.needsReview);
@@ -344,7 +344,7 @@ export default function PendingCards({
                       </button>
                     </div>
                     {open && (
-                      <div className="wl-detail">
+                      <div className="pc-detail">
                         {w.cards.map((c) => c.setId).filter((v, i, a) => a.indexOf(v) === i).map((setId) => {
                           const cards = [...(sets[setId] ?? [])].sort((a, b) => Number(Boolean(b.needsReview)) - Number(Boolean(a.needsReview)));
                           if (!sets[setId]) return <p key={setId} className="text-sm font-bold text-ink-faint">加载卡片…</p>;
@@ -363,14 +363,19 @@ export default function PendingCards({
                                 />
                               ) : (
                                 <>
-                                  <CardPreview preview={c.preview} notice={c.needsReview} />
-                                  <div className="pc-actions">
-                                    <button type="button" className="duo-btn-sm duo-btn-white" onClick={() => setEditing(c.id)}>修改</button>
-                                    <button type="button" className="duo-btn-sm duo-btn-white" disabled={busyCard === c.id} onClick={() => void cardAction(c.id, setId, "regenerate")}>
-                                      {busyCard === c.id ? "处理中…" : "换一道"}
-                                    </button>
-                                    <button type="button" className="duo-btn-sm duo-btn-white" disabled={busyCard === c.id} onClick={() => void cardAction(c.id, setId, "delete")}>删除</button>
-                                  </div>
+                                  <CardPreview
+                                    preview={c.preview}
+                                    notice={c.needsReview}
+                                    actions={
+                                      <>
+                                        <button type="button" className="rf-btn-text" onClick={() => setEditing(c.id)}>修改</button>
+                                        <button type="button" className="rf-btn-text" disabled={busyCard === c.id} onClick={() => void cardAction(c.id, setId, "regenerate")}>
+                                          {busyCard === c.id ? "处理中…" : "换一道"}
+                                        </button>
+                                        <button type="button" className="rf-btn-text rf-btn-text-danger" disabled={busyCard === c.id} onClick={() => void cardAction(c.id, setId, "delete")}>删除</button>
+                                      </>
+                                    }
+                                  />
                                   {cardError[c.id] && <p className="pc-error" role="alert">{cardError[c.id]}</p>}
                                 </>
                               )}
