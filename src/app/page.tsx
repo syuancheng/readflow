@@ -1,5 +1,4 @@
 import { and, desc, eq, ne } from "drizzle-orm";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { texts } from "@/db/schema";
@@ -11,8 +10,6 @@ import SurveyPrompt from "@/components/SurveyPrompt";
 import { getLearner, needsSurvey } from "@/lib/learner-store";
 
 export const dynamic = "force-dynamic";
-
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 export default async function Home() {
   // proxy 只挡「没 cookie」；伪造 / 过期 cookie 在这里兜底
@@ -43,7 +40,6 @@ export default async function Home() {
     completedAt: t.completedAt,
   }));
 
-  const maxBar = Math.max(1, ...stats.recent.map((r) => r.count));
   // P32：没填过问卷、也没点过「以后再说」的老用户，在首页看到一次提示卡片
   const showSurvey = needsSurvey(getLearner(user.id));
 
@@ -97,74 +93,12 @@ export default async function Home() {
           )}
         </div>
 
-        {/* ===== 右：导入 + 统计 =====
-            宽屏两栏时钉住右栏（top-20 = 80px，紧贴 64px 顶栏下方）；
-            窄屏退回单列，sticky 自然失效、右栏正常排在列表下方（TIP-05）。 */}
-        <div className="space-y-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-96px)] lg:overflow-y-auto">
+        {/* ===== 右：导入文本 =====
+            不钉住：跟着页面一起滚，整页只有一条滚动条。窄屏退回单列，排在列表下方（TIP-05）。 */}
+        <div>
           <ImportForm />
-
-          {/* 统计卡 */}
-          <div className="duo-card p-6">
-            <div className="duo-section-title mb-4">我的战绩</div>
-
-            <div className="grid grid-cols-3 gap-2 mb-6">
-              <StatBox value={stats.textCount} label="文本" />
-              <StatBox value={stats.savedCount} label="生词" />
-              <StatBox value={stats.todayCount} label="今日" />
-            </div>
-
-            <p className="text-xs font-semibold text-ink-soft mb-3">最近 7 天收集</p>
-            <div className="flex justify-between gap-2 h-32">
-              {stats.recent.map((d, i) => {
-                const h = Math.round((d.count / maxBar) * 100);
-                const isToday = i === stats.recent.length - 1;
-                const empty = d.count === 0;
-                return (
-                  <div key={d.date} className="flex-1 h-full flex flex-col items-center gap-2">
-                    <span className="text-xs font-semibold text-ink-soft min-h-4">{d.count || ""}</span>
-                    <div className="w-full flex-1 flex items-end">
-                      <div
-                        className="w-full rounded-sm transition-all"
-                        style={{
-                          height: `${Math.max(h, 4)}%`,
-                          background: empty
-                            ? "var(--rf-bg-selected)"
-                            : isToday
-                              ? "var(--rf-accent)"
-                              : "var(--rf-heat-2)",
-                        }}
-                      />
-                    </div>
-                    <span
-                      className="text-xs"
-                      style={{
-                        color: isToday ? "var(--rf-text-primary)" : "var(--rf-text-secondary)",
-                        fontWeight: isToday ? 700 : 400,
-                      }}
-                    >
-                      {WEEKDAYS[new Date(d.date).getDay()]}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <Link href="/stats" className="duo-btn duo-btn-white w-full mt-6">
-              查看完整战绩
-            </Link>
-          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** 首页小统计格：中性灰底 + 主文字色数字，不再每格一种颜色 */
-function StatBox({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="rounded-md py-3 text-center" style={{ background: "var(--rf-bg-subtle)" }}>
-      <div className="text-2xl font-extrabold">{value}</div>
-      <div className="text-xs text-ink-soft">{label}</div>
     </div>
   );
 }

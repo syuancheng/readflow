@@ -294,6 +294,13 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   const foot = page.locator(".rf-site-footer a");
   check("C24 普通页面底部有 ICP 备案号，链接到 beian.miit.gov.cn（新标签页）；阅读页宽屏不显示页脚", (await foot.innerText()) === "陕ICP备2026034202号" && (await foot.getAttribute("href")) === "https://beian.miit.gov.cn/" && (await foot.getAttribute("target")) === "_blank" && !footerOnReader, `阅读页可见=${footerOnReader}`);
+  const home = await page.evaluate(() => {
+    const card = [...document.querySelectorAll(".duo-card")].find((c) => c.textContent.includes("导入文本"));
+    const col = card?.parentElement;
+    const cs = col ? getComputedStyle(col) : null;
+    return { hasStats: document.body.innerText.includes("我的战绩"), position: cs?.position, overflowY: cs?.overflowY, pageScrolls: document.documentElement.scrollHeight > document.documentElement.clientHeight + 1 };
+  });
+  check("C25 首页只留「导入文本」：没有「我的战绩」，右栏不钉住、不自己滚动（整页只有一条滚动条）", !home.hasStats && home.position === "static" && home.overflowY === "visible", JSON.stringify(home));
   await page.screenshot({ path: path.join(SHOTS, "footer-home-1440.png"), fullPage: true });
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
