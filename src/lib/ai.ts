@@ -1,3 +1,5 @@
+import { ASK_MAX_CHARS } from "./ask-presets";
+import { planHistory } from "./history-compress";
 import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
@@ -47,9 +49,14 @@ export type AiConfig = { settings: SettingsMap; env: EnvMap };
  */
 export type ExplainHistoryTurn = { ask?: string; text: string };
 
-/** 历史的硬上限：条数与单轮字数，防止长对话把上下文撑爆（服务端也会再校验一次） */
-export const EXPLAIN_HISTORY_MAX_TURNS = 12;
-export const EXPLAIN_HISTORY_MAX_CHARS = 2000;
+/**
+ * 历史的「收包」上限：客户端一次最多送来多少轮、每轮多少字，防止请求体过大。
+ * 真正发给模型的内容由 history-compress.ts 压缩（P45：首次讲解 + 最近 3 轮完整，中间压成要点）。
+ */
+export const EXPLAIN_HISTORY_MAX_TURNS = 30;
+export const EXPLAIN_HISTORY_MAX_CHARS = 4000;
+/** 学生这一次的提问最多多少字（前端输入框和服务端都限制） */
+export const EXPLAIN_PROMPT_MAX_CHARS = ASK_MAX_CHARS;
 
 export type ExplainParams = {
   word: string;          // 要解释的词或短语（选区）
@@ -417,19 +424,24 @@ export function narrowHistory(v: unknown): ExplainHistoryTurn[] | undefined {
 /**
  * 把历史问答展开成多轮 messages：一轮 = 一条 user（学生当时的问题）+ 一条 assistant（老师当时的回答）。
  *
- * 默认讲解那轮 ask 为空，用一句固定措辞还原当时「学生没说出具体问题」的情形，
+ * 默认讲解那轮 ask 为空，用一句固定措辞还原当时「学生没有说出具体问题」的情形，
  * 与 buildUserMessage 在无 prompt 时的收尾一致，避免凭空编一个问题。
- * 历史按原顺序截断到上限；空文本轮次丢弃。
+ * 先过 planHistory 压缩（P45）：首次讲解和最近 3 轮完整，中间压成要点；轮数不多时内容与原来逐字一致。
+ * 有整轮被丢掉时，开头加一句说明，让模型知道前面有省略。空文本轮次丢弃。
  */
 export function historyTurns(history: readonly ExplainHistoryTurn[] | undefined): ChatTurn[] {
   if (!history || history.length === 0) return [];
+  const eligible = history.filter((t) => t.text?.trim());
+  if (eligible.length === 0) return [];
+  const plan = planHistory(eligible.map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text.trim() })));
   const out: ChatTurn[] = [];
-  for (const t of history.slice(-EXPLAIN_HISTORY_MAX_TURNS)) {
-    const answer = t.text?.trim();
-    if (!answer) continue;
+  if (plan.omitted > 0) {
+    out.push({ role: "system", content: `（这处批注上更早的 ${plan.omitted} 轮对话已省略，下面只保留了要点和最近的几轮。）` });
+  }
+  for (const t of plan.turns) {
     const asked = t.ask?.trim();
     out.push({ role: "user", content: asked ? `学生的问题: ${asked}` : "学生没有说出具体问题，请我判断他卡在哪里。" });
-    out.push({ role: "assistant", content: answer.slice(0, EXPLAIN_HISTORY_MAX_CHARS) });
+    out.push({ role: "assistant", content: t.text });
   }
   return out;
 }

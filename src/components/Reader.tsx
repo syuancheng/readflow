@@ -23,6 +23,7 @@ import ChatTurn from "@/components/ChatTurn";
 import AskComposer from "@/components/AskComposer";
 import CardRunBlock from "@/components/CardRunBlock";
 import { useCardJob } from "@/lib/use-card-job";
+import { firstCompressedIndex, planHistory } from "@/lib/history-compress";
 import { buildAskPresets, defaultQuestion, type AskReq } from "@/lib/ask-presets";
 import { nearBottom, cardBlockVisible, cardPresetState, showFeedback as showTurnFeedback, suggestionActionable, suggestionHolderIndex } from "@/lib/chat-view";
 import { splitCardSuggestion } from "@/lib/cards/suggestion";
@@ -1612,6 +1613,12 @@ function PickCard({
   const [cardAt, setCardAt] = useState<number | null>(null);
   const cardShown = card.enabled && cardBlockVisible(card.status);
   const cardIndex = cardAt ?? turns.length;
+
+  // P45：和服务端用同一个 planHistory，算出哪些轮次已被压缩，在对话里提示用户
+  const eligibleIdx = turns.flatMap((t, i) => (t.status === "done" && t.text.trim() && !isNotAGloss(t.text) ? [i] : []));
+  const historyPlan = planHistory(eligibleIdx.map((i) => ({ ask: turns[i].ask, text: turns[i].text })));
+  const compressedAt = firstCompressedIndex(historyPlan.tiers);
+  const noteAt = compressedAt >= 0 ? eligibleIdx[compressedAt] : -1;
   const cardPreset = !card.enabled
     ? "hidden"
     : cardPresetState(card.status) === "enabled" && !pick.contextId
@@ -1998,6 +2005,12 @@ function PickCard({
               const nodes = turns.map((t, i) => (
                 <Fragment key={i}>
                   {cardShown && cardIndex === i && cardNode}
+                  {i === noteAt && (
+                    <p className="rf-compress-note" role="note">
+                      以下较早的对话已压缩：AI 只参考要点（首次讲解和最近 3 轮仍是完整的）
+                      {historyPlan.omitted > 0 ? `；最早的 ${historyPlan.omitted} 轮已不再参考` : ""}
+                    </p>
+                  )}
                   <ChatTurn
                     turn={t}
                     question={t.ask ?? defaultQuestion({ isPhrase, isWholeSentence })}

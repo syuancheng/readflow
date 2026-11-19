@@ -20,6 +20,9 @@ export type AskReq = {
   askKind?: AskKind;
 };
 
+/** 学生一次提问最多多少字：前端输入框和服务端都按它限制（P45） */
+export const ASK_MAX_CHARS = 500;
+
 export type AskPreset = { key: string; label: string; req: AskReq };
 
 export type AskPresetInput = {
