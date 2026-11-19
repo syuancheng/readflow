@@ -60,21 +60,39 @@
 /* 用户气泡里的引用行：这次提问针对 AI 回答里的哪段话，回看也能追溯 */
 .rf-bubble-quote {
   display: flex;
-  align-items: flex-start;
-  gap: var(--rf-space-1);
-  margin-bottom: var(--rf-space-1);
-  padding-bottom: var(--rf-space-1);
-  border-bottom: var(--rf-border-width) solid var(--rf-border);
-  color: var(--rf-text-secondary);
+  align-items: center;
+  gap: var(--rf-space-2);
+  margin-bottom: var(--rf-space-2);
+  padding: var(--rf-space-2);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  text-align: left;
 }
-.rf-bubble-quote svg { flex: none; margin-top: 2px; }
-.rf-bubble-quote span {
+.rf-bubble-quote-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--rf-space-8);
+  height: var(--rf-space-8);
+  padding: 0 var(--rf-space-1);
+  border-radius: var(--rf-radius-sm);
+  background: var(--rf-bg-subtle);
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-xs);
+  font-weight: 700;
+}
+.rf-bubble-quote-body { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.rf-bubble-quote-text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+  font-weight: 700;
+  color: var(--rf-text-primary);
 }
+.rf-bubble-quote-label { font-size: var(--rf-text-xs); color: var(--rf-text-secondary); }
 
 .rf-ai-reply { min-width: 0; }
 
@@ -283,7 +301,7 @@
   transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
 }
 .rf-selection-ask-btn svg { width: var(--rf-space-4); height: var(--rf-space-4); }
-.rf-selection-ask-btn:hover { background: var(--rf-ai-soft); color: var(--rf-ai-text); }
+.rf-selection-ask-btn:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
 .rf-selection-ask-btn:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
 /* 引用 chip：按需宽度的小胶囊（对齐 WorkBuddy 参考），单行截断，紧贴输入框上方 */
@@ -296,10 +314,11 @@
   margin: 0 var(--rf-space-1) var(--rf-space-1);
   padding: var(--rf-space-1) var(--rf-space-2);
   border: 0;
-  border-radius: var(--rf-radius-full);
-  background: var(--rf-ai-soft);
-  color: var(--rf-ai-text);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-subtle);
+  color: var(--rf-text-primary);
   font-size: var(--rf-text-sm);
+  font-weight: 600;
   line-height: var(--rf-leading-sm);
 }
 .rf-quote-chip-text {

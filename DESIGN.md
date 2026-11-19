@@ -277,3 +277,17 @@
 
 ## 自动检查
 - 三个改动组件 `check_design.py` HARD=0 / REVIEW=0；`npm test` 634/634、typecheck、隔离库 build 全通过。
+
+---
+
+# 严格照 WorkBuddy 参考：去紫色（13:20 用户纠正）
+
+用户指出浮层 hover 与引用块用了紫色（`--rf-ai-soft` / `--rf-ai-text`），参考图里根本没有，要求严格照图做、只去掉「复制」。本轮全部改中性灰，形态对齐三张参考图：
+
+1. **浮层**：白底细边框，一个「添加到对话」按钮（勾选图标 + 文字），hover 用 `--rf-bg-hover` + `--rf-text-primary`，无紫色。
+2. **输入框引用 chip**：浅灰底 `--rf-bg-subtle` + 深色字 `--rf-text-primary`（600），左侧虚线框图标（参考图 2），单行截断。
+3. **对话气泡引用块**：浅灰卡片 + 左侧「AI」标签 + 加粗引用文字 + 灰色「Selected Text」副标题（参考图 3）。
+
+配色：单色中性灰，暖色/紫色面积归零（COL-09）。重复：三个组件共用 `--rf-bg-subtle` / `--rf-text-primary` / `--rf-radius-md`（R-01）。对比：引用靠字重 700 + 结构卡片，副标题靠 `--rf-text-xs` + 次要色（C-03）。字体、媒介同前，无例外。
+
+自动检查：check-tokens 通过（修正了 chip 的 500 字重→600 白名单）；check_design.py 两组件 HARD=0/REVIEW=0；npm test 634/634、typecheck、隔离库 build 全通过。

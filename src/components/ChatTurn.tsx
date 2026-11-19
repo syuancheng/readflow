@@ -88,10 +88,11 @@ export default function ChatTurn({
       <div className="rf-bubble-user">
         {turn.quote && (
           <div className="rf-bubble-quote" title={turn.quote}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="12" height="12" aria-hidden>
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            <span>{turn.quote}</span>
+            <span className="rf-bubble-quote-badge">AI</span>
+            <span className="rf-bubble-quote-body">
+              <span className="rf-bubble-quote-text">{turn.quote}</span>
+              <span className="rf-bubble-quote-label">Selected Text</span>
+            </span>
           </div>
         )}
         {question}
