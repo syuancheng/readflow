@@ -398,6 +398,14 @@
     scrollbar-color: var(--rf-gray-300) transparent;
   }
 
+  /* 正文外面的卡片框去掉：两栏之间已经有一条分隔线，再套一圈框就变成两条线了 */
+  .rf-reading-layout .reader-article-card {
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+    background: transparent;
+  }
+
   .rf-reading-layout .reader-aside {
     position: static;
     height: 100%;

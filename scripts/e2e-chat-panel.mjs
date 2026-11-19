@@ -265,6 +265,8 @@ try {
     };
   });
   check("C23 宽屏双栏：整页不滚动，正文自己是滚动区，AI 栏贴到窗口最右边，两栏紧挨着（中间没有空档）", !pane.pageScrolls && pane.mainScrolls && pane.asideRightGap <= 1 && Math.abs(pane.asideLeft - pane.mainRight) <= 1, JSON.stringify(pane));
+  const card = await page.evaluate(() => { const c = getComputedStyle(document.querySelector(".reader-article-card")); return { b: c.borderTopWidth, shadow: c.boxShadow }; });
+  check("C23a 宽屏下正文外面没有卡片框（只剩两栏之间一条分隔线）", card.b === "0px" && card.shadow === "none", JSON.stringify(card));
   check("C23b 滚动条细（≤ 8px）", pane.mainBar <= 8, `正文滚动条宽=${pane.mainBar}`);
   await page.evaluate(() => { const m = document.querySelector(".reader-main"); m.scrollTo({ top: m.scrollHeight }); });
   await page.waitForTimeout(900);
