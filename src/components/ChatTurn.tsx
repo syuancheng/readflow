@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import FeedbackRow from "@/components/FeedbackRow";
 import MarkdownText from "@/components/MarkdownText";
+import SelectionAskBar, { type SelectionAsk } from "@/components/SelectionAskBar";
 import { shownText } from "@/lib/chat-view";
 import { isNotAGloss } from "@/lib/explain-policy";
 import type { Feedback } from "@/lib/learner/types";
@@ -31,6 +32,7 @@ export default function ChatTurn({
   onRetry,
   onRate,
   onReason,
+  onQuote,
 }: {
   turn: ChatTurnData;
   /** 这条回答对应的用户问题：显示在右边。每条 AI 回答都有，首次讲解用统一的默认问题 */
@@ -42,14 +44,46 @@ export default function ChatTurn({
   onRetry: () => void;
   onRate: (r: Feedback) => void;
   onReason: (r: string | null) => void;
+  /** 划选这段回答里的文字并点「提问」：把选中的原话交给上层当引用 */
+  onQuote?: (text: string) => void;
 }) {
   // 「暂不需要」只对这一条建议生效：关掉后这条回答下面不再出现
   const [dismissed, setDismissed] = useState(false);
+  const [selection, setSelection] = useState<SelectionAsk | null>(null);
+  const replyRef = useRef<HTMLDivElement>(null);
   const failed = turn.status === "error" || (turn.status === "done" && isNotAGloss(turn.text));
+
+  // 只在已完成的回答里允许划选；选区必须完全落在本条回答容器内，避免跨轮/跨正文
+  const captureSelection = useCallback(() => {
+    if (turn.status !== "done" || !onQuote) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const text = sel.toString().trim();
+    if (!text) return;
+    const range = sel.getRangeAt(0);
+    if (!replyRef.current?.contains(range.commonAncestorContainer)) return;
+    const rect = range.getBoundingClientRect();
+    const above = rect.top >= 64;
+    setSelection({
+      text,
+      top: above ? rect.top - 8 : rect.bottom + 8,
+      left: Math.max(90, Math.min(window.innerWidth - 90, rect.left + rect.width / 2)),
+      below: !above,
+    });
+  }, [turn.status, onQuote]);
+
+  const askAboutSelection = useCallback(
+    (text: string) => {
+      setSelection(null);
+      window.getSelection()?.removeAllRanges();
+      onQuote?.(text);
+    },
+    [onQuote],
+  );
   return (
     <div className="rf-chat-turn">
       <div className="rf-bubble-user">{question}</div>
-      <div className="rf-ai-reply">
+      <div className="rf-ai-reply" ref={replyRef} onMouseUp={captureSelection}>
         {(turn.status === "loading" || turn.status === "streaming" || failed) && (
           <div className="rf-chat-status">
             {turn.status === "loading" && <span>正在思考…</span>}
@@ -91,6 +125,7 @@ export default function ChatTurn({
           />
         )}
       </div>
+      <SelectionAskBar selection={selection} onAsk={askAboutSelection} onDismiss={() => setSelection(null)} />
     </div>
   );
 }

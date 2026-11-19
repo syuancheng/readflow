@@ -237,6 +237,46 @@
 }
 .rf-composer-input::placeholder { color: var(--rf-text-secondary); }
 
+/* 引用片段 chip：划选 AI 回答后贴在输入框上方，可删除 */
+.rf-quote-chip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--rf-space-2);
+  margin: 0 var(--rf-space-1) var(--rf-space-1);
+  padding: var(--rf-space-2);
+  border-left: 3px solid var(--rf-ai-text, var(--duo-green));
+  border-radius: var(--rf-radius-sm);
+  background: var(--rf-bg-subtle, var(--duo-surface));
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-md);
+  color: var(--rf-text-secondary);
+}
+.rf-quote-chip-mark { color: var(--rf-ai-text, var(--duo-green)); font-weight: 600; }
+.rf-quote-chip-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.rf-quote-chip-del {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--rf-radius-sm);
+  background: transparent;
+  color: var(--rf-text-secondary);
+  font-size: var(--rf-text-md);
+  line-height: 1;
+  cursor: pointer;
+}
+.rf-quote-chip-del:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-quote-chip-del:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+
 /* 左右两个按钮同尺寸（32px），重复 */
 .rf-composer-plus,
 .rf-composer-send {

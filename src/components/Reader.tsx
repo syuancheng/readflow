@@ -1600,6 +1600,8 @@ function PickCard({
     turnsRef.current = fn(turnsRef.current);
     setTurns(turnsRef.current);
   };
+  // 用户在 AI 回答里划选的引用：先进输入框上方的 chip，发送时才随问题一起交给模型
+  const [askQuote, setAskQuote] = useState<{ text: string; turnIndex: number } | null>(null);
   const busy = turns.some((t) => t.status === "loading" || t.status === "streaming");
   const hasDefault = turns.some((t) => !t.ask);
 
@@ -1666,6 +1668,7 @@ function PickCard({
     setDictLoading(!recall);
     turnsRef.current = turnsFrom(initialGloss);
     setTurns(turnsRef.current);
+    setAskQuote(null); // 引用只属于当前这条批注的对话，换词就清掉
 
     // 回看：词典 / AI 都不查，直接展示存下来的结果。
     // P34 F4：只额外取一次这条批注保存过的回答，给每段对上 answerId 和当时的反馈，
@@ -1786,8 +1789,11 @@ function PickCard({
       ...(req.ask ? { askLabel: req.ask } : {}),
     };
     const withHistory = { ...(history.length > 0 ? { history } : {}) };
+    // 用户在 AI 回答里划选的引用，随这次提问一起发；发完就清掉 chip
+    const withQuote = { ...(askQuote ? { quote: askQuote } : {}) };
+    setAskQuote(null);
     const body = req.wholeSentence
-      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs, ...withHistory }
+      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs, ...withHistory, ...withQuote }
       : {
           word: anchor.quote,
           prefix: aiContext.prefix,
@@ -1800,6 +1806,7 @@ function PickCard({
           askKind: req.askKind ?? "default",
           ...refs,
           ...withHistory,
+          ...withQuote,
         };
 
     try {
@@ -2027,6 +2034,7 @@ function PickCard({
                       if (!t.feedback) return;
                       void rate(i, t.feedback, r);
                     }}
+                    onQuote={(text) => setAskQuote({ text, turnIndex: i })}
                   />
                 </Fragment>
               ));
@@ -2045,6 +2053,8 @@ function PickCard({
         cardTitle={pick.contextId ? undefined : "正在保存这条记录…"}
         onAsk={(req) => void triggerAI(req)}
         onMakeCard={makeCard}
+        quote={askQuote}
+        onClearQuote={() => setAskQuote(null)}
       />
     </div>
   );

@@ -57,6 +57,11 @@ export const EXPLAIN_HISTORY_MAX_TURNS = 30;
 export const EXPLAIN_HISTORY_MAX_CHARS = 4000;
 /** 学生这一次的提问最多多少字（前端输入框和服务端都限制） */
 export const EXPLAIN_PROMPT_MAX_CHARS = ASK_MAX_CHARS;
+/** 从 AI 回答里划选的引用片段上限（比提问稍宽，但仍防撑爆上下文） */
+export const EXPLAIN_QUOTE_MAX_CHARS = 500;
+
+/** 用户从 AI 回答里划选、要针对它提问的片段 */
+export type ExplainQuote = { text: string; turnIndex: number };
 
 export type ExplainParams = {
   word: string;          // 要解释的词或短语（选区）
@@ -66,6 +71,8 @@ export type ExplainParams = {
   language?: string;     // 目标语言（正在学的语言），默认 en
   monolingual?: boolean; // true = 用目标语言解释，false = 用中文解释
   prompt?: string;       // 用户的自定义追问（对应 Readlang 的 askAI）
+  /** 用户从 AI 回答里划选的引用片段；无引用时 user 消息逐字不变 */
+  quote?: ExplainQuote;
   withPrevSentence?: boolean; // 前文已包含上一句（「没看懂整句」信号触发），给模型加衔接提示
   /** 阅读器采集的客观信号（不是结论）。旧调用不带时模型仍可正常工作。 */
   signals?: SelectionSignals;
@@ -332,7 +339,13 @@ export function buildUserMessage(params: ExplainParams): string {
   // P40：领域块只由服务端按 textId 查库后注入；前端伪造的字段会在 handler 里被丢弃。
   // 没有值时一个字符都不插入，其他追问与默认讲解的 user message 逐字不变。
   const domain = params.domainBlock?.trim() ? `这篇文章：\n${params.domainBlock.trim()}\n\n` : "";
-  return `${domain}${learner}${contextBlock(params)}
+  // 用户在回答里划选的片段：明确告诉他这是模型自己上一轮说的原话，
+  // 让模型把它当作「在澄清自己的表述」而不是一条新证据。无引用时不插入任何字符。
+  const quoteText = params.quote?.text?.trim();
+  const quote = quoteText
+    ? `\n你引用了自己上一条回答里的这段话：\n「${quoteText.slice(0, EXPLAIN_QUOTE_MAX_CHARS)}」`
+    : "";
+  return `${domain}${learner}${contextBlock(params)}${quote}
 ${question}`;
 }
 
@@ -419,6 +432,19 @@ export function narrowHistory(v: unknown): ExplainHistoryTurn[] | undefined {
     out.push({ ...(ask ? { ask } : {}), text });
   }
   return out.length > 0 ? out : undefined;
+}
+
+/** 引用片段白名单：只取 text（裁剪字数）与 turnIndex（非负整数），非法输入丢弃 */
+export function narrowQuote(v: unknown): ExplainQuote | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  if (typeof o.text !== "string") return undefined;
+  const text = o.text.trim().slice(0, EXPLAIN_QUOTE_MAX_CHARS);
+  if (!text) return undefined;
+  const raw = typeof o.turnIndex === "number" && Number.isInteger(o.turnIndex) && o.turnIndex >= 0
+    ? o.turnIndex
+    : 0;
+  return { text, turnIndex: Math.min(raw, 99) };
 }
 
 /**

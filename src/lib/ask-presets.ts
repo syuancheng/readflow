@@ -18,6 +18,8 @@ export type AskReq = {
   wholeSentence?: boolean;
   /** 这次讲解的种类，随 /api/explain 送给服务端记事件 */
   askKind?: AskKind;
+  /** 用户在 AI 回答里划选的片段（引用），随追问送给模型 */
+  quote?: { text: string; turnIndex: number };
 };
 
 /** 学生一次提问最多多少字：前端输入框和服务端都按它限制（P45） */

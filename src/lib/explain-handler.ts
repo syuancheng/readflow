@@ -7,6 +7,7 @@ import {
   explainTurns,
   EXPLAIN_PROMPT_MAX_CHARS,
   narrowHistory,
+  narrowQuote,
   type ExplainParams,
 } from "@/lib/ai";
 import type { AuthUser } from "@/lib/auth";
@@ -303,6 +304,7 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     askLabel: str((body as { askLabel?: unknown }).askLabel)?.trim().slice(0, 60) || undefined,
     anchor: narrowAnchor((body as { anchor?: unknown }).anchor),
     history: narrowHistory((body as { history?: unknown }).history),
+    quote: narrowQuote((body as { quote?: unknown }).quote),
   };
 }
 

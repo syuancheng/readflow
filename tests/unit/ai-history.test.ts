@@ -7,9 +7,11 @@ import {
   buildUserMessage,
   EXPLAIN_HISTORY_MAX_CHARS,
   EXPLAIN_HISTORY_MAX_TURNS,
+  EXPLAIN_QUOTE_MAX_CHARS,
   explainTurns,
   historyTurns,
   narrowHistory,
+  narrowQuote,
 } from "../../src/lib/ai";
 
 /**
@@ -204,4 +206,47 @@ test("历史不进本轮 user 消息：contextBlock 与问题行逐字不变", (
     history: [{ ask: "上一个问题", text: "上一回答" }],
   });
   assert.equal(withHistory, without, "历史只走 messages，不塞进本轮 user 文本");
+});
+
+/** 划选 AI 回答里的片段追问：引用要明确告诉模型那是它自己的原话 */
+test("引用片段：无引用逐字不变；有引用明确标注是模型自己的原话", () => {
+  const without = buildUserMessage({ ...BASE, prompt: "这段什么意思" });
+  assert.ok(!without.includes("你引用了自己"), "无引用时不插入任何字符");
+
+  const withQuote = buildUserMessage({
+    ...BASE,
+    prompt: "这段什么意思",
+    quote: { text: "up 和 to 分属两个成分", turnIndex: 1 },
+  });
+  assert.ok(withQuote.includes("你引用了自己上一条回答里的这段话"));
+  assert.ok(withQuote.includes("「up 和 to 分属两个成分」"));
+  assert.ok(withQuote.indexOf("你引用了自己") < withQuote.indexOf("学生的问题: 这段什么意思"),
+    "引用要放在问题行之前");
+
+  // 引用与历史并存：两者都在，互不覆盖
+  const both = buildUserMessage({
+    ...BASE,
+    prompt: "再讲讲",
+    history: [{ text: "上次回答" }],
+    quote: { text: "引用原文", turnIndex: 0 },
+  });
+  assert.ok(both.includes("「引用原文」") && both.includes("学生的问题: 再讲讲"));
+});
+
+test("narrowQuote 白名单：裁剪字数、只收合法结构，非法输入丢弃", () => {
+  assert.deepEqual(
+    narrowQuote({ text: "  一段话  ", turnIndex: 2, evil: "x" }),
+    { text: "一段话", turnIndex: 2 },
+    "额外字段不透传",
+  );
+  const long = narrowQuote({ text: "字".repeat(EXPLAIN_QUOTE_MAX_CHARS + 100), turnIndex: 0 });
+  assert.equal(long?.text.length, EXPLAIN_QUOTE_MAX_CHARS);
+  assert.deepEqual(narrowQuote({ text: "   " }), undefined, "空引用丢弃");
+  assert.deepEqual(narrowQuote({ text: 123 }), undefined);
+  assert.deepEqual(narrowQuote(null), undefined);
+  assert.deepEqual(narrowQuote("字符串"), undefined);
+  // turnIndex 非法归 0，不超过 99
+  assert.deepEqual(narrowQuote({ text: "x", turnIndex: -1 }), { text: "x", turnIndex: 0 });
+  assert.deepEqual(narrowQuote({ text: "x", turnIndex: "1" }), { text: "x", turnIndex: 0 });
+  assert.equal(narrowQuote({ text: "x", turnIndex: 999 })?.turnIndex, 99);
 });

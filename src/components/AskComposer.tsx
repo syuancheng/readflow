@@ -18,6 +18,8 @@ export default function AskComposer({
   cardTitle,
   onAsk,
   onMakeCard,
+  quote,
+  onClearQuote,
 }: {
   presets: AskPreset[];
   /** AI 正在回答：菜单里的问题和发送暂停，输入框仍可输入 */
@@ -28,6 +30,9 @@ export default function AskComposer({
   cardTitle?: string;
   onAsk: (req: AskReq) => void;
   onMakeCard: () => void;
+  /** 用户在 AI 回答里划选、要随这次提问一起发的引用；显示在输入框上方 */
+  quote?: { text: string; turnIndex: number } | null;
+  onClearQuote?: () => void;
 }) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
@@ -74,11 +79,17 @@ export default function AskComposer({
     run();
   }
 
+  // 所有提问都从这里走：有引用就自动带上，发送后由 Reader 清空 chip
+  function emit(req: AskReq) {
+    if (busy) return;
+    onAsk({ ...req, ...(quote ? { quote } : {}) });
+  }
+
   function send() {
     const q = text.trim();
     if (!q || busy) return;
     setText("");
-    onAsk({ ask: q, prompt: q, askKind: "custom" });
+    emit({ ask: q, prompt: q, askKind: "custom" });
     box.current?.focus();
   }
 
@@ -107,7 +118,7 @@ export default function AskComposer({
         <div className="rf-menu" role="menu" aria-label="常用问题">
           <div className="rf-menu-group">
             {presets.map((p) => (
-              <button key={p.key} type="button" role="menuitem" className="rf-menu-item" disabled={busy} onClick={() => pick(() => onAsk(p.req))}>
+              <button key={p.key} type="button" role="menuitem" className="rf-menu-item" disabled={busy} onClick={() => pick(() => emit(p.req))}>
                 {p.label}
               </button>
             ))}
@@ -132,7 +143,7 @@ export default function AskComposer({
                   role="menuitem"
                   className="rf-menu-item"
                   disabled={busy}
-                  onClick={() => pick(() => onAsk({ ask: q.text, prompt: q.text, askKind: "custom" }))}
+                  onClick={() => pick(() => emit({ ask: q.text, prompt: q.text, askKind: "custom" }))}
                 >
                   {q.text}
                 </button>
@@ -171,6 +182,21 @@ export default function AskComposer({
               </p>
             )}
           </div>
+        </div>
+      )}
+      {quote && (
+        <div className="rf-quote-chip" role="group" aria-label="引用的回答片段">
+          <span className="rf-quote-chip-mark" aria-hidden>❝</span>
+          <span className="rf-quote-chip-text" title={quote.text}>{quote.text}</span>
+          <button
+            type="button"
+            className="rf-quote-chip-del"
+            aria-label="移除引用"
+            title="移除引用"
+            onClick={onClearQuote}
+          >
+            ×
+          </button>
         </div>
       )}
       <div className="rf-composer-box">
