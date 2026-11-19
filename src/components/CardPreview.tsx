@@ -104,7 +104,16 @@ function Lines({ side, answers }: { side: PreviewSide; answers: boolean }) {
   );
 }
 
-export default function CardPreview({ preview, notice }: { preview: PreviewModel; notice?: string | null }) {
+export default function CardPreview({
+  preview,
+  notice,
+  actions,
+}: {
+  preview: PreviewModel;
+  notice?: string | null;
+  /** 头部右侧的操作（修改 / 换一道 / 删除）：由使用的地方传入，预览本身不管 */
+  actions?: React.ReactNode;
+}) {
   const [side, setSide] = useState<Side>("front");
   const hasHint = preview.hints !== null;
   const order: Side[] = hasHint ? ["front", "hint", "back"] : ["front", "back"];
@@ -116,12 +125,12 @@ export default function CardPreview({ preview, notice }: { preview: PreviewModel
   return (
     <div className="cp-card">
       {notice && <div className="st-notice st-notice-err cp-notice">需要检查：{notice}</div>}
-      <div className="cp-tags">
-        <span className="cp-tag cp-tag-kind">
-          {preview.tags.emoji} {preview.tags.label}
-        </span>
-        {preview.tags.style && <span className="cp-tag cp-tag-style">{preview.tags.style}</span>}
-        {preview.tags.source && <span className="cp-tag cp-tag-source">{preview.tags.source}</span>}
+      <div className="cp-head">
+        <div className="cp-tags">
+          <span className="cp-tag cp-tag-kind">{preview.tags.label}</span>
+          {preview.tags.style && <span className="cp-tag cp-tag-style">{preview.tags.style}</span>}
+        </div>
+        {actions && <div className="cp-actions">{actions}</div>}
       </div>
 
       <div className="cp-body" aria-live="polite">
@@ -187,7 +196,7 @@ export default function CardPreview({ preview, notice }: { preview: PreviewModel
         )}
       </div>
 
-      <button type="button" className="duo-btn-sm duo-btn-white cp-flip" aria-pressed={side !== "front"} onClick={() => setSide(next)}>
+      <button type="button" className="rf-btn-quiet cp-flip" aria-pressed={side !== "front"} onClick={() => setSide(next)}>
         {flipLabel}
       </button>
     </div>

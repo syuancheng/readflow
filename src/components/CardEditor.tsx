@@ -122,10 +122,10 @@ export default function CardEditor({
         )}
       </fieldset>
       <div className="ce-actions">
-        <button type="submit" className="duo-btn-sm duo-btn-white" disabled={saving}>
+        <button type="submit" className="rf-btn-quiet" disabled={saving}>
           {saving ? "保存中…" : "保存"}
         </button>
-        <button type="button" className="duo-btn-sm duo-btn-white" onClick={onCancel} disabled={saving}>
+        <button type="button" className="rf-btn-text" onClick={onCancel} disabled={saving}>
           取消
         </button>
       </div>
@@ -214,7 +214,7 @@ function BlockField({ block, label, onChange }: { block: Block; label: string; o
               />
               <button
                 type="button"
-                className="duo-btn-sm duo-btn-white"
+                className="rf-btn-text"
                 aria-label={`删除选项 ${i + 1}`}
                 disabled={block.options.length <= CHOICE_MIN}
                 onClick={() => onChange(removeOption(block, i))}
@@ -225,7 +225,7 @@ function BlockField({ block, label, onChange }: { block: Block; label: string; o
           ))}
           <button
             type="button"
-            className="duo-btn-sm duo-btn-white"
+            className="rf-btn-text"
             disabled={block.options.length >= CHOICE_MAX}
             onClick={() => onChange(addOption(block))}
           >
