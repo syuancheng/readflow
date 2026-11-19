@@ -28,12 +28,6 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 var(--rf-space-1) var(--rf-space-4);
-  scrollbar-width: thin;
-}
-.rf-chat-log::-webkit-scrollbar { width: 6px; }
-.rf-chat-log::-webkit-scrollbar-thumb {
-  background: var(--rf-border);
-  border-radius: var(--rf-radius-full);
 }
 @media (max-width: 1023px) {
   /* 窄屏右栏堆到文章下面：不固定高度（手机端不在本期范围） */
@@ -289,7 +283,6 @@
   background: var(--rf-bg-surface);
   box-shadow: var(--rf-shadow-md);
   z-index: var(--rf-z-dropdown);
-  scrollbar-width: thin;
 }
 .rf-menu-group { display: flex; flex-direction: column; }
 .rf-menu-group + .rf-menu-group { margin-top: var(--rf-space-2); }
@@ -395,8 +388,6 @@
     min-height: 0;
     overflow-y: auto;
     padding: var(--rf-space-6);
-    scrollbar-width: thin;
-    scrollbar-color: var(--rf-gray-300) transparent;
   }
 
   /* 正文外面的卡片框去掉：两栏之间已经有一条分隔线，再套一圈框就变成两条线了 */
@@ -414,8 +405,6 @@
     padding: var(--rf-space-6) 0 0 var(--rf-space-5);
     border-left: var(--rf-border-width) solid var(--rf-border);
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--rf-gray-300) transparent;
   }
   .rf-reading-layout .reader-aside-chat { height: 100%; overflow: hidden; padding-bottom: 0; }
   .rf-reading-layout .reader-aside-chat .rf-chat { height: 100%; max-height: none; }
@@ -424,6 +413,3 @@
   .rf-reading-layout .reader-aside-chat .rf-composer { margin-right: var(--rf-space-4); margin-bottom: var(--rf-space-4); }
 }
 
-/* 滚动条细一点、淡一点（Claude 的做法）：对话区和 AI 栏统一 */
-.reader-aside .rf-chat-log, .rf-chat-log { scrollbar-width: thin; scrollbar-color: var(--rf-gray-300) transparent; }
-.rf-chat-log::-webkit-scrollbar { width: var(--rf-space-1); }

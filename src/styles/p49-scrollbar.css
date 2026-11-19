@@ -1,0 +1,13 @@
+/*
+ * P49：全站滚动条统一做窄、做淡（宽 6px，灰色滑块、透明轨道），参照 Claude 的样子。
+ * 页面滚动、阅读页的正文栏和 AI 栏、菜单、输入框……所有滚动区都用这一套，
+ * 所以别的地方不要再单独写 scrollbar-width / scrollbar-color（它们会盖掉这里的宽度）。
+ * Firefox 不支持 ::-webkit-scrollbar，用 scrollbar-width: thin 兜底。
+ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rf-gray-300); border-radius: var(--rf-radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--rf-gray-400); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--rf-gray-300) transparent; }
+}

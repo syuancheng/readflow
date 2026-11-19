@@ -278,7 +278,8 @@ try {
   check("C23 宽屏双栏：整页不滚动，正文自己是滚动区，AI 栏贴到窗口最右边，两栏紧挨着（中间没有空档）", !pane.pageScrolls && pane.mainScrolls && pane.asideRightGap <= 1 && Math.abs(pane.asideLeft - pane.mainRight) <= 1, JSON.stringify(pane));
   const card = await page.evaluate(() => { const c = getComputedStyle(document.querySelector(".reader-article-card")); return { b: c.borderTopWidth, shadow: c.boxShadow }; });
   check("C23a 宽屏下正文外面没有卡片框（只剩两栏之间一条分隔线）", card.b === "0px" && card.shadow === "none", JSON.stringify(card));
-  check("C23b 滚动条细（≤ 8px）", pane.mainBar <= 8, `正文滚动条宽=${pane.mainBar}`);
+  const sb = await page.evaluate(() => ({ html: getComputedStyle(document.documentElement, "::-webkit-scrollbar").width, main: getComputedStyle(document.querySelector(".reader-main"), "::-webkit-scrollbar").width, aside: getComputedStyle(document.querySelector(".reader-aside"), "::-webkit-scrollbar").width }));
+  check("C23b 全站滚动条统一做窄（6px）：整页、正文栏、AI 栏都一样", sb.html === "6px" && sb.main === "6px" && sb.aside === "6px", JSON.stringify(sb));
   await page.evaluate(() => { const m = document.querySelector(".reader-main"); m.scrollTo({ top: m.scrollHeight }); });
   await page.waitForTimeout(900);
   const prog = await page.evaluate(() => parseFloat(document.querySelector(".rf-tb-progress i").style.width));
@@ -288,12 +289,39 @@ try {
   const prog0 = await page.evaluate(() => parseFloat(document.querySelector(".rf-tb-progress i").style.width));
   check("C23d 滚回顶部：读进度回到 0", prog0 <= 1, `进度=${prog0}`);
   await page.screenshot({ path: path.join(SHOTS, "chat-panes-1440.png") });
+  // ===== 回到顶部（阅读页宽屏：挂在正文栏里） =====
+  check("C26a 还在顶部时没有回到顶部按钮", (await page.locator(".rf-totop").count()) === 0);
+  await page.evaluate(() => document.querySelector(".reader-main").scrollTo({ top: 900 }));
+  await page.locator(".rf-totop-in").waitFor({ timeout: 3000 });
+  await page.screenshot({ path: path.join(SHOTS, "chat-totop-1440.png") });
+  const inMain = await page.evaluate(() => Boolean(document.querySelector(".rf-totop-in")?.closest(".reader-main")));
+  await page.locator(".rf-totop-in").click();
+  await page.waitForFunction(() => document.querySelector(".reader-main").scrollTop < 5, null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  check("C26 往下滚后出现回到顶部按钮（在正文栏里，不压 AI 栏）；点一下滚回最上面，按钮消失", inMain && (await page.locator(".rf-totop").count()) === 0);
+  // ===== 回到顶部（整页滚动：窄屏阅读页） =====
+  await page.setViewportSize({ width: 768, height: 700 });
+  await page.goto(`${BASE}/texts/${lt.data.id ?? lt.data.textId}`, { waitUntil: "networkidle" });
+  await page.evaluate(() => window.scrollTo(0, 1500));
+  await page.locator(".rf-totop:not(.rf-totop-in)").waitFor({ timeout: 3000 });
+  const fixedPos = await page.evaluate(() => getComputedStyle(document.querySelector(".rf-totop")).position);
+  await page.locator(".rf-totop").click();
+  await page.waitForFunction(() => window.scrollY < 5, null, { timeout: 5000 });
+  check("C27 整页滚动的页面：右下角固定的回到顶部按钮，点一下滚回最上面", fixedPos === "fixed");
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   // ===== 页脚：ICP 备案号 =====
   const footerOnReader = await page.locator(".rf-site-footer").isVisible();
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   const foot = page.locator(".rf-site-footer a");
   check("C24 普通页面底部有 ICP 备案号，链接到 beian.miit.gov.cn（新标签页）；阅读页宽屏不显示页脚", (await foot.innerText()) === "陕ICP备2026034202号" && (await foot.getAttribute("href")) === "https://beian.miit.gov.cn/" && (await foot.getAttribute("target")) === "_blank" && !footerOnReader, `阅读页可见=${footerOnReader}`);
+  const home = await page.evaluate(() => {
+    const card = [...document.querySelectorAll(".duo-card")].find((c) => c.textContent.includes("导入文本"));
+    const col = card?.parentElement;
+    const cs = col ? getComputedStyle(col) : null;
+    return { hasStats: document.body.innerText.includes("我的战绩"), position: cs?.position, overflowY: cs?.overflowY, pageScrolls: document.documentElement.scrollHeight > document.documentElement.clientHeight + 1 };
+  });
+  check("C25 首页只留「导入文本」：没有「我的战绩」，右栏不钉住、不自己滚动（整页只有一条滚动条）", !home.hasStats && home.position === "static" && home.overflowY === "visible", JSON.stringify(home));
   await page.screenshot({ path: path.join(SHOTS, "footer-home-1440.png"), fullPage: true });
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
