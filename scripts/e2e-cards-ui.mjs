@@ -27,13 +27,12 @@ const check = (n, ok, d = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PA
 const S = "The ephemeral joy faded quickly.";
 const cards = {
   cards: [
-    { kind: "context_meaning", target: "t", front: [
+    { kind: "rephrase", target: "t", front: [
       { t: "sentence", source: "original", text: S, mark: { start: 4, end: 13, as: "highlight" } },
-      { t: "instruction", text: "ephemeral is closest in meaning to" },
-      { t: "choice", options: [{ text: "brief", correct: true }, { text: "large", correct: false }, { text: "loud", correct: false }] }],
-      back: { answer: [{ t: "text", text: "brief" }], explanation: [{ t: "text", text: "转瞬即逝" }] } },
-    { kind: "layered_cloze", target: "t2", front: [{ t: "sentence", source: "original", text: S, mark: { start: 4, end: 13, as: "blank" } }],
-      hints: [{ t: "text", text: "首字母 e" }], back: { answer: [{ t: "fill", answer: "ephemeral" }] } },
+      { t: "instruction", text: "不用 ephemeral，换个说法把这句话再说一遍" }],
+      back: { answer: [{ t: "sentence", source: "paraphrase", text: "The brief joy faded quickly." }, { t: "text", text: "短暂的喜悦很快消失了。" }], explanation: [{ t: "text", text: "转瞬即逝" }] } },
+    { kind: "custom", customLabel: "提示卡", target: "t2", front: [{ t: "sentence", source: "original", text: S, mark: { start: 4, end: 13, as: "highlight" } }, { t: "instruction", text: "回忆这个词怎么拼" }],
+      hints: [{ t: "text", text: "首字母 e" }], back: { answer: [{ t: "text", text: "ephemeral" }] } },
     { kind: "situation_say", target: "在场景里用 ephemeral", front: [
       { t: "text", text: "朋友说他升职后的兴奋只持续了几天。" }, { t: "instruction", text: "用 ephemeral 说一句" }],
       back: { answer: [
@@ -261,28 +260,30 @@ try {
   const p3 = await c3.newPage();
   await p3.goto(`${BASE}/texts/${textId2}`, { waitUntil: "networkidle" });
   await p3.getByText("ephemeral", { exact: false }).first().click();
-  await p3.getByRole("button", { name: /问 AI/ }).click();
+  // P44：没有「问 AI」菜单了——快捷问题直接摆在底部输入框上方
   await p3.getByRole("button", { name: "这个词在这句里什么意思" }).click();
-  await p3.locator(".rf-card-suggest").waitFor({ timeout: 20000 }).catch(async (e) => { await p3.screenshot({ path: shots("reader-fail.png") }); console.log("页面文本:", (await p3.locator("body").innerText()).slice(0, 400)); throw e; });
+  await p3.locator(".rf-suggest-line").waitFor({ timeout: 20000 }).catch(async (e) => { await p3.screenshot({ path: shots("reader-fail.png") }); console.log("页面文本:", (await p3.locator("body").innerText()).slice(0, 400)); throw e; });
   const answerText = await p3.locator(".rf-md").first().innerText();
-  check("R1 讲解正文里没有「制卡建议」那一行；理由超过 30 字也完整显示（不截断、没有省略号）", !answerText.includes("制卡建议") && (await p3.locator(".rf-card-suggest").innerText()).includes("💡 建议做成卡片：技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了"), answerText.slice(0, 60));
-  const btn = p3.getByRole("button", { name: "＋ 做成卡片" });
-  check("R2 有建议时「做成卡片」有紫色点缀（不是绿色），且是和「问 AI」同一套按钮底盘", (await btn.getAttribute("class")).includes("rf-card-btn-suggest") && (await btn.getAttribute("class")).includes("duo-btn-white"));
-  const hs = await Promise.all([p3.getByRole("button", { name: /问 AI/ }), btn].map((l) => l.evaluate((e) => Math.round(e.getBoundingClientRect().height))));
-  check("R2b 「问 AI」与「做成卡片」同高", hs[0] === hs[1], `高度=${hs}`);
-  const bar = await p3.locator(".rf-card-suggest").evaluate((e) => ({ order: getComputedStyle(e).order, bg: getComputedStyle(e).backgroundColor }));
-  check("R2c 建议条在按钮组上方（order:-1）且是浅紫底", bar.order === "-1" && bar.bg === "rgb(245, 236, 255)", JSON.stringify(bar));
+  check("R1 讲解正文里没有「制卡建议」那一行；理由超过 30 字也完整显示（不截断、没有省略号）", !answerText.includes("制卡建议") && (await p3.locator(".rf-suggest-line").innerText()).includes("💡 建议做成卡片：技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了"), answerText.slice(0, 60));
+  const bar = await p3.locator(".rf-suggest-line").evaluate((e) => ({ bg: getComputedStyle(e).backgroundColor, inReply: Boolean(e.closest(".rf-ai-reply")), afterBody: Boolean(e.previousElementSibling?.classList.contains("rf-md")) }));
+  check("R2 制卡建议在这条回答的末尾（正文之后），浅紫底", bar.inReply && bar.afterBody && bar.bg === "rgb(245, 236, 255)", JSON.stringify(bar));
+  const chipNames = await p3.locator(".rf-quick-chip").allInnerTexts();
+  check("R2b 输入框上方的快捷问题里有「做成卡片」，和「整句没看懂」同级", chipNames.includes("做成卡片") && chipNames.includes("整句没看懂"), chipNames.join(" / "));
+  check("R2c 右栏没有旧的「问 AI」「做成卡片」独立按钮", (await p3.locator(".reader-note .rf-ask-menu, .reader-note .rf-ai-actions, .reader-note .rf-card-btn").count()) === 0 && (await p3.getByRole("button", { name: /问 AI/ }).count()) === 0);
   await p3.screenshot({ path: shots("reader-suggest-1440.png") });
-  const box = await btn.boundingBox();
-  await p3.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await p3.mouse.down();
-  const pressed = await btn.evaluate((e) => getComputedStyle(e).transform);
-  await p3.mouse.up({ button: "left" }).catch(() => {});
-  check("R2d 按下时有下沉反馈（:active 位移）", pressed !== "none", pressed);
-  await p3.getByText("正在做卡…").waitFor({ timeout: 3000 });
-  check("R3 点击后马上变成「正在做卡…」，同一个位置、带转圈、禁用并标 aria-busy", (await p3.locator(".rf-card-btn .rf-spin").count()) === 1 && (await p3.locator(".rf-card-btn[aria-busy=true]").count()) === 1);
-  await p3.getByText(/已做成 5 张卡/).waitFor({ timeout: 30000 });
-  check("R4 生成完成：「✓ 已做成 5 张卡 · 查看」，查看指向待推送并带上词", (await p3.getByRole("link", { name: "查看" }).getAttribute("href")).startsWith("/words?status=pending&word="));
+  await p3.locator(".rf-suggest-act").click();
+  await p3.locator('.rf-run-block[data-state="generating"]').waitFor({ timeout: 3000 });
+  const gen = await p3.evaluate(() => {
+    const blk = document.querySelector(".rf-run-block");
+    const bub = [...document.querySelectorAll(".rf-bubble-user")].at(-1);
+    const log = document.querySelector(".rf-chat-log").getBoundingClientRect();
+    const br = bub.getBoundingClientRect();
+    return { busy: blk.getAttribute("aria-busy"), ring: blk.querySelectorAll(".rf-progress-ring").length, bubble: bub.textContent, rightEdge: Math.round(log.right - br.right) };
+  });
+  check("R3 点建议里的按钮：右边出现用户消息「做成卡片」，左边出现带进度圈的状态块（aria-busy）", gen.busy === "true" && gen.ring === 1 && gen.bubble === "做成卡片" && gen.rightEdge <= 12, JSON.stringify(gen));
+  check("R3b 开始做卡后：建议行和「做成卡片」快捷项都消失", (await p3.locator(".rf-suggest-line").count()) === 0 && !(await p3.locator(".rf-quick-chip").allInnerTexts()).includes("做成卡片"));
+  await p3.locator('.rf-run-block[data-state="ready"]').waitFor({ timeout: 30000 });
+  check("R4 生成完成：「✓ 已做成 5 张卡 · 查看」，查看指向待推送并带上词", (await p3.locator(".rf-run-block").innerText()).includes("已做成 5 张卡") && (await p3.getByRole("link", { name: /查看/ }).first().getAttribute("href")).startsWith("/words?status=pending&word="));
   await p3.screenshot({ path: shots("reader-done-1440.png") });
   await c3.close();
   const c4 = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -291,7 +292,7 @@ try {
   await p4.goto(`${BASE}/texts/${textId2}`, { waitUntil: "networkidle" });
   await p4.screenshot({ path: shots("reader-390-before.png") });
   await p4.mouse.click(150, 141);
-  await p4.getByText(/已做成 5 张卡/).waitFor({ timeout: 15000 });
+  await p4.locator('.rf-run-block[data-state="ready"]').waitFor({ timeout: 15000 });
   check("R5 390px：回到已生成的词，按钮状态保持「已做成 5 张卡」，无横向溢出", await p4.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   await p4.screenshot({ path: shots("reader-done-390.png") });
   await c4.close();

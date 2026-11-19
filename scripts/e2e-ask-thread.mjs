@@ -126,50 +126,52 @@ try {
   const shown = await labelOpacity("database");
   check("2 中文默认收起，鼠标停在划线上才显示", hidden === "0" && shown === "1", `平时=${hidden} 悬停=${shown}`);
 
-  // ---- 3. 「问 AI」：一个按钮，展开有选项 + 输入框 ----
+  // ---- 3. P44：没有「问 AI」菜单了，所有 AI 入口都在底部输入区 ----
   await page.mouse.click(b.x, b.y); // 回看
   await page.waitForTimeout(800);
-  const askBtn = page.locator('.reader-note button:has-text("问 AI")');
-  const legacy = await page.locator('.reader-note button:has-text("追问"), .reader-note button:text-is("✨ AI 释义")').count();
-  check("3a 右栏只有一个「问 AI」入口（原「AI 释义」「追问」已合并）", (await askBtn.count()) === 1 && legacy === 0, `旧按钮=${legacy}`);
-  await askBtn.click();
-  const chips = await page.locator(".rf-ask-chip").allInnerTexts();
-  const hasInput = await page.locator(".rf-ask-menu input").count();
-  check("3b 展开后有选项和输入框", chips.includes("整句没看懂") && chips.length >= 3 && hasInput === 1, chips.join(" / "));
+  const legacy = await page.locator('.reader-note button:has-text("问 AI"), .reader-note button:has-text("追问"), .reader-note button:text-is("✨ AI 释义")').count();
+  check("3a 右栏没有「问 AI」「追问」「AI 释义」按钮，输入区固定在底部", legacy === 0 && (await page.locator(".rf-composer").count()) === 1, `旧按钮=${legacy}`);
+  const chips = await page.locator(".rf-quick-chip").allInnerTexts();
+  const hasInput = await page.locator(".rf-composer-input").count();
+  check("3b 输入框上方直接是快捷问题（不用先展开），下面是输入框", chips.includes("整句没看懂") && chips.length >= 3 && hasInput === 1, chips.join(" / "));
 
-  // ---- 4. 整句没看懂：追加在词典下面 ----
-  await page.locator('.rf-ask-chip:has-text("整句没看懂")').click();
+  // ---- 4. 整句没看懂：用户消息靠右，回答追加在词典下面 ----
+  await page.locator('.rf-quick-chip:has-text("整句没看懂")').click();
   await page.waitForTimeout(1200);
   const last = asks.at(-1);
   let card = await cardText();
+  const bubbles = await page.locator(".rf-bubble-user").allInnerTexts();
   check(
-    "4 整句没看懂：按整句提问，回答追加在词典释义下面",
-    last?.word?.startsWith("The skill database tracks") && card.includes("数据库") && card.includes("你问：整句没看懂"),
-    `word=${last?.word?.slice(0, 30)}…`,
+    "4 整句没看懂：按整句提问，右边出现用户消息，回答追加在词典释义下面",
+    last?.word?.startsWith("The skill database tracks") && card.includes("数据库") && bubbles.join("|") === "整句没看懂",
+    `word=${last?.word?.slice(0, 30)}… 气泡=${bubbles.join("|")}`,
   );
 
   // ---- 5. 再问一次：前一段不被覆盖 ----
-  await askBtn.click();
-  await page.locator('.rf-ask-chip:has-text("再给个例句")').click();
+  await page.locator('.rf-quick-chip:has-text("再给个例句")').click();
   await page.waitForTimeout(1200);
-  await askBtn.click();
-  await page.locator(".rf-ask-menu input").fill("这里为什么用 tracks？");
+  await page.locator(".rf-composer-input").fill("这里为什么用 tracks？");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(1200);
   card = await cardText();
-  const turns = (card.match(/你问：/g) ?? []).length;
+  const bubbles5 = await page.locator(".rf-bubble-user").allInnerTexts();
   check(
-    "5 连问三次：三段都在、词典还在，按顺序追加",
-    turns === 3 && card.includes("数据库") && card.indexOf("整句没看懂") < card.indexOf("再给个例句") && card.includes("你问：这里为什么用 tracks？"),
-    `追问段数=${turns}`,
+    "5 连问三次：三条用户消息按顺序、词典还在、回答都在",
+    bubbles5.join("|") === "整句没看懂|再给个例句|这里为什么用 tracks？" && card.includes("数据库"),
+    `气泡=${bubbles5.join("|")}`,
   );
-  if (process.env.SHOT_DIR) {
-    await askBtn.click();
-    await page.locator(".reader-note").screenshot({ path: path.join(process.env.SHOT_DIR, "ask-thread.png") });
-    await askBtn.click();
-  }
+  const geo = await page.evaluate(() => {
+    const log = document.querySelector(".rf-chat-log").getBoundingClientRect();
+    const bub = document.querySelector(".rf-bubble-user").getBoundingClientRect();
+    const reply = document.querySelector(".rf-ai-reply").getBoundingClientRect();
+    const composer = document.querySelector(".rf-composer").getBoundingClientRect();
+    const aside = document.querySelector(".reader-aside").getBoundingClientRect();
+    return { bubbleRight: Math.round(log.right - bub.right), replyLeft: Math.round(reply.left - log.left), composerBottom: Math.round(aside.bottom - composer.bottom) };
+  });
+  check("5a 用户消息靠右、AI 回答靠左，输入区贴在右栏底部", geo.bubbleRight <= 12 && geo.replyLeft <= 12 && geo.composerBottom <= 8, JSON.stringify(geo));
+  if (process.env.SHOT_DIR) await page.locator(".reader-aside").screenshot({ path: path.join(process.env.SHOT_DIR, "ask-thread.png") });
   const stored = q("select ai_gloss g from contexts where text_id = ? and quote = 'database'", textId)?.g ?? "";
-  check("5b 整串存进这条记录", (stored.match(/【追问】/g) ?? []).length === 3, `【追问】×${(stored.match(/【追问】/g) ?? []).length}`);
+  check("5b 整串存进这条记录（格式不变）", (stored.match(/【追问】/g) ?? []).length === 3, `【追问】×${(stored.match(/【追问】/g) ?? []).length}`);
 
   // ---- 6. 回看：原样还原，零请求 ----
   await page.keyboard.press("Escape");
@@ -178,7 +180,7 @@ try {
   await page.mouse.click(b.x, b.y);
   await page.waitForTimeout(1000);
   card = await cardText();
-  check("6 回看：三段追问原样还原，零请求", asks.length === before && (card.match(/你问：/g) ?? []).length === 3, `新请求=${asks.length - before}`);
+  check("6 回看：三段追问原样还原，零请求", asks.length === before && (await page.locator(".rf-bubble-user").count()) === 3, `新请求=${asks.length - before}`);
 
   // ---- 7. P36：同句第二个词（词典查得到）：不再自动问 AI，由学生自己点「问 AI」 ----
   await page.keyboard.press("Escape");
@@ -191,17 +193,16 @@ try {
   const lookups7b = q("select count(*) n from explain_events where kind = 'lookup'")?.n ?? 0;
   check(
     "7 同句第二个词、词典查得到：不调模型（问了几次不再决定要不要问 AI）；这次划选照样记成一次提问",
-    asks.length === n7 && !card.includes("AI 释义") && lookups7b === lookups7 + 1,
+    asks.length === n7 && !/AI 释义/.test(card.replace(/英文释义/g,"")) && lookups7b === lookups7 + 1,
     `新请求=${asks.length - n7} 查词事件 +${lookups7b - lookups7}`,
   );
-  await askBtn.click();
-  const chips7 = await page.locator(".rf-ask-chip").allInnerTexts();
+  const chips7 = await page.locator(".rf-quick-chip").allInnerTexts();
   check(
-    "7b 「问 AI」里有「这个词在这句里什么意思」，没有「只讲这个词，不讲整句」",
+    "7b 快捷问题里有「这个词在这句里什么意思」，没有「只讲这个词，不讲整句」",
     chips7.includes("这个词在这句里什么意思") && !chips7.some((c) => c.includes("只讲这个词")),
     chips7.join(" / "),
   );
-  await page.locator('.rf-ask-chip:has-text("这个词在这句里什么意思")').click();
+  await page.locator('.rf-quick-chip:has-text("这个词在这句里什么意思")').click();
   await page.waitForTimeout(1200);
   const a7 = asks.slice(n7)[0];
   check(
