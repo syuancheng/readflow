@@ -188,12 +188,13 @@ try {
     return true;
   });
   await page.waitForTimeout(1500);
+  // P44：手动入口是底部输入区的快捷问题「这个词在这句里什么意思」
   const manualBtn = await page.evaluate(() =>
-    [...document.querySelectorAll(".reader-note button")].some((b) => b.textContent.includes("✨ AI 释义")),
+    [...document.querySelectorAll(".reader-note .rf-quick-chip")].some((b) => b.textContent.includes("这个词在这句里什么意思")),
   );
   check("D1 点正文绿色标记能打开这条词典命中、无 AI 释义的旧批注", opened);
   check("D2 回看旧批注 → 不自动发 /api/explain", explainCount === before, `before=${before} after=${explainCount}`);
-  check("D3 手动「✨ AI 释义」入口仍可用（不把回看路径堵死）", manualBtn);
+  check("D3 底部输入区的「这个词在这句里什么意思」仍可用（不把回看路径堵死）", manualBtn);
 } catch (e) {
   check("脚本执行无异常", false, e instanceof Error ? e.message : String(e));
 } finally {

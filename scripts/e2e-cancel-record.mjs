@@ -148,7 +148,7 @@ try {
 
   // ---- 4. 只有一个按钮：取消记录 ----
   const btns = await page.evaluate(() =>
-    [...document.querySelectorAll(".reader-note > div:first-child button")].map((x) => x.getAttribute("aria-label") || x.textContent.trim()),
+    [...document.querySelectorAll(".reader-note .rf-chat-log > div:first-child button")].map((x) => x.getAttribute("aria-label") || x.textContent.trim()),
   );
   check("4a 右栏标题行只剩一个操作「取消记录」", btns.filter((x) => x !== "发音" && !/^\//.test(x)).join("|") === "取消记录", btns.join(" | "));
   await page.locator('[aria-label="取消记录"]').click();
