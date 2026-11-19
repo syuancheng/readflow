@@ -31,7 +31,6 @@ export default function AskComposer({
 }) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
   const [addError, setAddError] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
@@ -59,7 +58,6 @@ export default function AskComposer({
 
   function closeMenu(focusPlus = false) {
     setOpen(false);
-    setAdding(false);
     setDraft("");
     setAddError("");
     if (focusPlus) plus.current?.focus();
@@ -89,7 +87,6 @@ export default function AskComposer({
     if (err) return setAddError(err);
     setDraft("");
     setAddError("");
-    setAdding(false);
   }
 
   return (
@@ -129,9 +126,6 @@ export default function AskComposer({
           </div>
           <div className="rf-menu-group">
             <p className="rf-menu-title">我的常用问题</p>
-            {quick.items.length === 0 && !adding && !quick.loading && (
-              <p className="rf-menu-empty">还没有。把你常问的问题存在这里，以后点一下就发。</p>
-            )}
             {quick.items.map((q) => (
               <div className="rf-menu-row" key={q.id}>
                 <button
@@ -148,39 +142,34 @@ export default function AskComposer({
                 </button>
               </div>
             ))}
-            {adding ? (
-              <div className="rf-menu-add">
-                <input
-                  className="rf-menu-input"
-                  autoFocus
-                  aria-label="新的常用问题"
-                  placeholder="写一个你常问的问题"
-                  maxLength={MAX_QUICK_QUESTION_CHARS}
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    setAddError("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      void saveDraft();
-                    }
-                  }}
-                />
-                <button type="button" className="rf-menu-save" disabled={!draft.trim()} onClick={() => void saveDraft()}>
-                  保存
-                </button>
-                {addError && (
-                  <p className="rf-menu-error" role="alert">
-                    {addError}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <button type="button" className="rf-menu-item rf-menu-addbtn" onClick={() => setAdding(true)}>
-                ＋ 添加常用问题
+            <div className="rf-menu-add">
+              <input
+                className="rf-menu-input"
+                aria-label="添加常用问题"
+                placeholder="添加常用问题"
+                maxLength={MAX_QUICK_QUESTION_CHARS}
+                value={draft}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  setAddError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void saveDraft();
+                  }
+                }}
+              />
+              <button type="button" className="rf-menu-check" aria-label="保存常用问题" title="保存" disabled={!draft.trim()} onClick={() => void saveDraft()}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
               </button>
+            </div>
+            {addError && (
+              <p className="rf-menu-error" role="alert">
+                {addError}
+              </p>
             )}
           </div>
         </div>
