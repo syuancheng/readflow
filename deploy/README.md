@@ -91,6 +91,9 @@ cd /opt/readflow/current && sudo -u readflow DB_PATH=/var/lib/readflow/data/read
    certbot --nginx -d 你的域名
    ```
    之后访问 `https://你的域名`，登录 cookie 会自动带上 Secure。
+   - 如果 certbot 说「Could not automatically find a matching server block」，是因为第 2 步没做（`server_name` 还是 `_`）：把 `/etc/nginx/conf.d/readflow.conf` 里的 `server_name _;` 改成你的域名，`nginx -t && systemctl reload nginx`，再执行 `certbot install --cert-name 你的域名`。
+   - 开 HTTP/2：nginx ≥ 1.25.1 在 443 的 `server` 块里加一行 `http2 on;`；更老的版本把那行改成 `listen 443 ssl http2;`。
+4. **配好 HTTPS 之后再执行 `deploy.sh setup` 是安全的**：`server-setup.sh` 发现 `/etc/nginx/conf.d/readflow.conf` 里已经有 `listen 443` 就会保留现有配置、不再覆盖（模板只有 80 端口，覆盖会让 https:// 打不开）。想改 Nginx 配置请直接编辑那个文件。
 
 ## 已知要注意的点
 
