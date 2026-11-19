@@ -94,9 +94,13 @@ try {
   await page.locator(".rf-composer-plus").click();
   const chips = await page.locator(".rf-menu-item").allInnerTexts();
   check("C1b 点「＋」展开常用问题：含「这个词在这句里什么意思」「整句没看懂」「做成卡片」和「添加常用问题」", ["这个词在这句里什么意思", "整句没看懂", "做成卡片"].every((x) => chips.includes(x)) && chips.some((c) => c.includes("添加常用问题")), chips.join(" / "));
+  const menuBox = await page.evaluate(() => { const m = document.querySelector(".rf-menu").getBoundingClientRect(), c = document.querySelector(".rf-composer").getBoundingClientRect(); return { w: Math.round(m.width), cw: Math.round(c.width), row: Math.round(document.querySelector(".rf-menu-item").getBoundingClientRect().height) }; });
+  check("C1d 菜单窄而紧凑：宽度 ≤ 288px 且比输入区窄，每行高度 ≤ 32px", menuBox.w <= 288 && menuBox.w < menuBox.cw && menuBox.row <= 32, JSON.stringify(menuBox));
   await page.screenshot({ path: path.join(SHOTS, "chat-menu-1440.png") });
   await page.keyboard.press("Escape");
   check("C1c 按 Esc 收起菜单", (await page.locator(".rf-menu").count()) === 0);
+  const line = await page.evaluate(() => getComputedStyle(document.querySelector(".rf-composer")).borderTopWidth);
+  check("C2a 输入框上面没有多余的横线", line === "0px", line);
   const lay = await page.evaluate(() => {
     const a = document.querySelector(".reader-aside").getBoundingClientRect();
     const c = document.querySelector(".rf-composer").getBoundingClientRect();
@@ -110,14 +114,13 @@ try {
   check("C3 输入文字后右边出现圆形发送按钮（贴右边内侧、单行时垂直居中），清空后消失", sendShown && sbox.right <= 8 && sbox.mid <= 2 && (await page.locator(".rf-composer-send").count()) === 0, JSON.stringify(sbox));
 
   // ===== 词典区 =====
-  const en = page.locator(".rf-en-def-text");
-  check("C4 英文释义默认展开（直接可见、不是折叠项）", (await en.count()) === 1 && (await en.isVisible()) && (await page.locator("details", { hasText: "英文释义" }).count()) === 0);
+  check("C4 词典区没有英文释义（已去掉）", (await page.locator(".rf-en-def, .rf-en-def-text").count()) === 0 && !(await page.locator(".rf-chat-log").innerText()).includes("英文释义"));
   const order = await page.evaluate(() => {
-    const def = document.querySelector(".rf-en-def"), anc = document.querySelector(".rf-anchor");
-    const log = document.querySelector(".rf-chat-log");
-    return { after: Boolean(def.compareDocumentPosition(anc) & Node.DOCUMENT_POSITION_FOLLOWING), collapsed: !anc.open, lastInLog: log.lastElementChild === anc };
+    const anc = document.querySelector(".rf-anchor");
+    const prev = anc.previousElementSibling;
+    return { afterDict: Boolean(prev && /数据库/.test(prev.textContent || "")), collapsed: !anc.open };
   });
-  check("C5 「上下文锚点」紧跟在英文释义下面（不在最底部），默认收起", order.after && order.collapsed, JSON.stringify(order));
+  check("C5 「上下文锚点」紧跟在词典释义下面（不在最底部），默认收起", order.afterDict && order.collapsed, JSON.stringify(order));
   const stray = await page.locator(".rf-chat-log button", { hasText: /追问|问 AI|AI 释义|整句没看懂|做成卡片/ }).count();
   check("C6 对话区里没有独立的 AI 操作按钮（都在输入区）", stray === 0, `数量=${stray}`);
   const titleBtns = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-log > div:first-child button")].map((x) => x.getAttribute("aria-label") || x.textContent.trim()).filter((x) => x !== "发音" && !/^\//.test(x)));
@@ -158,18 +161,24 @@ try {
   check("C13 自己发消息后停在底部（对话溢出时输入区仍在原处）", bottom.over && bottom.atBottom, JSON.stringify(bottom));
   await page.screenshot({ path: path.join(SHOTS, "chat-thread-1440.png") });
 
-  // ===== 制卡建议：在这条回答的末尾 =====
-  const sugLine = page.locator(".rf-suggest-line");
+  // ===== 制卡建议：这条回答末尾的一张带按钮的小卡片 =====
+  const sugCard = page.locator(".rf-suggest-card");
   const answerText = await page.locator(".rf-ai-reply").last().locator(".rf-md").innerText();
-  const sug = await sugLine.evaluate((e) => ({ bg: getComputedStyle(e).backgroundColor, inLast: e.closest(".rf-ai-reply") === [...document.querySelectorAll(".rf-ai-reply")].at(-1), afterBody: Boolean(e.previousElementSibling?.classList.contains("rf-md")) }));
-  check("C13b 制卡建议显示在这条回答的末尾（正文之后）、浅紫底；理由超过 30 字也完整显示", (await sugLine.count()) === 1 && sug.inLast && sug.afterBody && sug.bg === "rgb(245, 236, 255)" && (await sugLine.innerText()).includes("别和名词混了"), JSON.stringify(sug));
+  const sug = await sugCard.evaluate((e) => ({ inLast: e.closest(".rf-ai-reply") === [...document.querySelectorAll(".rf-ai-reply")].at(-1), afterBody: Boolean(e.previousElementSibling?.classList.contains("rf-md")), primaryBg: getComputedStyle(e.querySelector(".rf-btn-solid")).backgroundColor, buttons: [...e.querySelectorAll("button")].map((b) => b.textContent) }));
+  check("C13b 制卡建议是这条回答末尾的小卡片，有明确的两个按钮：实心「做成卡片」+ 描边「暂不需要」；理由完整显示", (await sugCard.count()) === 1 && sug.inLast && sug.afterBody && sug.buttons.join("|") === "做成卡片|暂不需要" && sug.primaryBg !== "rgba(0, 0, 0, 0)" && (await sugCard.innerText()).includes("别和名词混了"), JSON.stringify(sug));
   check("C13c 正文里没有「制卡建议」那一行", !answerText.includes("制卡建议"), answerText.slice(0, 40));
   await page.screenshot({ path: path.join(SHOTS, "chat-suggest-1440.png") });
+  await sugCard.getByRole("button", { name: "暂不需要" }).click();
+  check("C13d 点「暂不需要」：这张建议卡片消失", (await page.locator(".rf-suggest-card").count()) === 0);
+  await page.locator(".rf-composer-input").fill("为什么用 skills？");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 5 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
+  await page.locator(".rf-suggest-card").waitFor({ timeout: 5000 });
 
   // ===== 做成卡片：像一次工具调用 =====
-  await page.locator(".rf-suggest-act").click();
+  await page.locator(".rf-suggest-card .rf-btn-solid").click();
   await page.locator('.rf-run-block[data-state="generating"]').waitFor({ timeout: 5000 });
-  check("C14a 开始做卡后建议行消失", (await page.locator(".rf-suggest-line").count()) === 0);
+  check("C14a 开始做卡后建议卡片消失", (await page.locator(".rf-suggest-card").count()) === 0);
   check("C14 点建议里的「做成卡片」：右边出现用户消息，左边出现进行中的状态块", (await page.locator(".rf-bubble-user").last().innerText()) === "做成卡片" && (await page.locator(".rf-run-block .rf-progress-ring").count()) === 1);
   const failed = page.locator('.rf-run-block[data-state="failed"]');
   await failed.waitFor({ timeout: 20000 });
@@ -185,9 +194,9 @@ try {
   await page.keyboard.press("Escape");
   check("C17 做完后菜单里的「做成卡片」消失，状态块里没有「再做一组」", !afterItems.includes("做成卡片") && (await ready.getByRole("button").count()) === 0, afterItems.join(" / "));
   await ask("整句没看懂");
-  await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 6 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 7 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const seq = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].map((b) => b.textContent));
-  check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|做成卡片|整句没看懂", seq.join("|"));
+  check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|为什么用 skills？|做成卡片|整句没看懂", seq.join("|"));
   await page.screenshot({ path: path.join(SHOTS, "chat-card-ready-1440.png") });
 
   // ===== 我的常用问题：添加、使用、刷新后还在、删除 =====
@@ -224,7 +233,7 @@ try {
   await page.locator(".rf-composer").waitFor();
   await page.waitForTimeout(1500);
   const re = await page.evaluate(() => ({ bubbles: document.querySelectorAll(".rf-bubble-user").length, block: document.querySelector(".rf-run-block")?.getAttribute("data-state") }));
-  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 7 && re.block === "ready", JSON.stringify(re));
+  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 8 && re.block === "ready", JSON.stringify(re));
 
   // ===== 自动触发的回答（词典查不到的短语）：右边同样有一条用户问题 =====
   await page.keyboard.press("Escape");

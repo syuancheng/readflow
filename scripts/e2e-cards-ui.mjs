@@ -263,18 +263,18 @@ try {
   // P44：没有「问 AI」菜单了——快捷问题直接摆在底部输入框上方
   await p3.locator(".rf-composer-plus").click();
   await p3.locator(".rf-menu-item", { hasText: /^这个词在这句里什么意思$/ }).click();
-  await p3.locator(".rf-suggest-line").waitFor({ timeout: 20000 }).catch(async (e) => { await p3.screenshot({ path: shots("reader-fail.png") }); console.log("页面文本:", (await p3.locator("body").innerText()).slice(0, 400)); throw e; });
+  await p3.locator(".rf-suggest-card").waitFor({ timeout: 20000 }).catch(async (e) => { await p3.screenshot({ path: shots("reader-fail.png") }); console.log("页面文本:", (await p3.locator("body").innerText()).slice(0, 400)); throw e; });
   const answerText = await p3.locator(".rf-md").first().innerText();
-  check("R1 讲解正文里没有「制卡建议」那一行；理由超过 30 字也完整显示（不截断、没有省略号）", !answerText.includes("制卡建议") && (await p3.locator(".rf-suggest-line").innerText()).includes("💡 建议做成卡片：技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了"), answerText.slice(0, 60));
-  const bar = await p3.locator(".rf-suggest-line").evaluate((e) => ({ bg: getComputedStyle(e).backgroundColor, inReply: Boolean(e.closest(".rf-ai-reply")), afterBody: Boolean(e.previousElementSibling?.classList.contains("rf-md")) }));
-  check("R2 制卡建议在这条回答的末尾（正文之后），浅紫底", bar.inReply && bar.afterBody && bar.bg === "rgb(245, 236, 255)", JSON.stringify(bar));
+  check("R1 讲解正文里没有「制卡建议」那一行；理由超过 30 字也完整显示（不截断、没有省略号）", !answerText.includes("制卡建议") && (await p3.locator(".rf-suggest-card").innerText()).includes("💡 建议做成卡片：技术文档高频形容词，与 generalization 同源，值得放在一起记，别和名词混了"), answerText.slice(0, 60));
+  const bar = await p3.locator(".rf-suggest-card").evaluate((e) => ({ inReply: Boolean(e.closest(".rf-ai-reply")), afterBody: Boolean(e.previousElementSibling?.classList.contains("rf-md")), buttons: [...e.querySelectorAll("button")].map((b) => b.textContent).join("|") }));
+  check("R2 制卡建议在这条回答的末尾（正文之后），带「做成卡片」「暂不需要」两个按钮", bar.inReply && bar.afterBody && bar.buttons === "做成卡片|暂不需要", JSON.stringify(bar));
   await p3.locator(".rf-composer-plus").click();
   const chipNames = await p3.locator(".rf-menu-item").allInnerTexts();
   await p3.keyboard.press("Escape");
   check("R2b 「＋」菜单里有「做成卡片」，和「整句没看懂」同级", chipNames.includes("做成卡片") && chipNames.includes("整句没看懂"), chipNames.join(" / "));
   check("R2c 右栏没有旧的「问 AI」「做成卡片」独立按钮", (await p3.locator(".reader-note .rf-ask-menu, .reader-note .rf-ai-actions, .reader-note .rf-card-btn").count()) === 0 && (await p3.getByRole("button", { name: /问 AI/ }).count()) === 0);
   await p3.screenshot({ path: shots("reader-suggest-1440.png") });
-  await p3.locator(".rf-suggest-act").click();
+  await p3.locator(".rf-suggest-card .rf-btn-solid").click();
   await p3.locator('.rf-run-block[data-state="generating"]').waitFor({ timeout: 3000 });
   const gen = await p3.evaluate(() => {
     const blk = document.querySelector(".rf-run-block");
@@ -284,7 +284,7 @@ try {
     return { busy: blk.getAttribute("aria-busy"), ring: blk.querySelectorAll(".rf-progress-ring").length, bubble: bub.textContent, rightEdge: Math.round(log.right - br.right) };
   });
   check("R3 点建议里的按钮：右边出现用户消息「做成卡片」，左边出现带进度圈的状态块（aria-busy）", gen.busy === "true" && gen.ring === 1 && gen.bubble === "做成卡片" && gen.rightEdge <= 12, JSON.stringify(gen));
-  check("R3b 开始做卡后：建议行和菜单里的「做成卡片」都消失", (await p3.locator(".rf-suggest-line").count()) === 0 && !(await (async () => { await p3.locator(".rf-composer-plus").click(); const t = await p3.locator(".rf-menu-item").allInnerTexts(); await p3.keyboard.press("Escape"); return t; })()).includes("做成卡片"));
+  check("R3b 开始做卡后：建议行和菜单里的「做成卡片」都消失", (await p3.locator(".rf-suggest-card").count()) === 0 && !(await (async () => { await p3.locator(".rf-composer-plus").click(); const t = await p3.locator(".rf-menu-item").allInnerTexts(); await p3.keyboard.press("Escape"); return t; })()).includes("做成卡片"));
   await p3.locator('.rf-run-block[data-state="ready"]').waitFor({ timeout: 30000 });
   check("R4 生成完成：「✓ 已做成 5 张卡 · 查看」，查看指向待推送并带上词", (await p3.locator(".rf-run-block").innerText()).includes("已做成 5 张卡") && (await p3.getByRole("link", { name: /查看/ }).first().getAttribute("href")).startsWith("/words?status=pending&word="));
   await p3.screenshot({ path: shots("reader-done-1440.png") });

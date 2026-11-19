@@ -127,7 +127,6 @@ export default function AskComposer({
               </button>
             )}
           </div>
-          <div className="rf-menu-sep" role="separator" />
           <div className="rf-menu-group">
             <p className="rf-menu-title">我的常用问题</p>
             {quick.items.length === 0 && !adding && !quick.loading && (

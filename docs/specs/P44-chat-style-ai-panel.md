@@ -362,3 +362,9 @@
 - `use-read-progress.ts`、`ReadingChrome.tsx`（目录高亮、目录点击跳转）改用它；`scroll` 监听改挂在 `document` 的**捕获阶段**（scroll 事件不冒泡，这样整页滚动和正文滚动都能收到）。块位置换算为「滚动区内容坐标」：`rect.top - originTop + scrollY`。
 - 样式在 `p44-chat.css` 末尾的 `@media (min-width: 1024px)`：`.rf-reading-layout` 固定为 `100vh - 顶栏`；`.reader-main` `overflow-y:auto`；`.reader-aside` 不再 sticky，高度 100%、贴窗口右边；AI 栏右侧留白放在里面的内容上，滚动条才能贴边。选择器带 `.rf-reading-layout` 前缀，因为 `globals.css` 的同名规则排在 `@import` 之后，同权重会覆盖。
 - 测试：`e2e-chat-panel.mjs` C23–C23d（整页不滚动、两栏紧挨、AI 栏贴右、正文滚到底进度 100%、回顶 0%）。
+
+### 11.6 建议卡片、菜单、英文释义、横线（PRD §15）
+- `ChatTurn.tsx`：建议改为 `.rf-suggest-card`（`role="group"`），含 `.rf-btn-solid`「做成卡片」和 `.rf-btn-quiet`「暂不需要」；「暂不需要」是组件内的 `dismissed` 状态，只影响这一条。样式在 `p44-chat.css`（取代 `.rf-suggest-line` / `.rf-suggest-act`）。
+- `AskComposer.tsx` / `p44-chat.css`：菜单 `width: min(280px, …)`，菜单项上下 4px 内边距；删掉 `.rf-menu-sep` 元素，两组之间用 `.rf-menu-group + .rf-menu-group` 的 1px 上边线；`.rf-composer` 去掉 `border-top`。
+- `Reader.tsx` 的 `DictView`：删除英文释义块；`.rf-en-def*` 样式删除。
+- 测试：`e2e-chat-panel.mjs` C1d（菜单宽度与行高）、C2a（输入框上无横线）、C4（无英文释义）、C5（锚点在词典下面）、C13b/C13d（建议卡片两个按钮、暂不需要消失）、C14（点实心按钮开始做卡）。

@@ -44,23 +44,7 @@
 /* ===== 词典区与对话之间：两组之间留一个组间距 ===== */
 .rf-chat-turns { margin-top: var(--rf-space-6); display: flex; flex-direction: column; gap: var(--rf-space-6); }
 
-/* ===== 英文释义：直接展开 ===== */
-.rf-en-def { margin-top: var(--rf-space-3); }
-.rf-en-def-label {
-  margin: 0;
-  font-size: var(--rf-text-xs);
-  line-height: var(--rf-leading-xs);
-  font-weight: 700;
-  color: var(--rf-text-secondary);
-}
-.rf-en-def-text {
-  margin: var(--rf-space-1) 0 0;
-  font-size: var(--rf-text-sm);
-  line-height: var(--rf-leading-sm);
-  color: var(--rf-text-secondary);
-  white-space: pre-line;
-}
-/* 上下文锚点：紧跟英文释义下面 */
+/* 上下文锚点：紧跟词典释义下面 */
 .rf-anchor { margin-top: var(--rf-space-3); }
 
 /* ===== 一轮对话 ===== */
@@ -104,29 +88,48 @@
 @keyframes rf-caret { to { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { .rf-stream-caret { animation: none; } }
 
-/* 制卡建议：这条回答的末尾，浅紫底、次要灰正文，只有「建议做成卡片」和按钮用 AI 紫 */
-.rf-suggest-line {
-  margin: var(--rf-space-3) 0 0;
-  padding: var(--rf-space-2) var(--rf-space-3);
+/* 制卡建议：这条回答末尾的一张小卡片，带两个明确的按钮（像 Claude Code 问「要不要合并」）。
+   主按钮是实心 AI 紫，次按钮是描边；卡片本身只有一条 1px 边线，不用底色。 */
+.rf-suggest-card {
+  margin-top: var(--rf-space-3);
+  padding: var(--rf-space-3);
+  border: var(--rf-border-width) solid var(--rf-border);
   border-radius: var(--rf-radius-md);
-  background: var(--rf-ai-soft);
+  background: var(--rf-bg-surface);
+}
+.rf-suggest-text {
+  margin: 0;
   font-size: var(--rf-text-sm);
   line-height: var(--rf-leading-sm);
   color: var(--rf-text-secondary);
   overflow-wrap: anywhere;
 }
-.rf-suggest-line b { font-weight: 700; color: var(--rf-ai-text); }
-.rf-suggest-act {
-  border: 0;
-  padding: 0;
-  background: none;
-  font: inherit;
+.rf-suggest-text b {
+  display: block; /* 标题单独一行，理由在下面 */
+  margin-bottom: var(--rf-space-1);
   font-weight: 700;
-  color: var(--rf-ai-text);
-  cursor: pointer;
+  color: var(--rf-text-primary);
 }
-.rf-suggest-act:hover { filter: brightness(0.85); }
-.rf-suggest-act:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); border-radius: var(--rf-radius-xs); }
+.rf-suggest-actions { display: flex; flex-wrap: wrap; gap: var(--rf-space-2); margin-top: var(--rf-space-3); }
+.rf-btn-solid,
+.rf-btn-quiet {
+  height: var(--rf-space-8);
+  padding: 0 var(--rf-space-4);
+  border-radius: var(--rf-radius-md);
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, transform var(--rf-duration-fast) ease;
+}
+.rf-btn-solid { border: 0; background: var(--rf-ai-text); color: var(--rf-bg-surface); }
+.rf-btn-solid:hover { filter: brightness(1.15); }
+.rf-btn-quiet { border: var(--rf-border-width) solid var(--rf-border-strong); background: var(--rf-bg-surface); color: var(--rf-text-secondary); }
+.rf-btn-quiet:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-btn-solid:active,
+.rf-btn-quiet:active { transform: translateY(1px); }
+.rf-btn-solid:focus-visible,
+.rf-btn-quiet:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
 /* ===== 做卡状态块：AI 一侧的一次「工具调用」 ===== */
 .rf-run-block {
@@ -195,8 +198,7 @@
 .rf-composer {
   position: relative; /* 常用问题菜单相对它定位，向上展开 */
   flex: none;
-  padding: var(--rf-space-3) var(--rf-space-1) var(--rf-space-1);
-  border-top: var(--rf-border-width) solid var(--rf-border);
+  padding: var(--rf-space-2) var(--rf-space-1) var(--rf-space-1);
   background: var(--rf-bg-surface);
 }
 
@@ -264,23 +266,24 @@
 .rf-composer-plus:focus-visible,
 .rf-composer-send:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
-/* ===== 常用问题菜单：从「＋」向上展开 ===== */
+/* ===== 常用问题菜单：从「＋」向上展开，窄而紧凑（不撑满整栏） ===== */
 .rf-menu {
   position: absolute;
   left: var(--rf-space-1);
-  right: var(--rf-space-1);
-  bottom: calc(100% - var(--rf-space-2));
-  max-height: 60vh;
+  bottom: calc(100% - var(--rf-space-1));
+  width: min(280px, calc(100% - var(--rf-space-2)));
+  max-height: 50vh;
   overflow-y: auto;
-  padding: var(--rf-space-2);
+  padding: var(--rf-space-1);
   border: var(--rf-border-width) solid var(--rf-border);
-  border-radius: var(--rf-radius-lg);
+  border-radius: var(--rf-radius-md);
   background: var(--rf-bg-surface);
   box-shadow: var(--rf-shadow-md);
   z-index: var(--rf-z-dropdown);
+  scrollbar-width: thin;
 }
-.rf-menu-group { display: flex; flex-direction: column; gap: var(--rf-space-1); }
-.rf-menu-sep { height: var(--rf-border-width); margin: var(--rf-space-2) 0; background: var(--rf-border); }
+.rf-menu-group { display: flex; flex-direction: column; }
+.rf-menu-group + .rf-menu-group { margin-top: var(--rf-space-2); padding-top: var(--rf-space-1); border-top: var(--rf-border-width) solid var(--rf-border); }
 .rf-menu-title {
   margin: 0;
   padding: var(--rf-space-1) var(--rf-space-2);
@@ -301,7 +304,7 @@
 .rf-menu-item {
   display: block;
   width: 100%;
-  padding: var(--rf-space-2);
+  padding: var(--rf-space-1) var(--rf-space-2);
   border: 0;
   border-radius: var(--rf-radius-sm);
   background: transparent;
@@ -369,7 +372,6 @@
 /* T-08：回答、气泡、建议行不留单字孤行 */
 .rf-ai-reply p,
 .rf-bubble-user,
-.rf-suggest-line,
 .rf-run-block {
   text-wrap: pretty;
   orphans: 2;

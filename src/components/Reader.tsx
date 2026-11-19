@@ -2066,12 +2066,6 @@ function DictView({
         </p>
       )}
 
-      {entry.definition && entry.definition.length > 0 && (
-        <div className="rf-en-def">
-          <p className="rf-en-def-label">英文释义</p>
-          <p className="rf-en-def-text">{normalizeTranslation(entry.definition)}</p>
-        </div>
-      )}
 
       {entry.collins && entry.collins > 0 && (
         <div className="flex items-center gap-1 mt-2">
