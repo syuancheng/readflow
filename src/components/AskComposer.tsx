@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AskPreset, AskReq } from "@/lib/ask-presets";
+import { MAX_QUICK_QUESTION_CHARS } from "@/lib/quick-questions";
+import { useQuickQuestions } from "@/lib/use-quick-questions";
 
 /**
- * 右栏底部的对话输入区（P44）：唯一的 AI 入口。
- * 上方一排快捷问题（输入框为空时显示，点一下就发送），下面是输入框，发送图标在框内右下角。
+ * 右栏底部的对话输入区（P44）：唯一的 AI 入口，版式参照 Gemini / ChatGPT 的输入框。
+ * 一个圆角容器：左边「＋」、中间输入框、右边发送（有文字才出现）。
+ * 「＋」展开常用问题菜单：上面是随选区变化的内置问题和「做成卡片」，下面是用户自己加的常用问题（可添加、可删除）。
  * 「做成卡片」和「整句没看懂」同级：都是给 AI 发一条消息。
  */
 export default function AskComposer({
@@ -17,9 +20,9 @@ export default function AskComposer({
   onMakeCard,
 }: {
   presets: AskPreset[];
-  /** AI 正在回答：快捷项和发送暂停，输入框仍可输入 */
+  /** AI 正在回答：菜单里的问题和发送暂停，输入框仍可输入 */
   busy: boolean;
-  /** 「做成卡片」快捷项的状态 */
+  /** 「做成卡片」菜单项的状态 */
   card: "hidden" | "enabled" | "disabled";
   /** 置灰时的提示（例如「正在保存这条记录…」） */
   cardTitle?: string;
@@ -27,7 +30,14 @@ export default function AskComposer({
   onMakeCard: () => void;
 }) {
   const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [addError, setAddError] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const plus = useRef<HTMLButtonElement>(null);
+  const quick = useQuickQuestions();
 
   // 随内容增高，上限 160px，超过内部滚动
   useEffect(() => {
@@ -37,6 +47,35 @@ export default function AskComposer({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [text]);
 
+  // 菜单：点到外面或按 Esc 收起
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  function closeMenu(focusPlus = false) {
+    setOpen(false);
+    setAdding(false);
+    setDraft("");
+    setAddError("");
+    if (focusPlus) plus.current?.focus();
+  }
+
+  function toggleMenu() {
+    if (open) return closeMenu();
+    setOpen(true);
+    void quick.load();
+  }
+
+  function pick(run: () => void) {
+    closeMenu();
+    run();
+  }
+
   function send() {
     const q = text.trim();
     if (!q || busy) return;
@@ -45,29 +84,123 @@ export default function AskComposer({
     box.current?.focus();
   }
 
+  async function saveDraft() {
+    const err = await quick.add(draft);
+    if (err) return setAddError(err);
+    setDraft("");
+    setAddError("");
+    setAdding(false);
+  }
+
   return (
-    <div className="rf-composer">
-      {text === "" && (presets.length > 0 || card !== "hidden") && (
-        <div className="rf-quick" role="group" aria-label="常用问题">
-          {presets.map((p) => (
-            <button key={p.key} type="button" className="rf-quick-chip" disabled={busy} onClick={() => onAsk(p.req)}>
-              {p.label}
-            </button>
-          ))}
-          {card !== "hidden" && (
-            <button
-              type="button"
-              className="rf-quick-chip"
-              disabled={card === "disabled" || busy}
-              title={cardTitle}
-              onClick={onMakeCard}
-            >
-              做成卡片
-            </button>
-          )}
+    <div
+      className="rf-composer"
+      ref={root}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          // Next 的 React 根就是 document，阅读页「Esc 关右栏」的监听也挂在 document 上：
+          // 光 stopPropagation 拦不住同一个节点上的其它监听，要 stopImmediatePropagation
+          e.nativeEvent.stopImmediatePropagation();
+          e.stopPropagation();
+          closeMenu(true);
+        }
+      }}
+    >
+      {open && (
+        <div className="rf-menu" role="menu" aria-label="常用问题">
+          <div className="rf-menu-group">
+            {presets.map((p) => (
+              <button key={p.key} type="button" role="menuitem" className="rf-menu-item" disabled={busy} onClick={() => pick(() => onAsk(p.req))}>
+                {p.label}
+              </button>
+            ))}
+            {card !== "hidden" && (
+              <button
+                type="button"
+                role="menuitem"
+                className="rf-menu-item"
+                disabled={card === "disabled" || busy}
+                title={cardTitle}
+                onClick={() => pick(onMakeCard)}
+              >
+                做成卡片
+              </button>
+            )}
+          </div>
+          <div className="rf-menu-sep" role="separator" />
+          <div className="rf-menu-group">
+            <p className="rf-menu-title">我的常用问题</p>
+            {quick.items.length === 0 && !adding && !quick.loading && (
+              <p className="rf-menu-empty">还没有。把你常问的问题存在这里，以后点一下就发。</p>
+            )}
+            {quick.items.map((q) => (
+              <div className="rf-menu-row" key={q.id}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="rf-menu-item"
+                  disabled={busy}
+                  onClick={() => pick(() => onAsk({ ask: q.text, prompt: q.text, askKind: "custom" }))}
+                >
+                  {q.text}
+                </button>
+                <button type="button" className="rf-menu-del" aria-label={`删除常用问题：${q.text}`} title="删除" onClick={() => void quick.remove(q.id)}>
+                  ×
+                </button>
+              </div>
+            ))}
+            {adding ? (
+              <div className="rf-menu-add">
+                <input
+                  className="rf-menu-input"
+                  autoFocus
+                  aria-label="新的常用问题"
+                  placeholder="写一个你常问的问题"
+                  maxLength={MAX_QUICK_QUESTION_CHARS}
+                  value={draft}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setAddError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      void saveDraft();
+                    }
+                  }}
+                />
+                <button type="button" className="rf-menu-save" disabled={!draft.trim()} onClick={() => void saveDraft()}>
+                  保存
+                </button>
+                {addError && (
+                  <p className="rf-menu-error" role="alert">
+                    {addError}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <button type="button" className="rf-menu-item rf-menu-addbtn" onClick={() => setAdding(true)}>
+                ＋ 添加常用问题
+              </button>
+            )}
+          </div>
         </div>
       )}
       <div className="rf-composer-box">
+        <button
+          ref={plus}
+          type="button"
+          className="rf-composer-plus"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label="常用问题"
+          title="常用问题"
+          onClick={toggleMenu}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
         <textarea
           ref={box}
           className="rf-composer-input"
@@ -84,19 +217,13 @@ export default function AskComposer({
             }
           }}
         />
-        <button
-          type="button"
-          className="rf-composer-send"
-          disabled={!text.trim() || busy}
-          onClick={send}
-          aria-label="发送问题"
-          title="发送"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M21 3 10.5 13.5" />
-            <path d="M21 3 14.5 21l-4-7.5L3 9.5 21 3Z" />
-          </svg>
-        </button>
+        {text.trim() !== "" && (
+          <button type="button" className="rf-composer-send" disabled={busy} onClick={send} aria-label="发送问题" title="发送（Enter）">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

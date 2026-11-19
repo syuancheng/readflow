@@ -131,12 +131,13 @@ try {
   await page.waitForTimeout(800);
   const legacy = await page.locator('.reader-note button:has-text("问 AI"), .reader-note button:has-text("追问"), .reader-note button:text-is("✨ AI 释义")').count();
   check("3a 右栏没有「问 AI」「追问」「AI 释义」按钮，输入区固定在底部", legacy === 0 && (await page.locator(".rf-composer").count()) === 1, `旧按钮=${legacy}`);
-  const chips = await page.locator(".rf-quick-chip").allInnerTexts();
+  await page.locator(".rf-composer-plus").click();
+  const chips = await page.locator(".rf-menu-item").allInnerTexts();
   const hasInput = await page.locator(".rf-composer-input").count();
-  check("3b 输入框上方直接是快捷问题（不用先展开），下面是输入框", chips.includes("整句没看懂") && chips.length >= 3 && hasInput === 1, chips.join(" / "));
+  check("3b 输入框左边的「＋」菜单里有常用问题，旁边是输入框", chips.includes("整句没看懂") && chips.length >= 3 && hasInput === 1, chips.join(" / "));
 
   // ---- 4. 整句没看懂：用户消息靠右，回答追加在词典下面 ----
-  await page.locator('.rf-quick-chip:has-text("整句没看懂")').click();
+  await page.locator('.rf-menu-item:has-text("整句没看懂")').click();
   await page.waitForTimeout(1200);
   const last = asks.at(-1);
   let card = await cardText();
@@ -148,7 +149,8 @@ try {
   );
 
   // ---- 5. 再问一次：前一段不被覆盖 ----
-  await page.locator('.rf-quick-chip:has-text("再给个例句")').click();
+  await page.locator(".rf-composer-plus").click();
+  await page.locator('.rf-menu-item:has-text("再给个例句")').click();
   await page.waitForTimeout(1200);
   await page.locator(".rf-composer-input").fill("这里为什么用 tracks？");
   await page.keyboard.press("Enter");
@@ -196,13 +198,14 @@ try {
     asks.length === n7 && !/AI 释义/.test(card.replace(/英文释义/g,"")) && lookups7b === lookups7 + 1,
     `新请求=${asks.length - n7} 查词事件 +${lookups7b - lookups7}`,
   );
-  const chips7 = await page.locator(".rf-quick-chip").allInnerTexts();
+  await page.locator(".rf-composer-plus").click();
+  const chips7 = await page.locator(".rf-menu-item").allInnerTexts();
   check(
-    "7b 快捷问题里有「这个词在这句里什么意思」，没有「只讲这个词，不讲整句」",
+    "7b 「＋」菜单里有「这个词在这句里什么意思」，没有「只讲这个词，不讲整句」",
     chips7.includes("这个词在这句里什么意思") && !chips7.some((c) => c.includes("只讲这个词")),
     chips7.join(" / "),
   );
-  await page.locator('.rf-quick-chip:has-text("这个词在这句里什么意思")').click();
+  await page.locator('.rf-menu-item:has-text("这个词在这句里什么意思")').click();
   await page.waitForTimeout(1200);
   const a7 = asks.slice(n7)[0];
   check(

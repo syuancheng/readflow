@@ -188,9 +188,10 @@ try {
     return true;
   });
   await page.waitForTimeout(1500);
-  // P44：手动入口是底部输入区的快捷问题「这个词在这句里什么意思」
+  // P44：手动入口是输入框左边「＋」菜单里的「这个词在这句里什么意思」
+  await page.locator(".rf-composer-plus").click();
   const manualBtn = await page.evaluate(() =>
-    [...document.querySelectorAll(".reader-note .rf-quick-chip")].some((b) => b.textContent.includes("这个词在这句里什么意思")),
+    [...document.querySelectorAll(".reader-note .rf-menu-item")].some((b) => b.textContent.includes("这个词在这句里什么意思")),
   );
   check("D1 点正文绿色标记能打开这条词典命中、无 AI 释义的旧批注", opened);
   check("D2 回看旧批注 → 不自动发 /api/explain", explainCount === before, `before=${before} after=${explainCount}`);

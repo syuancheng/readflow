@@ -4,6 +4,7 @@ import { sqlite, dbPath } from "./sqlite";
 import { ensureCefrColumns } from "./ensure-cefr";
 import { ensureBlockColumns } from "./ensure-blocks";
 import { ensureTextMetaColumns } from "./ensure-text-meta";
+import { ensureQuickQuestions } from "./ensure-quick-questions";
 import { addColumnIfMissing } from "./alter";
 
 /**
@@ -192,6 +193,8 @@ function migrate(): void {
   ensureBlockColumns(sqlite);
   // 分类 + 阅读进度（P16）
   ensureTextMetaColumns(sqlite);
+  // 常用问题（P44）
+  ensureQuickQuestions(sqlite);
 
   const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "card_type")) {

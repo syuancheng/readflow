@@ -330,3 +330,29 @@
 5. 反馈收敛（`showFeedback`），**单独提交**。
 6. 更新 E2E，构建后全量跑；`check_design.py` 与 `check-tokens`；填 `docs/design/P44-DESIGN.md`；截**改后**图对比。
 7. 提交到功能分支；合并、推送、重启本地服务、部署远程，**由你决定**。
+
+---
+
+## 11. 修订：输入框改版（对应 PRD §13，D12–D16）
+
+### 11.1 组件
+- `AskComposer.tsx` 重写：`.rf-composer`（相对定位的外壳）→ 向上展开的 `.rf-menu`（`role="menu"`）+ `.rf-composer-box`（圆角 `--rf-radius-xl`，内含 `.rf-composer-plus`、textarea、条件渲染的 `.rf-composer-send`）。
+- 原来的 `.rf-quick` 一排按钮和 `.rf-quick-chip` 样式删除；`cardPresetState` 的三种状态不变，只是展示位置换成菜单项。
+- 菜单行为：`aria-haspopup="menu"` / `aria-expanded`；点外面（`mousedown`）、Esc、选完一项都收起；Esc 要用 `nativeEvent.stopImmediatePropagation()`，因为 Next 的 React 根就是 `document`，阅读页「Esc 关右栏」的监听也挂在 `document` 上，只 `stopPropagation` 拦不住。
+- 发送按钮：圆形（`--rf-space-8`，和「＋」同尺寸），实心 `--rf-ai-text`，向上箭头；`text.trim() !== ""` 才渲染；`busy` 时禁用。「＋」展开时图标转 45° 成「×」。
+
+### 11.2 常用问题的数据
+- 表 `quick_questions(id, user_id, text, created_at)`，`src/db/ensure-quick-questions.ts` 在启动时 `CREATE TABLE IF NOT EXISTS`（`src/db/index.ts` 里调用）。
+- 纯规则 `src/lib/quick-questions.ts`：`normalizeQuestion`（空白压成一个空格、1～100 字）、`checkAdd`（不重复、不超过 20 条）；单测 `tests/unit/quick-questions.test.ts`。
+- 存取 `src/lib/quick-question-store.ts`；接口 `src/app/api/quick-questions/route.ts`（GET / POST）和 `[id]/route.ts`（DELETE，只删自己的，删不到返回 404）；未登录一律 401。
+- 前端 `src/lib/use-quick-questions.ts`：第一次打开菜单才读取，页面内共用一份缓存；添加返回失败原因（重复 / 超限 / 空），删除先从界面拿掉、失败放回。
+- 点自己的常用问题：`onAsk({ ask: 文字, prompt: 文字, askKind: "custom" })`，和手打完全一样（右边出现这句话、记成一次 custom 提问）。
+
+### 11.3 测试
+- `e2e-chat-panel.mjs` 新增：C1（没输入时右边没有发送按钮、没有语音按钮）、C1b/C1c（菜单内容、Esc 收起）、C3（发送按钮出现、贴右、垂直居中）、C20a–e（添加、重复提示、点击使用、服务器存了、删除、未登录 401）。其余 E2E 的「点快捷问题」都改成「点＋再选项」。
+
+### 11.4 设计简报修订（并入 `docs/design/P44-DESIGN.md` §6）
+- 分组：输入区内部「＋ / 输入 / 发送」同属一个容器，间距 4px；菜单两组（内置 / 我的）之间一条 1px 线 + 8px。
+- 对齐：菜单文字、「我的常用问题」标题、添加按钮全部落在菜单内左边线；「＋」与发送同为 32px 圆形，分居容器两端。
+- 对比：发送是整个输入区里**唯一的实心色块**（AI 紫），只有输入后才出现，所以它是焦点；「＋」是无底色的次要灰。
+- 新增色值：无。

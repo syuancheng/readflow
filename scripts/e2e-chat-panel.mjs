@@ -78,14 +78,25 @@ try {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
 
+  // 常用问题在输入框左边「＋」菜单里：点「＋」→ 选一项
+  const ask = async (label) => {
+    await page.locator(".rf-composer-plus").click();
+    await page.locator(".rf-menu-item", { hasText: new RegExp(`^${label}$`) }).click();
+  };
+
   await page.goto(`${BASE}/texts/${textId}`, { waitUntil: "networkidle" });
   await page.locator(".w", { hasText: /^database$/ }).first().click();
   await page.locator(".rf-composer").waitFor({ timeout: 15000 });
   await page.waitForTimeout(800);
 
   // ===== 版面 =====
-  const chips = await page.locator(".rf-quick-chip").allInnerTexts();
-  check("C1 底部输入区：快捷问题直接可见（不用展开），含「整句没看懂」和「做成卡片」", chips.includes("整句没看懂") && chips.includes("做成卡片") && chips.includes("这个词在这句里什么意思"), chips.join(" / "));
+  check("C1 输入区是一个圆角容器：左「＋」、中输入框；没有输入时右边没有发送按钮，也没有语音按钮", (await page.locator(".rf-composer-plus").count()) === 1 && (await page.locator(".rf-composer-send").count()) === 0 && (await page.locator(".rf-quick").count()) === 0);
+  await page.locator(".rf-composer-plus").click();
+  const chips = await page.locator(".rf-menu-item").allInnerTexts();
+  check("C1b 点「＋」展开常用问题：含「这个词在这句里什么意思」「整句没看懂」「做成卡片」和「添加常用问题」", ["这个词在这句里什么意思", "整句没看懂", "做成卡片"].every((x) => chips.includes(x)) && chips.some((c) => c.includes("添加常用问题")), chips.join(" / "));
+  await page.screenshot({ path: path.join(SHOTS, "chat-menu-1440.png") });
+  await page.keyboard.press("Escape");
+  check("C1c 按 Esc 收起菜单", (await page.locator(".rf-menu").count()) === 0);
   const lay = await page.evaluate(() => {
     const a = document.querySelector(".reader-aside").getBoundingClientRect();
     const c = document.querySelector(".rf-composer").getBoundingClientRect();
@@ -93,9 +104,10 @@ try {
   });
   check("C2 输入区固定在右栏底部、在可视区域内", lay.gap <= 8 && lay.inView, JSON.stringify(lay));
   await page.locator(".rf-composer-input").fill("abc");
-  const hidden = (await page.locator(".rf-quick").count()) === 0;
+  const sendShown = (await page.locator(".rf-composer-send").count()) === 1;
+  const sbox = await page.evaluate(() => { const b = document.querySelector(".rf-composer-box").getBoundingClientRect(), x = document.querySelector(".rf-composer-send").getBoundingClientRect(); return { right: Math.round(b.right - x.right), mid: Math.abs((b.top + b.bottom) / 2 - (x.top + x.bottom) / 2) }; });
   await page.locator(".rf-composer-input").fill("");
-  check("C3 开始输入时快捷问题收起，清空后重新出现", hidden && (await page.locator(".rf-quick").count()) === 1);
+  check("C3 输入文字后右边出现圆形发送按钮（贴右边内侧、单行时垂直居中），清空后消失", sendShown && sbox.right <= 8 && sbox.mid <= 2 && (await page.locator(".rf-composer-send").count()) === 0, JSON.stringify(sbox));
 
   // ===== 词典区 =====
   const en = page.locator(".rf-en-def-text");
@@ -113,11 +125,11 @@ try {
   await page.screenshot({ path: path.join(SHOTS, "chat-initial-1440.png") });
 
   // ===== 对话 =====
-  await page.getByRole("button", { name: "这个词在这句里什么意思" }).click();
+  await ask("这个词在这句里什么意思");
   await page.locator(".rf-ai-reply .rf-feedback-row").waitFor({ timeout: 15000 });
   const b1 = await page.locator(".rf-bubble-user").allInnerTexts();
   check("C8 手动点「这个词在这句里什么意思」：右边也出现这句话（不能只出现回答），下面有「这次讲得」反馈", b1.join("|") === "这个词在这句里什么意思" && (await page.locator(".rf-feedback-row").count()) === 1, b1.join("|"));
-  await page.getByRole("button", { name: "再给个例句" }).click();
+  await ask("再给个例句");
   await page.locator(".rf-bubble-user", { hasText: "再给个例句" }).waitFor();
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 2 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   check("C9 追问：右边用户气泡 + 左边回答；追问的回答下面没有反馈（只有首次讲解有）", (await page.locator(".rf-feedback-row").count()) === 1);
@@ -129,10 +141,12 @@ try {
   check("C10 用户气泡靠右、浅灰底；AI 回答无底色、满宽", g.bubbleRight <= 12 && g.bubbleBg !== "rgba(0, 0, 0, 0)" && g.replyBg === "rgba(0, 0, 0, 0)" && g.replyW >= g.logW - 12, JSON.stringify(g));
 
   // 回答期间：快捷问题和发送暂停；往上翻时不抢滚动
-  await page.getByRole("button", { name: "讲讲句子结构" }).click();
+  await ask("讲讲句子结构");
   await page.locator(".rf-chat-status").waitFor({ timeout: 5000 });
-  const dis = await page.evaluate(() => [...document.querySelectorAll(".rf-quick-chip")].every((b) => b.disabled));
-  check("C11 AI 回答期间快捷问题全部暂停", dis);
+  await page.locator(".rf-composer-plus").click();
+  const dis = await page.evaluate(() => [...document.querySelectorAll(".rf-menu-group:first-child .rf-menu-item")].every((b) => b.disabled));
+  await page.keyboard.press("Escape");
+  check("C11 AI 回答期间菜单里的问题全部暂停", dis);
   await page.evaluate(() => { document.querySelector(".rf-chat-log").scrollTop = 0; });
   await page.waitForFunction(() => !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const top = await page.evaluate(() => document.querySelector(".rf-chat-log").scrollTop);
@@ -166,12 +180,41 @@ try {
   const ready = page.locator('.rf-run-block[data-state="ready"]');
   await ready.waitFor({ timeout: 20000 });
   check("C16 重试后成功：「已做成 3 张卡 · 查看」，新标签页打开", (await ready.innerText()).includes("已做成 3 张卡") && (await ready.getByRole("link").getAttribute("target")) === "_blank");
-  check("C17 做完后「做成卡片」快捷项消失，状态块里没有「再做一组」", !(await page.locator(".rf-quick-chip").allInnerTexts()).includes("做成卡片") && (await ready.getByRole("button").count()) === 0);
-  await page.getByRole("button", { name: "整句没看懂" }).click();
+  await page.locator(".rf-composer-plus").click();
+  const afterItems = await page.locator(".rf-menu-item").allInnerTexts();
+  await page.keyboard.press("Escape");
+  check("C17 做完后菜单里的「做成卡片」消失，状态块里没有「再做一组」", !afterItems.includes("做成卡片") && (await ready.getByRole("button").count()) === 0, afterItems.join(" / "));
+  await ask("整句没看懂");
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 6 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const seq = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].map((b) => b.textContent));
   check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|做成卡片|整句没看懂", seq.join("|"));
   await page.screenshot({ path: path.join(SHOTS, "chat-card-ready-1440.png") });
+
+  // ===== 我的常用问题：添加、使用、刷新后还在、删除 =====
+  await page.locator(".rf-composer-plus").click();
+  await page.getByRole("button", { name: /添加常用问题/ }).click();
+  await page.locator(".rf-menu-input").fill("有什么近义词？");
+  await page.keyboard.press("Enter");
+  await page.locator(".rf-menu-row", { hasText: "有什么近义词？" }).waitFor({ timeout: 5000 });
+  await page.locator(".rf-menu-addbtn").click();
+  await page.locator(".rf-menu-input").fill("有什么近义词？");
+  await page.keyboard.press("Enter");
+  const dupErr = await page.locator(".rf-menu-error").innerText();
+  check("C20a 常用问题：能添加；重复添加给出提示", /已经在常用问题里/.test(dupErr), dupErr);
+  await page.screenshot({ path: path.join(SHOTS, "chat-menu-custom-1440.png") });
+  await page.locator(".rf-menu-row .rf-menu-item", { hasText: "有什么近义词？" }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".rf-bubble-user")].at(-1)?.textContent === "有什么近义词？" && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
+  check("C20b 点自己的常用问题：和手打一样，右边出现这句话、AI 回答", true);
+  const saved = await api("/api/quick-questions", { cookie });
+  check("C20c 常用问题存在服务器（按账号）", saved.data?.items?.length === 1 && saved.data.items[0].text === "有什么近义词？", JSON.stringify(saved.data));
+  await page.locator(".rf-composer-plus").click();
+  await page.getByRole("button", { name: /删除常用问题：有什么近义词/ }).click();
+  await page.waitForTimeout(400);
+  const after = await api("/api/quick-questions", { cookie });
+  check("C20d 删除后列表和服务器都没有了", (await page.locator(".rf-menu-row").count()) === 0 && after.data?.items?.length === 0);
+  await page.keyboard.press("Escape");
+  const anon = await fetch(`${BASE}/api/quick-questions`);
+  check("C20e 没登录读不到常用问题（401）", anon.status === 401);
 
   // ===== 回看：对话串、做卡状态都能还原 =====
   await page.keyboard.press("Escape");
@@ -181,7 +224,7 @@ try {
   await page.locator(".rf-composer").waitFor();
   await page.waitForTimeout(1500);
   const re = await page.evaluate(() => ({ bubbles: document.querySelectorAll(".rf-bubble-user").length, block: document.querySelector(".rf-run-block")?.getAttribute("data-state") }));
-  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 6 && re.block === "ready", JSON.stringify(re));
+  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 7 && re.block === "ready", JSON.stringify(re));
 
   // ===== 自动触发的回答（词典查不到的短语）：右边同样有一条用户问题 =====
   await page.keyboard.press("Escape");

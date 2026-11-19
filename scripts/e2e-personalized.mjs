@@ -542,7 +542,8 @@ try {
   if (rect) {
     await ownerPage.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
     await ownerPage.waitForTimeout(1200);
-    await ownerPage.locator(".rf-quick-chip").first().click();
+    await ownerPage.locator(".rf-composer-plus").click();
+    await ownerPage.locator(".rf-menu-item").first().click();
     const feedbackVisible = await ownerPage
       .waitForSelector(".reader-note .rf-feedback-row", { timeout: 12000 })
       .then(() => true)
@@ -628,7 +629,8 @@ try {
     if (rect2) {
       await ownerPage.mouse.click(rect2.x + rect2.width / 2, rect2.y + rect2.height / 2);
       await ownerPage.waitForTimeout(1200);
-        await ownerPage.locator(".rf-quick-chip").first().click();
+        await ownerPage.locator(".rf-composer-plus").click();
+    await ownerPage.locator(".rf-menu-item").first().click();
       await ownerPage.waitForFunction(
         () => (document.querySelector(".reader-note .rf-md")?.textContent ?? "").includes("假模型讲解"),
         null, { timeout: 12000 },
@@ -873,7 +875,8 @@ try {
   if (jRect) {
     await ownerPage.mouse.click(jRect.x + jRect.width / 2, jRect.y + jRect.height / 2);
     await ownerPage.waitForTimeout(1200);
-    await ownerPage.locator(".rf-quick-chip").first().click();
+    await ownerPage.locator(".rf-composer-plus").click();
+    await ownerPage.locator(".rf-menu-item").first().click();
     const jAnswerDone = await ownerPage.waitForFunction(
       () => (document.querySelector(".reader-note .rf-md")?.textContent ?? "").includes("假模型讲解"),
       null, { timeout: 12000 },
@@ -904,7 +907,8 @@ try {
   if (kRect) {
     await ownerPage.mouse.click(kRect.x + kRect.width / 2, kRect.y + kRect.height / 2);
     await ownerPage.waitForTimeout(1200);
-    await ownerPage.locator(".rf-quick-chip").first().click();
+    await ownerPage.locator(".rf-composer-plus").click();
+    await ownerPage.locator(".rf-menu-item").first().click();
     await ownerPage.waitForSelector(".reader-note .rf-feedback-row", { timeout: 12000 }).catch(() => {});
     const rowsBefore = await ownerPage.locator(".reader-note .rf-feedback-row").count();
     await api("/api/learner", { cookie: owner, method: "PUT", body: { showFeedback: false } });
