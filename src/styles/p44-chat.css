@@ -256,8 +256,6 @@
   border-color: var(--rf-border-focus);
   box-shadow: var(--rf-focus-ring);
 }
-/* 有引用时输入框略微放大：内边距更松、最小高度更高，撤销引用即恢复原样 */
-.rf-composer-box-expanded { padding: var(--rf-space-2); }
 .rf-composer-input {
   flex: 1;
   min-width: 0;
@@ -306,15 +304,14 @@
 .rf-selection-ask-btn:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
 .rf-selection-ask-btn:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
-/* 引用 chip：按需宽度的小胶囊（对齐 WorkBuddy 参考），单行截断，紧贴输入框上方 */
+/* 引用条：与输入框等宽，单行截断，× 靠最右，紧贴输入框上方 */
 .rf-quote-chip {
   display: flex;
   align-items: center;
-  gap: var(--rf-space-1);
-  align-self: flex-start;
-  max-width: 100%;
-  margin: 0 var(--rf-space-1) var(--rf-space-1);
-  padding: var(--rf-space-1) var(--rf-space-2);
+  gap: var(--rf-space-2);
+  /* 与输入框等宽：同一容器内去掉横向 margin，撑满内容区 */
+  margin: 0 0 var(--rf-space-1);
+  padding: var(--rf-space-2);
   border: 0;
   border-radius: var(--rf-radius-md);
   background: var(--rf-bg-subtle);
@@ -324,6 +321,7 @@
   line-height: var(--rf-leading-sm);
 }
 .rf-quote-chip-text {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

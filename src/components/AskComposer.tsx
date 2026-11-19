@@ -43,14 +43,13 @@ export default function AskComposer({
   const plus = useRef<HTMLButtonElement>(null);
   const quick = useQuickQuestions();
 
-  // 随内容增高，上限 160px，超过内部滚动。有引用时输入框稍微变高一点
+  // 随内容增高，上限 160px，超过内部滚动
   useEffect(() => {
     const el = box.current;
     if (!el) return;
     el.style.height = "auto";
-    const min = quote ? 40 : 32;
-    el.style.height = `${Math.max(min, Math.min(el.scrollHeight, 160))}px`;
-  }, [text, quote]);
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
 
   // 菜单：点到外面或按 Esc 收起
   useEffect(() => {
@@ -203,7 +202,7 @@ export default function AskComposer({
           </button>
         </div>
       )}
-      <div className={`rf-composer-box${quote ? " rf-composer-box-expanded" : ""}`}>
+      <div className="rf-composer-box">
         <button
           ref={plus}
           type="button"
