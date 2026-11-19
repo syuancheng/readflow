@@ -8,6 +8,7 @@ import {
   EXPLAIN_PROMPT_MAX_CHARS,
   narrowHistory,
   narrowQuote,
+  narrowContextLayers,
   type ExplainParams,
 } from "@/lib/ai";
 import type { AuthUser } from "@/lib/auth";
@@ -295,6 +296,8 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     monolingual: body.monolingual === true,
     prompt: str(body.prompt)?.trim().slice(0, EXPLAIN_PROMPT_MAX_CHARS) || undefined,
     withPrevSentence: body.withPrevSentence === true,
+    // 两层上下文：客户端传来的只取 sentence + nearContext，逐条裁剪、限制条数
+    contextLayers: narrowContextLayers((body as { contextLayers?: unknown }).contextLayers),
     signals: narrowSignals((body as { signals?: unknown }).signals),
     // P32：白名单收 askKind；非法值一律按 default，前端说什么都不直接信
     askKind: narrowAskKind((body as { askKind?: unknown }).askKind),

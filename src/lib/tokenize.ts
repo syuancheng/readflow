@@ -53,7 +53,7 @@ export function tokenize(text: string): Token[] {
  * prefix / suffix 截到**句子边界**（句号 / 问号 / 叹号 / 省略号结束一句）；
  * 词在括号里面时，只截到括号里面那一段（见 parenthetical）：
  * 绝不从词中间剁（老版固定 ±40 字符窗口会把 thus 剁成 hus），
- * 语义与 AI 上下文（sentence.ts aiContextOf）一致。
+ * 语义与 AI 上下文（sentence.ts 的所在句边界）一致。
  *
  * 仅在客户端点词/划选事件回调中调用，不参与 SSR —— 用 Intl.Segmenter
  * 切句没有 hydration 风险（同 sentence.ts 的约定）。

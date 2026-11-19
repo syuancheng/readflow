@@ -4,7 +4,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { buildAnchor, tokenize, type Anchor, type Token } from "@/lib/tokenize";
 import { groupBlocks, isSkipped, type Group } from "@/lib/import/group";
 import { isProse, type BlockKind, type BlockMeta, type InlineRange } from "@/lib/import/types";
-import { aiContextOf, selectionSignals, type SelectionSignals } from "@/lib/sentence";
+import { contextLayersOf, selectionSignals, type ContextLayers, type SelectionSignals } from "@/lib/sentence";
 import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak, canSpeak } from "@/lib/speak";
@@ -1511,17 +1511,12 @@ export default function Reader({
             initialGloss={pick.initialGloss}
             initialDict={pick.initialDict}
             feedbackEnabled={feedbackEnabled}
-            /* AI 上下文按情况截取：单词/短语 → 所在整句；划整句 → 相邻句补语境；
-               「没看懂整句」信号（覆盖 ≥75% 词汇或句内生词密度 ≥75%）→ 前文额外带上一句 */
-            aiContext={(() => {
+            /* 两层上下文：所在句（讲的对象）+ 往前 150 词近前文（理解指代），跨段倒序取。
+               只依赖段落原文与锚点，逐轮逐字稳定 → 放 system 命中前缀缓存。 */
+            contextLayers={(() => {
               const idx = paragraphs.findIndex((p) => p.id === pick.paragraphId);
-              const para = idx >= 0 ? paragraphs[idx] : undefined;
-              return para
-                ? aiContextOf(para.content, pick.anchor.start, pick.anchor.end, {
-                    savedSet: new Set(savedMap.keys()),
-                    prevParagraph: idx > 0 ? paragraphs[idx - 1].content : undefined,
-                  })
-                : { prefix: pick.anchor.prefix, suffix: pick.anchor.suffix };
+              if (idx < 0) return { sentence: pick.anchor.quote.trim(), nearContext: [] };
+              return contextLayersOf(paragraphs, idx, pick.anchor.start, pick.anchor.end);
             })()}
             onAIGloss={(text) => void persistGloss(pick, text)}
             onCancel={() => void cancelRecord(pick)}
@@ -1565,7 +1560,7 @@ function PickCard({
   initialGloss,
   initialDict,
   onAIGloss,
-  aiContext,
+  contextLayers,
   feedbackEnabled,
 }: {
   pick: Pick;
@@ -1580,8 +1575,8 @@ function PickCard({
   initialDict?: DictResult | null;
   /** AI 释义生成完成后回调，用于把结果写回该批注 */
   onAIGloss?: (text: string) => void;
-  /** AI 用的上下文（句子边界 + 按需带上一句；锚点的 40 字符窗口只够定位，会切碎句子） */
-  aiContext: { prefix: string; suffix: string; withPrevSentence?: boolean };
+  /** 两层文章上下文（所在句 + 近前文），由 Reader 按锚点算好后传入；逐轮逐字稳定 */
+  contextLayers: ContextLayers;
   feedbackEnabled: boolean;
 }) {
   const { anchor, paragraphIdx } = pick;
@@ -1735,10 +1730,9 @@ function PickCard({
   }, [anchor.quote, initialGloss, recall]);
 
   /**
-   * 选区所在的整句（「整句没看懂」用）：采集信号时已经算好；回看时由锚点拼回。
-   * ⚠️ 回看时不能用 aiContext.prefix —— 它是「给 AI 的上下文」，生词密度高时
-   * 会故意把上一句带进来（理解指代用）；而这里要的是纯粹的「所在句」本体。
-   * anchor.prefix/suffix 由 buildAnchor 截到句子边界，正好符合语义。
+   * 选区所在的整句（「整句没看懂」这个问题的宾语）：采集信号时已经算好；回看时由锚点拼回。
+   * 这里仍用 anchor 的 prefix/suffix 拼「所在句本体」——它的 40 字符窗口只截到句子边界，
+   * 不含近前文。近前文现在单独走 contextLayers 传给 AI，不在这里混。
    */
   const sentence = (
     pick.signals?.sentence || `${anchor.prefix}${anchor.quote}${anchor.suffix}`
@@ -1801,13 +1795,14 @@ function PickCard({
     // 用户在 AI 回答里划选的引用，随这次提问一起发；发完就清掉 chip
     const withQuote = { ...(askQuote ? { quote: askQuote } : {}) };
     setAskQuote(null);
+    // 两层上下文随每一轮请求发送：内容只由段落原文 + 锚点决定，逐轮逐字相同。
+    // wholeSentence 分支原本写死 prefix/suffix 为空，那是「讲整句」拿不到指代背景的 bug，
+    // 现在两条分支统一带 contextLayers，问什么都能看到所在句 + 近前文。
     const body = req.wholeSentence
-      ? { word: req.word ?? sentence, prefix: "", suffix: "", language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs, ...withHistory, ...withQuote }
+      ? { word: req.word ?? sentence, contextLayers, language: "en", monolingual: false, prompt: req.prompt, askKind: req.askKind ?? "default", ...refs, ...withHistory, ...withQuote }
       : {
           word: anchor.quote,
-          prefix: aiContext.prefix,
-          suffix: aiContext.suffix,
-          ...(aiContext.withPrevSentence ? { withPrevSentence: true } : {}),
+          contextLayers,
           language: "en",
           monolingual: false,
           ...(req.prompt ? { prompt: req.prompt } : {}),

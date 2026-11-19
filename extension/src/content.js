@@ -482,7 +482,8 @@
     if (!s) return "";
     return (
       s.signals?.sentence ||
-      `${s.aiContext?.prefix || ""}${s.quote}${s.aiContext?.suffix || ""}`
+      s.contextLayers?.sentence ||
+      `${s.prefix || ""}${s.quote}${s.suffix || ""}`
     ).trim();
   }
 
@@ -662,11 +663,11 @@
     } catch {
       host = "";
     }
-    const pre = s.aiContext?.prefix || "";
-    const suf = s.aiContext?.suffix || "";
+    const sentence = s.contextLayers?.sentence || "";
+    const near = s.contextLayers?.nearContext || [];
     return `<details class="rf-ctx"><summary>上下文</summary>
-      ${pre ? `<p><b>前文</b>${esc(pre)}</p>` : ""}
-      ${suf ? `<p><b>后文</b>${esc(suf)}</p>` : ""}
+      ${sentence ? `<p><b>所在句</b>${esc(sentence)}</p>` : ""}
+      ${near.length ? `<p><b>近前文</b>${esc(near.join(" · "))}</p>` : ""}
       ${host ? `<p><b>来源</b>${esc(host)}</p>` : ""}
     </details>`;
   }
@@ -734,7 +735,7 @@
       dict: null,
       dictLoading: true,
       autoExplain: false,
-      aiContext: { prefix: "", suffix: "", withPrevSentence: false },
+      contextLayers: { sentence: "", nearContext: [] },
       signals: null,
       contextId: "",
       wordId: "",
@@ -755,7 +756,7 @@
       dict: p.dict || { entry: null },
       dictLoading: false,
       autoExplain: p.autoExplain === true,
-      aiContext: p.aiContext || { prefix: "", suffix: "", withPrevSentence: false },
+      contextLayers: p.contextLayers || { sentence: "", nearContext: [] },
       signals: p.signals || null,
       contextId: p.contextId || "",
       wordId: p.wordId || "",
@@ -836,8 +837,7 @@
     const body = req.wholeSentence
       ? {
           word: req.word || sentenceText(),
-          prefix: "",
-          suffix: "",
+          contextLayers: s.contextLayers || { sentence: "", nearContext: [] },
           language: config?.language || "en",
           monolingual: false,
           askKind: req.askKind || "default",
@@ -846,9 +846,7 @@
         }
       : {
           word: s.quote,
-          prefix: s.aiContext?.prefix || "",
-          suffix: s.aiContext?.suffix || "",
-          ...(s.aiContext?.withPrevSentence ? { withPrevSentence: true } : {}),
+          contextLayers: s.contextLayers || { sentence: "", nearContext: [] },
           language: config?.language || "en",
           monolingual: false,
           askKind: req.askKind || "default",

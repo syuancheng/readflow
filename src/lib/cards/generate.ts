@@ -261,9 +261,10 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
     base = [
       ...explainTurns({
         word: ctx.display_form,
-        context: sentenceOf(ctx),
-        prefix: ctx.prefix || undefined,
-        suffix: ctx.suffix || undefined,
+        context: sentenceOf(ctx), // 旧字段占位；contextLayers 存在时 contextBlock 不会再用它
+        // 缓存未命中时只有当前段落，拿不到前序段落 → 只放 layer1（所在句），不编造近前文。
+        // 命中缓存时前缀直接复用 cached.messages，那里两层都齐，不受这里影响。
+        contextLayers: { sentence: sentenceOf(ctx), nearContext: [] },
         learnerBlock: profile.block || undefined,
         personalized: profile.personalized,
         detailed: profile.detailed,

@@ -4,7 +4,7 @@ import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
 import { streamChat, type ChatTurn } from "./providers";
-import type { SelectionSignals } from "./sentence";
+import { NEAR_CONTEXT_MAX_SENTENCES, type ContextLayers, type SelectionSignals } from "./sentence";
 import { NO_MODEL_NOTICE } from "./explain-policy";
 // 保留原有导入路径：/api/summarize 仍从 lib/ai 取这段提示
 export { NO_MODEL_NOTICE };
@@ -65,9 +65,16 @@ export type ExplainQuote = { text: string; turnIndex: number };
 
 export type ExplainParams = {
   word: string;          // 要解释的词或短语（选区）
+  // 旧字段：只传给没升级到 contextLayers 的老调用方；新调用方一律用 contextLayers。
+  // 两者都不传时 contextBlock 退回「用户选中 + context」的最简形式。
   context: string;       // 兜底上下文（旧调用只传一句话时使用）
   prefix?: string;       // 选区在段内的前文（可为空）
   suffix?: string;       // 选区在段内的后文（可为空）
+  /**
+   * 两层文章上下文（2026-11-19）：所在句 + 所在句之前 ≤150 词的近前文（倒序）。
+   * 作为独立 system message 注入，内容只由段落原文与锚点决定，逐轮逐字稳定 → 缓存命中。
+   */
+  contextLayers?: ContextLayers;
   language?: string;     // 目标语言（正在学的语言），默认 en
   monolingual?: boolean; // true = 用目标语言解释，false = 用中文解释
   prompt?: string;       // 用户的自定义追问（对应 Readlang 的 askAI）
@@ -227,6 +234,56 @@ export function buildSentenceStructureMethodPrompt(): string {
 一次只带他走最卡的一两处，拆完把主干标到句子地图上。给的是标注和判断的抓手，不是整句逐字翻译——他要保留自己分析句型结构的机会。`;
 }
 
+/** 两层上下文里单条文本的字数上限（只在服务端白名单校验时用） */
+export const CONTEXT_LAYER_SENTENCE_MAX_CHARS = 4000;
+export const CONTEXT_LAYER_NEAR_MAX_CHARS = 2000;
+
+/**
+ * 上下文两层白名单：客户端传来的 contextLayers 只取 { sentence, nearContext }，
+ * 逐条裁剪字数、限制条数；非法结构整条丢弃，额外字段不透传。
+ * 与 narrowHistory / narrowQuote 同款规则，服务端与单测共用。
+ */
+export function narrowContextLayers(v: unknown): ContextLayers | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  if (typeof o.sentence !== "string") return undefined;
+  const sentence = o.sentence.trim().slice(0, CONTEXT_LAYER_SENTENCE_MAX_CHARS);
+  if (!sentence) return undefined;
+  const nearContext: string[] = [];
+  if (Array.isArray(o.nearContext)) {
+    for (const item of o.nearContext.slice(0, NEAR_CONTEXT_MAX_SENTENCES)) {
+      if (typeof item !== "string") continue;
+      const text = item.trim().slice(0, CONTEXT_LAYER_NEAR_MAX_CHARS);
+      if (text) nearContext.push(text);
+    }
+  }
+  return { sentence, nearContext };
+}
+
+/**
+ * 把两层上下文做成独立 system message（2026-11-19）。
+ *
+ * 位置：rules 之后、history 之前——夹在「稳定的规则」和「逐轮变化的历史」之间，
+ * 同一条批注的每一轮，人设 + 规则 + 两层上下文逐字相同，前缀缓存稳定命中。
+ *
+ * 内容只来自 contextLayers（段落原文 + 锚点算出的结果），不读任何会变化的状态。
+ * 分层说明直接写进提示词：所在句是讲的对象，近前文只是背景，别混、别翻译。
+ */
+export function buildContextLayersSystemMessage(layers: ContextLayers): string {
+  const near = layers.nearContext.length
+    ? layers.nearContext.map((s, i) => `${i + 1}. "${s}"`).join("\n")
+    : "（文章开头，没有更早的原文）";
+  return `【文章上下文：两处不同，别混用】
+- 「所在句」是学生选中的词／短语直接所在的那句，是你要讲的对象：词义、搭配、句法都以它为准。
+- 「近前文」是所在句之前最多 150 词的原文，按倒序（离所在句最近的排最前），只用来理解 that / it / the one 这类指代、承接与省略。它是背景，不是学生选中的内容——不要把它逐字译成中文，也不要把它当成学生的问题。
+
+近前文（背景，倒序）：
+${near}
+
+所在句（讲的对象）：
+"${layers.sentence}"`;
+}
+
 /** 导出供单测断言输出结构（不对外承诺稳定性） */
 export function buildSystemPrompt(
   language: string,
@@ -349,11 +406,14 @@ export function buildUserMessage(params: ExplainParams): string {
 ${question}`;
 }
 
-/** 组装「选中/前文/后文」上下文块，并附上阅读器采集的客观信号 */
+/** 组装上下文块：新调用方（contextLayers）的上下文已移到 system，这里只剩用户选中；老调用方逐字不变 */
 function contextBlock(params: ExplainParams): string {
   const { word, context, prefix, suffix, withPrevSentence } = params;
   let base: string;
-  if (typeof prefix === "string" || typeof suffix === "string") {
+  if (params.contextLayers) {
+    // 两层上下文在 buildContextLayersSystemMessage 里；user 消息只保留「选中了什么」。
+    base = `用户选中: "${word}"`;
+  } else if (typeof prefix === "string" || typeof suffix === "string") {
     const pre = (prefix ?? "").trim();
     const suf = (suffix ?? "").trim();
     const hint = withPrevSentence
@@ -382,7 +442,8 @@ function observations(params: ExplainParams): string {
   const pos =
     signals.position === "start" ? "句首" : signals.position === "end" ? "句末" : "句中";
   lines.push(`- 选区位置: ${pos}`);
-  const sentence = signals.sentence.trim();
+  // 两层上下文启用后，所在句已进 system 的 layer1，user 消息不再重复一遍
+  const sentence = params.contextLayers ? "" : signals.sentence.trim();
   if (sentence) lines.push(`- 所在句子原文: "${sentence}"`);
   if (typeof signals.dictHit === "boolean") {
     lines.push(`- 词典: ${signals.dictHit ? "已收录" : "未收录"}`);
@@ -488,11 +549,14 @@ export function explainTurns(params: ExplainParams): ChatTurn[] {
   // P44：「讲讲句子结构」这一轮追加拆句方法；放在学生规则之前，硬规则仍然优先。
   // 其他 askKind 与默认讲解一个字符都不变。
   const structureMethod = params.askKind === "structure" ? buildSentenceStructureMethodPrompt() : "";
+  // 两层上下文：文章事实，逐轮逐字稳定，放 history 之前才能命中前缀缓存
+  const layers = params.contextLayers ? buildContextLayersSystemMessage(params.contextLayers) : "";
   // 历史在前、本轮 user 在最后；无历史、无规则、非 structure 时就是你看到的原有两条，逐字不变。
   return [
     { role: "system", content: system },
     ...(structureMethod ? [{ role: "system" as const, content: structureMethod }] : []),
     ...(rules ? [{ role: "system" as const, content: rules }] : []),
+    ...(layers ? [{ role: "system" as const, content: layers }] : []),
     ...historyTurns(params.history),
     { role: "user", content: buildUserMessage(params) },
   ];

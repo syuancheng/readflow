@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildContextLayersSystemMessage,
   buildDomainSystemPrompt,
   buildSentenceStructureMethodPrompt,
   buildSystemPrompt,
   buildUserMessage,
+  CONTEXT_LAYER_NEAR_MAX_CHARS,
+  CONTEXT_LAYER_SENTENCE_MAX_CHARS,
   EXPLAIN_HISTORY_MAX_CHARS,
   EXPLAIN_HISTORY_MAX_TURNS,
   EXPLAIN_QUOTE_MAX_CHARS,
   explainTurns,
   historyTurns,
+  narrowContextLayers,
   narrowHistory,
   narrowQuote,
 } from "../../src/lib/ai";
@@ -249,4 +253,105 @@ test("narrowQuote 白名单：裁剪字数、只收合法结构，非法输入�
   assert.deepEqual(narrowQuote({ text: "x", turnIndex: -1 }), { text: "x", turnIndex: 0 });
   assert.deepEqual(narrowQuote({ text: "x", turnIndex: "1" }), { text: "x", turnIndex: 0 });
   assert.equal(narrowQuote({ text: "x", turnIndex: 999 })?.turnIndex, 99);
+});
+
+// ====== 两层上下文：system 位置、分层说明、缓存稳定性（2026-11-19）======
+
+const LAYERS = {
+  sentence: "Man: Get the plain one.",
+  nearContext: [
+    "Woman: That could work.",
+    "Man: The bakery has banana bread.",
+    "Woman: So I was thinking a loaf cake.",
+  ],
+};
+
+test("两层上下文：作为独立 system 插在规则之后、历史之前，本轮 user 仍在最后", () => {
+  const turns = explainTurns({
+    ...BASE,
+    contextLayers: LAYERS,
+    teachingRules: "别直接给整句翻译",
+    history: [{ ask: "plain 什么意思", text: "plain = 普通的" }],
+  });
+  const systems = turns.filter((t) => t.role === "system").map((t) => t.content);
+  assert.equal(systems.length, 3, "人设 + 规则 + 两层上下文，共三条 system");
+  assert.deepEqual(systems.slice(0, 2), [
+    buildSystemPrompt("en", false, BASE.word, { cardsEnabled: false }),
+    "别直接给整句翻译",
+  ]);
+  assert.ok(systems[2].includes("两处不同，别混用"));
+  // 顺序：system ×3 → 历史 user/assistant → 本轮 user
+  assert.equal(turns[3].role, "user");
+  assert.equal(turns[3].content, "学生的问题: plain 什么意思");
+  assert.equal(turns[4].role, "assistant");
+  assert.equal(turns[turns.length - 1].role, "user");
+  assert.equal(turns[turns.length - 1].content, buildUserMessage({ ...BASE, contextLayers: LAYERS }));
+});
+
+test("分层提示词：讲清所在句是对象、近前文是背景，且不要翻译背景", () => {
+  const msg = buildContextLayersSystemMessage(LAYERS);
+  assert.ok(msg.includes("所在句") && msg.includes("讲的对象"));
+  assert.ok(msg.includes("近前文") && msg.includes("背景"));
+  assert.ok(msg.includes("不要把它逐字译成中文"));
+  // 两层内容都在，且倒序呈现
+  assert.ok(msg.indexOf("That could work") < msg.indexOf("loaf cake"));
+  assert.ok(msg.includes('"Man: Get the plain one."'));
+});
+
+test("两层上下文：user 消息不再重复所在句与前后文，只留选中项", () => {
+  const msg = buildUserMessage({ ...BASE, contextLayers: LAYERS });
+  assert.ok(msg.includes('用户选中: "which goes a lot"'));
+  assert.ok(!msg.includes("前文:"), "旧的前文行不再出现");
+  assert.ok(!msg.includes("后文:"), "旧的后文行不再出现");
+  assert.ok(!msg.includes("所在句子:"), "所在句已移到 system layer1");
+  // 老调用（不传 contextLayers）逐字不变
+  const legacy = buildUserMessage(BASE);
+  assert.ok(legacy.includes("前文:") && legacy.includes("后文:"));
+});
+
+test("不传 contextLayers 时 explainTurns 逐字不变（含 structure 与规则的控制变量）", () => {
+  const plain = explainTurns(BASE);
+  assert.equal(plain.length, 2);
+  assert.equal(plain[1].content, buildUserMessage(BASE));
+  const withOthers = explainTurns({
+    ...BASE,
+    askKind: "structure",
+    teachingRules: "别直接给整句翻译",
+    history: [{ text: "上一答" }],
+  });
+  // 有 structure / rules / history 时，恰好是 system×3 + history×2 + user = 6 条，没有 layer system
+  assert.equal(withOthers.length, 6);
+  assert.ok(!withOthers.some((t) => t.content.includes("两处上下文，别混用")));
+});
+
+test("两层上下文逐轮稳定：同一锚点、不同追问，system 部分逐字相同", () => {
+  const first = explainTurns({ ...BASE, contextLayers: LAYERS, prompt: "plain 什么意思" });
+  const second = explainTurns({
+    ...BASE,
+    contextLayers: LAYERS,
+    prompt: "那 the plain one 指哪个？",
+    history: [{ ask: "plain 什么意思", text: "普通的那个" }],
+  });
+  // 三条 system 完全一样 → KV cache 前缀命中；变化只发生在 history 与本轮 user
+  const systemsOf = (ts: typeof first) => ts.filter((t) => t.role === "system");
+  assert.deepEqual(systemsOf(first), systemsOf(second));
+  assert.equal(systemsOf(first).length, 2, "人设 + 两层上下文");
+});
+
+test("narrowContextLayers 白名单：裁剪字数、限制条数、非法结构丢弃", () => {
+  assert.deepEqual(
+    narrowContextLayers({ sentence: "  A sentence.  ", nearContext: ["  prior  "], evil: "x" }),
+    { sentence: "A sentence.", nearContext: ["prior"] },
+    "额外字段不透传",
+  );
+  const long = narrowContextLayers({
+    sentence: "x".repeat(CONTEXT_LAYER_SENTENCE_MAX_CHARS + 100),
+    nearContext: ["y".repeat(CONTEXT_LAYER_NEAR_MAX_CHARS + 100)],
+  });
+  assert.equal(long?.sentence.length, CONTEXT_LAYER_SENTENCE_MAX_CHARS);
+  assert.equal(long?.nearContext[0].length, CONTEXT_LAYER_NEAR_MAX_CHARS);
+  assert.deepEqual(narrowContextLayers({ sentence: "   " }), undefined);
+  assert.deepEqual(narrowContextLayers({ sentence: 123 }), undefined);
+  assert.deepEqual(narrowContextLayers([]), undefined);
+  assert.deepEqual(narrowContextLayers(null), undefined);
 });

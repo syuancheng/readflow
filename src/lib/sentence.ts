@@ -1,12 +1,12 @@
 /**
- * 按情况截取 AI 释义的上下文（对齐并小幅超越 Readlang 的句子级设计）：
+ * 按情况截取 AI 释义的上下文（2026-11-19 起为两层结构，见 contextLayersOf）：
  *
- * - 单词 / 短语（未覆盖整句）：前文、后文都截到所在句子的边界
- *   —— 即 Readlang 的「整句上下文」，保证句子主语完整，不被锚点窗口截断
- * - 划了完整一句（或多句）：选区本身已是完整句子，前文/后文各给相邻一句，补语境
- * - 「没看懂整句」信号（李笑来式阅读法的落地）：选区覆盖了句子的 ≥75% 词汇，
- *   或该句 ≥8 词且其中 ≥75% 是用户已收进词库的生词 —— 说明用户卡的是整句，
- *   前文额外带上上一句（跨段时取前一段最后一句），用于理解指代与句间衔接
+ * - 第一层「所在句」：选区所在句子的完整原文，是词义 / 搭配 / 句法判断的对象；
+ * - 第二层「近前文」：所在句之前最多 150 词，按句边界切、跨段往前取、倒序排列，
+ *   只用来理解指代 / 承接 / 省略；段首的 Woman: / Man: 标签随原文保留。
+ *
+ * 两层都只依赖段落原文 + 选区锚点，不读 savedSet 等可变状态——保证同一条批注
+ * 每轮追问算出的内容逐字相同，放进 system 才能命中模型前缀缓存。
  *
  * 句子切分用确定性的正则 + 缩写白名单，不用 Intl.Segmenter。
  * Segmenter 在两个方向都错（实测 ICU）：
@@ -135,103 +135,86 @@ export function selectionKind(text: string): SelectionKind {
   return "phrase";
 }
 
-export type AIContext = {
-  prefix: string;
-  suffix: string;
-  /** 前文包含了上一句（触发「没看懂整句」信号时为 true，前端据此给模型加提示语） */
-  withPrevSentence?: boolean;
+/**
+ * 两层上下文（2026-11-19 定稿）。
+ *
+ * 第一层「所在句」= 学生选中的词/短语直接所在的那句，是词义、搭配、句法判断的对象；
+ * 第二层「近前文」= 所在句之前最多 150 词的语境，按句边界切、跨段继续往前取、倒序排列，
+ * 只用来理解指代 / 承接 / 省略（that / it / the one 指什么），不是学生选中的内容。
+ *
+ * 两层都只由「段落原文 + 选区锚点」决定，不读 savedSet 之类的可变状态——
+ * 同一条批注的每一轮追问算出来的内容逐字相同，放进 system 才能命中模型前缀缓存。
+ */
+/** 近前文的最大词数（按句边界截断，最后一句可能让总量略超） */
+export const NEAR_CONTEXT_MAX_WORDS = 150;
+/** 兜底：近前文最多这么多句，防止极端短句把请求体撑爆 */
+export const NEAR_CONTEXT_MAX_SENTENCES = 80;
+
+export type ContextLayers = {
+  /** 第一层：选区所在的完整句子 */
+  sentence: string;
+  /** 第二层：所在句之前的句子，离所在句最近的排最前（倒序） */
+  nearContext: string[];
 };
 
 /**
- * 计算发给 AI 的前文/后文。
- * @param paragraph  选区所在段落的完整文本
+ * 计算两层上下文。
+ * @param paragraphs 全文段落（按 idx 顺序），每项至少有 content
+ * @param paraIdx    选区所在段落在数组里的下标
  * @param start/end  选区在段落内的字符区间
- * @param opts.savedSet      用户已收词集合（小写词形/词元），用于生词密度判定
- * @param opts.prevParagraph 上一段全文（选区在段首时，上一句要从前一段取）
  */
-export function aiContextOf(
-  paragraph: string,
+export function contextLayersOf(
+  paragraphs: readonly { content: string }[],
+  paraIdx: number,
   start: number,
   end: number,
-  opts?: { savedSet?: Set<string>; prevParagraph?: string }
-): AIContext {
-  const s = Math.max(0, Math.min(start, paragraph.length));
-  const e = Math.max(s, Math.min(end, paragraph.length));
+): ContextLayers {
+  if (paraIdx < 0 || paraIdx >= paragraphs.length) return { sentence: "", nearContext: [] };
+  const content = paragraphs[paraIdx].content;
+  const s = Math.max(0, Math.min(start, content.length));
+  const e = Math.max(s, Math.min(end, content.length));
 
-  const sentences = splitSentences(paragraph);
-  // 与选区重叠的句子集合 [s0, s1]
-  let s0 = -1;
-  let s1 = -1;
+  const sentences = splitSentences(content);
+  let first = -1;
+  let last = -1;
   sentences.forEach((sn, i) => {
     if (sn.end > s && sn.start < e) {
-      if (s0 < 0) s0 = i;
-      s1 = i;
+      if (first < 0) first = i;
+      last = i;
     }
   });
-  if (s0 < 0) {
-    // 选区落在句子间隙（理论上不会）：退化为段落级
-    return { prefix: paragraph.slice(0, s), suffix: paragraph.slice(e) };
-  }
+  // 选区落在句子间隙（理论上不会）：退化成把选区本身当所在句
+  const coreStart = first >= 0 ? sentences[first].start : s;
+  const coreEnd = last >= 0 ? sentences[last].end : e;
+  const sentence = content.slice(coreStart, coreEnd).trim();
 
-  const coreStart = sentences[s0].start;
-  const coreEnd = sentences[s1].end;
-  const core = paragraph.slice(coreStart, coreEnd);
-  const coreWords = wordsOf(core);
-  const selWords = wordsOf(paragraph.slice(s, e));
-  const coverage = coreWords.length > 0 ? selWords.length / coreWords.length : 1;
-
-  // 「没看懂整句」信号之一：句中生词密度（仅 ≥8 词的长句判定，避免短句误触发）
-  const savedSet = opts?.savedSet;
-  const density =
-    savedSet && coreWords.length >= 8
-      ? coreWords.filter((w) => savedSet.has(w)).length / coreWords.length
-      : 0;
-
-  // 上一句文本（段内取前一句；段首则取前一段最后一句），取不到为空串
-  const prevSentence = s0 > 0
-    ? paragraph.slice(sentences[s0 - 1].start, sentences[s0 - 1].end)
-    : opts?.prevParagraph
-      ? lastSentenceOf(opts.prevParagraph)
-      : "";
-
-  // 选区覆盖了所在句 ≥75% 词汇：视为「划了整句/大半句」→ 前后取相邻句补语境
-  if (coverage >= 0.75 && coreWords.length > 0) {
-    const nextEnd = s1 + 1 < sentences.length ? sentences[s1 + 1].end : coreEnd;
-    const pre = prevSentence.trim();
-    return {
-      prefix: pre ? `${pre} ${paragraph.slice(coreStart, s)}`.trim() : paragraph.slice(coreStart, s),
-      suffix: paragraph.slice(e, nextEnd),
-      withPrevSentence: Boolean(pre),
-    };
-  }
-
-  // 单词/短语：前后文截到句子边界（整句上下文，对齐 Readlang）
-  const base: AIContext = {
-    prefix: paragraph.slice(coreStart, s),
-    suffix: paragraph.slice(e, coreEnd),
+  const nearContext: string[] = [];
+  let words = 0;
+  const take = (text: string): boolean => {
+    const t = text.trim();
+    if (!t) return false;
+    nearContext.push(t);
+    words += wordsOf(t).length;
+    return words >= NEAR_CONTEXT_MAX_WORDS || nearContext.length >= NEAR_CONTEXT_MAX_SENTENCES;
   };
 
-  // 未盖满整句，但生词密度 ≥75%：用户卡的是整句 → 前文额外带上上一句
-  if (density >= 0.75) {
-    const pre = prevSentence.trim();
-    if (pre) {
-      return {
-        prefix: `${pre} ${base.prefix}`.trim(),
-        suffix: base.suffix,
-        withPrevSentence: true,
-      };
+  // 本段：所在句之前的句子，从近到远
+  for (let i = first >= 0 ? first - 1 : -1; i >= 0; i--) {
+    if (take(content.slice(sentences[i].start, sentences[i].end))) {
+      return { sentence, nearContext };
     }
   }
-
-  return base;
-}
-
-/** 取一段文本的最后一个句子（用于跨段取「上一句」） */
-function lastSentenceOf(text: string): string {
-  const spans = splitSentences(text);
-  if (spans.length === 0) return "";
-  const last = spans[spans.length - 1];
-  return text.slice(last.start, last.end);
+  // 跨段：前一段的最后一句开始，继续倒着往前取；段首的 Woman: / Man: 标签随原文保留
+  for (let p = paraIdx - 1; p >= 0; p--) {
+    const prev = paragraphs[p].content;
+    const spans = splitSentences(prev);
+    for (let i = spans.length - 1; i >= 0; i--) {
+      if (take(prev.slice(spans[i].start, spans[i].end))) {
+        return { sentence, nearContext };
+      }
+    }
+  }
+  return { sentence, nearContext };
 }
 
 /**

@@ -16,7 +16,7 @@ import { contexts, paragraphs, texts, userWords } from "@/db/schema";
 import { lookup } from "@/lib/dict";
 import { parseThread } from "@/lib/ai-thread";
 import { shouldAutoExplain } from "@/lib/explain-policy";
-import { aiContextOf, selectionSignals } from "@/lib/sentence";
+import { contextLayersOf, selectionSignals, type ContextLayers } from "@/lib/sentence";
 import { buildAnchor } from "@/lib/tokenize";
 import { ensureContextByAnchor } from "@/lib/word-store";
 import { locateInParagraphs, normalizeBlockText, stripHash } from "@/lib/web-anchor";
@@ -48,7 +48,7 @@ export type ExtensionPayload = {
   dict: { entry: unknown; originalForm: string; lemmaForm: string };
   thread: { ask?: string; text: string }[];
   autoExplain: boolean;
-  aiContext: { prefix: string; suffix: string; withPrevSentence: boolean };
+  contextLayers: ContextLayers;
   signals: Record<string, unknown>;
   imported: boolean;
   /** P32 F5：这段讲解下方要不要显示「太浅 · 刚好 · 太深」 */
@@ -85,10 +85,10 @@ function paragraphsOf(textId: string): ParaRow[] {
     .all();
 }
 
-/** 同一篇文章里的上一段（跨段取「上一句」用） */
-function previousOf(list: ParaRow[], paragraphId: string): string | undefined {
+/** 两层上下文（所在句 + 往前 150 词近前文），跨段倒序取；与阅读页同一函数 */
+function layersOf(list: ParaRow[], paragraphId: string, start: number, end: number): ContextLayers {
   const at = list.findIndex((p) => p.id === paragraphId);
-  return at > 0 ? list[at - 1].content : undefined;
+  return at < 0 ? { sentence: "", nearContext: [] } : contextLayersOf(list, at, start, end);
 }
 
 /**
@@ -241,15 +241,13 @@ export function recordFromWeb(userId: string, input: RecordInput): ExtensionPayl
     fromAnnotation: false,
   });
 
-  // 5. 信号（同阅读页）与发给 AI 的前后文
+  // 5. 信号（同阅读页）与两层上下文
   const signals = {
     ...selectionSignals(paragraph.content, anchor.start, anchor.end, source),
     repeatCount: input.repeatCount,
     dictHit: Boolean(dict.entry),
   };
-  const aiContext = aiContextOf(paragraph.content, anchor.start, anchor.end, {
-    prevParagraph: previousOf(list, paragraphId),
-  });
+  const layers = layersOf(list, paragraphId, anchor.start, anchor.end);
 
   return {
     ok: true,
@@ -265,11 +263,7 @@ export function recordFromWeb(userId: string, input: RecordInput): ExtensionPayl
     dict: { entry: dict.entry, originalForm: dict.originalForm, lemmaForm: dict.lemmaForm },
     thread: thread.map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text })),
     autoExplain,
-    aiContext: {
-      prefix: aiContext.prefix,
-      suffix: aiContext.suffix,
-      withPrevSentence: aiContext.withPrevSentence === true,
-    },
+    contextLayers: layers,
     signals,
     imported,
     feedbackEnabled: feedbackEnabledFor(userId),
@@ -322,9 +316,7 @@ export function recallWord(
   }
 
   const thread = parseThread(ctx.aiGloss);
-  const aiContext = aiContextOf(content, ctx.start, ctx.end, {
-    prevParagraph: paragraph ? previousOf(list, paragraph.id) : undefined,
-  });
+  const layers = layersOf(list, ctx.paragraphId, ctx.start, ctx.end);
 
   return {
     ok: true,
@@ -342,11 +334,7 @@ export function recallWord(
       dict,
       thread: thread.map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text })),
       autoExplain: false,
-      aiContext: {
-        prefix: aiContext.prefix,
-        suffix: aiContext.suffix,
-        withPrevSentence: aiContext.withPrevSentence === true,
-      },
+      contextLayers: layers,
       signals: selectionSignals(content, ctx.start, ctx.end, "word"),
       imported: text?.sourceType === "url",
       feedbackEnabled: false, // 回看历史时没有 answerId，不显示反馈行
