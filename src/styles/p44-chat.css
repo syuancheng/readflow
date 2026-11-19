@@ -284,3 +284,13 @@
 .rf-composer-send:disabled { opacity: 0.45; cursor: default; }
 
 @media print { .rf-composer { display: none; } }
+
+/* T-08：回答、气泡、建议行不留单字孤行 */
+.rf-ai-reply p,
+.rf-bubble-user,
+.rf-suggest-line,
+.rf-run-block {
+  text-wrap: pretty;
+  orphans: 2;
+  widows: 2;
+}

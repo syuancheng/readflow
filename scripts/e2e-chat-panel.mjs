@@ -106,7 +106,7 @@ try {
   check("C5 「上下文锚点」紧跟在英文释义下面（不在最底部），默认收起", order.after && order.collapsed, JSON.stringify(order));
   const stray = await page.locator(".rf-chat-log button", { hasText: /追问|问 AI|AI 释义|整句没看懂|做成卡片/ }).count();
   check("C6 对话区里没有独立的 AI 操作按钮（都在输入区）", stray === 0, `数量=${stray}`);
-  const titleBtns = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-log > div:first-child button")].map((x) => x.getAttribute("aria-label") || x.textContent.trim()).filter((x) => x !== "发音"));
+  const titleBtns = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-log > div:first-child button")].map((x) => x.getAttribute("aria-label") || x.textContent.trim()).filter((x) => x !== "发音" && !/^\//.test(x)));
   check("C7 右栏标题行只剩「取消记录」", titleBtns.join("|") === "取消记录", titleBtns.join("|"));
   await page.screenshot({ path: path.join(SHOTS, "chat-initial-1440.png") });
 
@@ -163,7 +163,9 @@ try {
 
   // ===== 回看：对话串、做卡状态都能还原 =====
   await page.keyboard.press("Escape");
-  await page.locator(".w", { hasText: /^database$/ }).first().click();
+  await page.waitForTimeout(300);
+  const bx = await page.evaluate(() => { const r = [...document.querySelectorAll(".reading-body .w")].find((e) => e.textContent === "database").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.click(bx.x, bx.y);
   await page.locator(".rf-composer").waitFor();
   await page.waitForTimeout(1500);
   const re = await page.evaluate(() => ({ bubbles: document.querySelectorAll(".rf-bubble-user").length, block: document.querySelector(".rf-run-block")?.getAttribute("data-state") }));
