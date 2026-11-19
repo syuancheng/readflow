@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import FeedbackRow from "@/components/FeedbackRow";
 import MarkdownText from "@/components/MarkdownText";
 import { shownText } from "@/lib/chat-view";
@@ -19,7 +20,7 @@ export type ChatTurnData = {
 /**
  * 对话流里的一轮（P44）：用户的提问靠右（浅灰气泡），AI 的回答在左边、满宽、没有气泡。
  * 每条回答都有一条用户问题（首次讲解是统一的默认问题）；首次讲解下面有「太浅 / 刚好 / 太深」，追问的回答下面没有反馈。
- * 制卡建议显示在这条回答的末尾。
+ * 制卡建议显示在这条回答的末尾：一张带明确按钮的小卡片（做成卡片 / 暂不需要），像 Claude Code 问「要不要合并」那样。
  */
 export default function ChatTurn({
   turn,
@@ -42,6 +43,8 @@ export default function ChatTurn({
   onRate: (r: Feedback) => void;
   onReason: (r: string | null) => void;
 }) {
+  // 「暂不需要」只对这一条建议生效：关掉后这条回答下面不再出现
+  const [dismissed, setDismissed] = useState(false);
   const failed = turn.status === "error" || (turn.status === "done" && isNotAGloss(turn.text));
   return (
     <div className="rf-chat-turn">
@@ -62,14 +65,21 @@ export default function ChatTurn({
           <MarkdownText text={shownText(turn)} />
           {turn.status === "streaming" && <span className="rf-stream-caret" aria-hidden />}
         </div>
-        {suggestion && (
-          <p className="rf-suggest-line">
-            <span aria-hidden>💡</span> <b>建议做成卡片：</b>
-            {suggestion}{" "}
-            <button type="button" className="rf-suggest-act" onClick={onMakeCard}>
-              做成卡片
-            </button>
-          </p>
+        {suggestion && !dismissed && (
+          <div className="rf-suggest-card" role="group" aria-label="制卡建议">
+            <p className="rf-suggest-text">
+              <b>建议做成卡片</b>
+              {suggestion}
+            </p>
+            <div className="rf-suggest-actions">
+              <button type="button" className="rf-btn-solid" onClick={onMakeCard}>
+                做成卡片
+              </button>
+              <button type="button" className="rf-btn-quiet" onClick={() => setDismissed(true)}>
+                暂不需要
+              </button>
+            </div>
+          </div>
         )}
         {showFeedback && (
           <FeedbackRow
