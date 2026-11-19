@@ -5,6 +5,7 @@
 @import "../styles/p35-cards.css";
 @import "../styles/p43-toast.css";
 @import "../styles/p44-chat.css";
+@import "../styles/p46-footer.css";
 
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）

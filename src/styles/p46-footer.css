@@ -1,0 +1,23 @@
+/*
+ * P46：页脚（ICP 备案号）。只用设计令牌，间距走 4px 阶梯。
+ * - 对齐：左对齐，放进和顶栏、正文同一个 .rf-container，落在页面内容区的左边线上。
+ * - 对比：12px、次要灰，权重最低，不抢任何页面的焦点；hover 才变深。
+ * - 手机底部导航固定在屏幕底部，body 已经有 64px 的底部内边距，页脚不会被盖住。
+ */
+.rf-site-footer {
+  padding: var(--rf-space-4) 0 var(--rf-space-6);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+}
+.rf-site-footer a {
+  color: var(--rf-text-secondary);
+  text-decoration: none;
+}
+.rf-site-footer a:hover { color: var(--rf-text-primary); }
+.rf-site-footer a:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); border-radius: var(--rf-radius-xs); }
+
+/* 阅读页宽屏是固定高度的两栏：不放页脚 */
+@media (min-width: 1024px) {
+  body:has(.rf-reading-layout) .rf-site-footer { display: none; }
+}
+@media print { .rf-site-footer { display: none; } }
