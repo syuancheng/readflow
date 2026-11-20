@@ -3,7 +3,7 @@ import { planHistory } from "./history-compress";
 import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
-import { streamChat, type ChatTurn } from "./providers";
+import { streamChat, type ChatTurn, type ChatUsage } from "./providers";
 import { NEAR_CONTEXT_MAX_SENTENCES, type ContextLayers, type SelectionSignals } from "./sentence";
 import { NO_MODEL_NOTICE } from "./explain-policy";
 // 保留原有导入路径：/api/summarize 仍从 lib/ai 取这段提示
@@ -566,6 +566,8 @@ export async function* streamExplain(
   params: ExplainParams,
   ai?: AiConfig,
   signal?: AbortSignal,
+  /** P57a：流结束时回传用量（输入/输出/缓存命中 token） */
+  onUsage?: (usage: ChatUsage) => void,
 ): AsyncGenerator<string, void, unknown> {
   const turns = explainTurns(params);
 
@@ -577,6 +579,7 @@ export async function* streamExplain(
       // 原来的 400 / 600 会让模型写到一半被迫停笔，页面停在半句话。
       maxTokens: null,
       signal,
+      onUsage,
     },
     ai,
   );
@@ -594,7 +597,7 @@ export function hasModelConfigured(ai?: AiConfig): boolean {
  */
 async function* streamTurns(
   turns: ChatTurn[],
-  opts: { temperature: number; maxTokens: number | null; signal?: AbortSignal },
+  opts: { temperature: number; maxTokens: number | null; signal?: AbortSignal; onUsage?: (usage: ChatUsage) => void },
   ai?: AiConfig,
 ): AsyncGenerator<string, void, unknown> {
   const provider = resolveProvider(ai?.settings ?? currentSettings(), ai?.env ?? process.env);

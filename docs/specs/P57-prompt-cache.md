@@ -25,7 +25,8 @@
 | `cache_hit_tokens` | INTEGER | 命中 token（DeepSeek `prompt_cache_hit_tokens`，OpenAI 兼容 `prompt_tokens_details.cached_tokens`） |
 | `completion_tokens` | INTEGER | 输出 token |
 | `layout` | TEXT | `v1`/`v2`，对比两套用 |
-| `para_click_n` | INTEGER | 同一用户同一段落里的第几次讲解请求（统计段落窗口收益；写入时查同段已有事件数） |
+| `para_id` | TEXT | 选区所在段落 id（来自请求的 anchor.paragraphId） |
+| `para_click_n` | INTEGER | 同一用户同一段落里的第几次讲解请求，含追问（统计段落窗口收益；写入时查同段已有事件数 +1） |
 
 ### 2.2 取数
 
@@ -37,7 +38,12 @@
 
 `scripts/prompt-cache-report.mjs`：读库，输出按 `layout`、`ask_kind`、`para_click_n`（1 / 2 / 3+）分组的：请求数、平均输入 token、命中率（Σ命中 / Σ输入）、折算成本（命中按 1/10）。输出 markdown 表，写入 `.verify/p57/`。
 
-### 2.4 验收
+### 2.4 实现说明（已完成）
+
+- 流式请求在 OpenAI 兼容分支加了 `stream_options: { include_usage: true }`，Claude 分支从 `message_start` / `message_delta` 取用量；统一由 `parseUsage`（`providers.ts`）解析，经 `onUsage` 回调交给 `handleExplain`，流**成功结束**后调用 `recordExplainUsage` 写库。
+- 报告：`node scripts/prompt-cache-report.mjs [--db …] [--days 7]`，输出写到 `.verify/p57/report.md`。
+
+### 2.5 验收
 
 - 点一次词，库里有 token 数；取消请求不留脏数据；`prompt_cache_hit_tokens` 缺失时记 NULL，不记 0。
 - 基线：先跑一周（或造一批请求）拿 v1 命中率，写进 `docs/design/P57-…` 的「基线」一节。

@@ -15,7 +15,8 @@ import type { AuthUser } from "@/lib/auth";
 import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
-import { learnerBlockFor, linkExplainContext, logExplain, saveAnswer } from "@/lib/learner-store";
+import { learnerBlockFor, linkExplainContext, logExplain, recordExplainUsage, saveAnswer } from "@/lib/learner-store";
+import type { ChatUsage } from "@/lib/providers";
 import { buildRulesSystemPrompt } from "@/lib/learner/teaching-rules";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
 import { cardsEnabled } from "@/lib/cards/flags";
@@ -131,6 +132,8 @@ export async function handleExplain(
       textId: params.textId,
       dictHit: params.signals?.dictHit,
       repeatCount: params.signals?.repeatCount,
+      paraId: params.anchor?.paragraphId,
+      layout: "v1",
     });
   } catch (err) {
     console.error("[learner] 记录讲解事件失败:", err);
@@ -172,7 +175,10 @@ export async function handleExplain(
   };
   const encoder = new TextEncoder();
   const abort = new AbortController();
-  const iter = streamExplain(enriched, ai, abort.signal)[Symbol.asyncIterator]();
+  let usage: ChatUsage | null = null; // P57a：流结束时由 provider 回传，成功结束后写入事件
+  const iter = streamExplain(enriched, ai, abort.signal, (u) => {
+    usage = u;
+  })[Symbol.asyncIterator]();
   let cancelled = false;
   let assistantText = ""; // P33：完整讲解全文（含建议行），缓存做卡用
   let streamDone = false; // 只缓存「完整成功」的结果（spec §7.2）
@@ -190,6 +196,7 @@ export async function handleExplain(
           controller.enqueue(encoder.encode(value));
         }
         streamDone = !cancelled;
+        if (streamDone && answerId && usage) recordExplainUsage(user.id, answerId, usage);
         // P34 F1：讲解完整结束 → 对上批注（请求里没有 contextId 时按锚点找）并存下这段回答原文。
         // 失败只记日志，绝不影响讲解。
         let linkedContextId: string | null = params.contextId ?? null;

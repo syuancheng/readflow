@@ -313,6 +313,10 @@ export type ExplainEventInput = {
   textId?: string | null;
   dictHit?: boolean | null;
   repeatCount?: number | null;
+  /** P57a：选区所在段落，用来算「同段第几次讲解请求」 */
+  paraId?: string | null;
+  /** P57a：提示词结构版本 */
+  layout?: string;
 };
 
 /** 写一条讲解事件；返回 id，同时就是「这段回答」的 X-RF-Answer-Id */
@@ -320,12 +324,13 @@ export function logExplain(input: ExplainEventInput): string {
   const id = randomUUID();
   const word = input.word.slice(0, 120);
   const refs = ownedRefs(input.userId, input.contextId, input.textId);
+  const paraId = input.paraId ? input.paraId.slice(0, 80) : null;
   sqlite
     .prepare(
       `INSERT INTO explain_events
          (id, user_id, kind, ask_kind, via, word, lemma, is_phrase, dict_hit, repeat_count,
-          text_id, text_cefr, context_id, created_at)
-       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          text_id, text_cefr, context_id, layout, para_id, para_click_n, created_at)
+       VALUES (?, ?, 'explain', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -340,9 +345,43 @@ export function logExplain(input: ExplainEventInput): string {
       refs.textId,
       refs.textCefr,
       refs.contextId,
+      input.layout ?? "v1",
+      paraId,
+      paraId ? paraClickN(input.userId, paraId) : null,
       Date.now(),
     );
   return id;
+}
+
+/** 同一用户在这一段里的第几次讲解请求（含本次；含追问）。统计段落窗口收益用 */
+function paraClickN(userId: string, paraId: string): number {
+  const row = sqlite
+    .prepare("SELECT COUNT(*) AS n FROM explain_events WHERE user_id = ? AND kind = 'explain' AND para_id = ?")
+    .get(userId, paraId) as { n: number };
+  return row.n + 1;
+}
+
+/**
+ * P57a：讲解结束后补上这次请求的用量。字段缺失就不写（保持 NULL，不当成 0）；
+ * 失败只记日志，绝不影响讲解。
+ */
+export function recordExplainUsage(
+  userId: string,
+  eventId: string,
+  usage: { promptTokens?: number; completionTokens?: number; cacheHitTokens?: number },
+): void {
+  if (usage.promptTokens === undefined && usage.cacheHitTokens === undefined && usage.completionTokens === undefined) return;
+  try {
+    sqlite
+      .prepare(
+        `UPDATE explain_events
+            SET prompt_tokens = ?, cache_hit_tokens = ?, completion_tokens = ?
+          WHERE id = ? AND user_id = ?`,
+      )
+      .run(usage.promptTokens ?? null, usage.cacheHitTokens ?? null, usage.completionTokens ?? null, eventId, userId);
+  } catch (err) {
+    console.error("[learner] 记录讲解用量失败:", err);
+  }
 }
 
 export type LookupEventInput = {

@@ -309,6 +309,14 @@ export const explainEvents = sqliteTable(
     /** 2026-11-18：反馈原因白名单，见 learner/feedback-reason.ts */
     feedbackReason: text("feedback_reason"),
     cardedBefore: integer("carded_before"),
+    /** P57a：本次请求的输入 / 缓存命中 / 输出 token；拿不到记 NULL */
+    promptTokens: integer("prompt_tokens"),
+    cacheHitTokens: integer("cache_hit_tokens"),
+    completionTokens: integer("completion_tokens"),
+    /** 提示词结构版本（P57b 起 v1/v2 对比用）与所在段落、同段第几次讲解请求 */
+    layout: text("layout"),
+    paraId: text("para_id"),
+    paraClickN: integer("para_click_n"),
     createdAt: integer("created_at").notNull(),
   },
   (t) => [index("idx_explain_events_user_time").on(t.userId, t.createdAt)],

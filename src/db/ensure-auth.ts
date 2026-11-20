@@ -194,6 +194,20 @@ export function ensureAuthSchema(sqlite: Database.Database): void {
     addColumnIfMissing(sqlite, "ALTER TABLE explain_events ADD COLUMN feedback_reason TEXT", "explain_events", "feedback_reason");
   }
 
+  // P57a：讲解请求的用量与缓存命中（统计前缀缓存命中率用）。命中数缺失记 NULL，不记 0
+  for (const [col, ddl] of [
+    ["prompt_tokens", "INTEGER"],
+    ["cache_hit_tokens", "INTEGER"],
+    ["completion_tokens", "INTEGER"],
+    ["layout", "TEXT"],
+    ["para_id", "TEXT"],
+    ["para_click_n", "INTEGER"],
+  ] as const) {
+    if (!evCols.some((c) => c.name === col)) {
+      addColumnIfMissing(sqlite, `ALTER TABLE explain_events ADD COLUMN ${col} ${ddl}`, "explain_events", col);
+    }
+  }
+
   // P33 F7：查词事件里记录「这个词当时是否已有推送成功的卡片」
   if (!evCols.some((c) => c.name === "carded_before")) {
     addColumnIfMissing(sqlite, "ALTER TABLE explain_events ADD COLUMN carded_before INTEGER", "explain_events", "carded_before");

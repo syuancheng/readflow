@@ -15,8 +15,52 @@ export class ProviderError extends Error {
 
 export type ChatTurn = { role: "system" | "user" | "assistant"; content: string };
 
+/** 一次模型调用的用量（P57a）。字段缺失记 undefined，不要当成 0 */
+export type ChatUsage = {
+  promptTokens?: number;
+  completionTokens?: number;
+  /** 命中缓存的输入 token（DeepSeek: prompt_cache_hit_tokens；OpenAI 兼容: prompt_tokens_details.cached_tokens；Claude: cache_read_input_tokens） */
+  cacheHitTokens?: number;
+};
+
+type RawUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_cache_hit_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+};
+
+const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+
+/**
+ * 把各家返回的 usage 统一成 ChatUsage（纯函数，单测直接覆盖）。
+ * Claude 的 input_tokens 不含缓存部分，所以 promptTokens = input + cache_read + cache_creation。
+ */
+export function parseUsage(u: RawUsage | null | undefined): ChatUsage {
+  if (!u) return {};
+  if (u.input_tokens !== undefined || u.cache_read_input_tokens !== undefined) {
+    const read = num(u.cache_read_input_tokens);
+    const prompt =
+      num(u.input_tokens) === undefined && read === undefined
+        ? undefined
+        : (num(u.input_tokens) ?? 0) + (read ?? 0) + (num(u.cache_creation_input_tokens) ?? 0);
+    return { promptTokens: prompt, completionTokens: num(u.output_tokens), cacheHitTokens: read };
+  }
+  return {
+    promptTokens: num(u.prompt_tokens),
+    completionTokens: num(u.completion_tokens),
+    cacheHitTokens: num(u.prompt_cache_hit_tokens) ?? num(u.prompt_tokens_details?.cached_tokens),
+  };
+}
+
 export type ChatOptions = {
   temperature?: number;
+  /** 流式调用结束时回传用量（P57a）。没有拿到用量就不调用；重试时只有最后一次会调用 */
+  onUsage?: (usage: ChatUsage) => void;
   /**
    * 输出上限（token）。不传 = 各调用的默认值；传 null = 流式调用不设上限：
    * OpenAI 兼容接口不带 max_tokens，由模型自己写完；Claude 接口必须带，用 CLAUDE_UNCAPPED_MAX_TOKENS。
@@ -87,6 +131,8 @@ async function* openaiStream(
     model: p.model,
     messages: turns,
     stream: true,
+    // 让流的最后一块带上 usage（输入/输出/缓存命中 token）；DeepSeek 与 OpenAI 兼容接口都支持
+    stream_options: { include_usage: true },
     temperature: opts.temperature ?? 0.3,
     // null = 不带 max_tokens（讲解用：模型写到讲完为止，只受服务商自身上限约束）
     ...(opts.maxTokens === null ? {} : { max_tokens: opts.maxTokens ?? 1200 }),
@@ -94,12 +140,15 @@ async function* openaiStream(
   }, { signal: opts.signal });
 
   let finish: string | null = null;
+  let usage: ChatUsage | null = null;
   for await (const chunk of stream) {
+    if (chunk.usage) usage = parseUsage(chunk.usage as RawUsage);
     const choice = chunk.choices[0];
     const delta = choice?.delta?.content;
     if (delta) yield delta;
     if (choice?.finish_reason) finish = choice.finish_reason;
   }
+  if (usage) opts.onUsage?.(usage);
   yield* endOfStream(finish === null ? null : finish === "length" ? "length" : "ok");
 }
 
@@ -166,6 +215,8 @@ async function* anthropicStream(
   /** message_stop 到了才算正常结束；message_delta 的 stop_reason = max_tokens 表示被截断 */
   let end: "ok" | "length" | null = null;
   let stopReason: string | null = null;
+  // message_start 带输入侧用量，message_delta 带输出 token
+  const rawUsage: RawUsage = {};
 
   while (true) {
     const { done, value } = await reader.read();
@@ -183,6 +234,8 @@ async function* anthropicStream(
           type?: string;
           delta?: { type?: string; text?: string; stop_reason?: string | null };
           error?: { type?: string; message?: string };
+          message?: { usage?: RawUsage };
+          usage?: RawUsage;
         };
         try {
           evt = JSON.parse(payload);
@@ -198,11 +251,14 @@ async function* anthropicStream(
         if (evt.type === "content_block_delta" && evt.delta?.text) {
           yield evt.delta.text;
         }
+        if (evt.type === "message_start" && evt.message?.usage) Object.assign(rawUsage, evt.message.usage);
+        if (evt.type === "message_delta" && evt.usage) Object.assign(rawUsage, evt.usage);
         if (evt.type === "message_delta" && evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
         if (evt.type === "message_stop") end = stopReason === "max_tokens" ? "length" : "ok";
       }
     }
   }
+  if (Object.keys(rawUsage).length > 0) opts.onUsage?.(parseUsage(rawUsage));
   yield* endOfStream(end);
 }
 
