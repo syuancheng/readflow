@@ -212,6 +212,26 @@ try {
     md.closest(".rf-ai-reply").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
   await page.locator(".rf-selection-ask-btn").click();
+  const chip = await page.evaluate(() => {
+    const c = document.querySelector(".rf-quote-chip");
+    if (!c) return null;
+    const cs = getComputedStyle(c);
+    return { inBox: Boolean(c.closest(".rf-composer-box")), height: Math.round(c.getBoundingClientRect().height), bg: cs.backgroundColor, border: cs.borderLeftWidth, icons: c.querySelectorAll("svg").length };
+  });
+  check("C37 输入框里的引用条：在输入框内部、窄（≤ 26px）、无底色、左竖线 3px、没有小图标", chip && chip.inBox && chip.height <= 26 && chip.bg === "rgba(0, 0, 0, 0)" && chip.border === "3px" && chip.icons === 0, JSON.stringify(chip));
+  await page.screenshot({ path: path.join(SHOTS, "chat-quote-chip-1440.png") });
+  await page.locator(".rf-quote-chip-del").click();
+  check("C37b 点 × 能清除引用", (await page.locator(".rf-quote-chip").count()) === 0);
+  await page.evaluate(() => {
+    const md = [...document.querySelectorAll(".rf-ai-reply .rf-md")].at(-1);
+    const range = document.createRange();
+    range.selectNodeContents(md);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    md.closest(".rf-ai-reply").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.locator(".rf-selection-ask-btn").click();
   await page.locator(".rf-composer-input").fill("这一段是什么意思？");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 8 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });

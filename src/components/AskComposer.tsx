@@ -199,25 +199,21 @@ export default function AskComposer({
           </div>
         </div>
       )}
-      {quote && (
-        <div className="rf-quote-chip" role="group" aria-label="引用的回答片段">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="3 2" width="14" height="14" aria-hidden>
-            <rect x="4" y="4" width="16" height="16" rx="2" />
-            <path d="M8 9h8M8 13h5" />
-          </svg>
-          <span className="rf-quote-chip-text" title={quote.text}>{quote.text}</span>
-          <button
-            type="button"
-            className="rf-quote-chip-del"
-            aria-label="移除引用"
-            title="移除引用"
-            onClick={onClearQuote}
-          >
-            ×
-          </button>
-        </div>
-      )}
       <div className="rf-composer-box">
+        {quote && (
+          <div className="rf-quote-chip" role="group" aria-label="引用的回答片段">
+            <span className="rf-quote-chip-text" title={quote.text}>{quote.text}</span>
+            <button
+              type="button"
+              className="rf-quote-chip-del"
+              aria-label="移除引用"
+              title="移除引用"
+              onClick={onClearQuote}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <button
           ref={plus}
           type="button"

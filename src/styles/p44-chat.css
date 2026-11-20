@@ -243,6 +243,7 @@
 .rf-composer-box {
   display: flex;
   align-items: flex-end; /* 多行输入时「＋」和发送留在底部 */
+  flex-wrap: wrap; /* 有引用时，引用行占满第一行，其余仍在下面一行 */
   gap: var(--rf-space-1);
   padding: var(--rf-space-1);
   border: var(--rf-border-width) solid var(--rf-border-strong);
@@ -302,20 +303,19 @@
 .rf-selection-ask-btn:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
 .rf-selection-ask-btn:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
-/* 引用条：与输入框等宽，单行截断，× 靠最右，紧贴输入框上方 */
+/* 引用条：在输入框里面的第一行，左竖线 + 次要色单行文字（与对话气泡里的引用同一种语言），无底色、无图标 */
 .rf-quote-chip {
+  flex: 1 0 100%;
   display: flex;
   align-items: center;
   gap: var(--rf-space-2);
-  /* 与输入框等宽：同一容器内去掉横向 margin，撑满内容区 */
-  margin: 0 0 var(--rf-space-1);
-  padding: var(--rf-space-2);
-  border: 0;
-  border-radius: var(--rf-radius-md);
-  background: var(--rf-bg-subtle);
-  color: var(--rf-text-primary);
+  min-height: var(--rf-space-6);
+  margin: 0;
+  padding: 0 var(--rf-space-1) 0 var(--rf-space-2);
+  border-left: 3px solid var(--rf-border-strong);
+  color: var(--rf-text-secondary);
   font-size: var(--rf-text-sm);
-  font-weight: 600;
+  font-weight: 400;
   line-height: var(--rf-leading-sm);
 }
 .rf-quote-chip-text {
@@ -340,9 +340,10 @@
   font: inherit;
   font-size: var(--rf-text-sm);
   line-height: 1;
+  opacity: 0.6;
   cursor: pointer;
 }
-.rf-quote-chip-del:hover { background: var(--rf-bg-hover); }
+.rf-quote-chip-del:hover { background: var(--rf-bg-hover); opacity: 1; }
 .rf-quote-chip-del:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
 /* 左右两个按钮同尺寸（32px），重复 */
