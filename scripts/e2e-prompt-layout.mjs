@@ -158,7 +158,7 @@ try {
   const r3 = await ask("tool", at("tool"), at("tool") + 4, { askKind: "structure" });
   check("V6 点「讲讲句子结构」：前缀仍然全部命中（拆句方法在尾部）", r3.hit >= tailStart(r3) - 5 && /带学生拆开这个长句/.test(r3.messages.at(-1).content), `hit=${r3.hit}/${tailStart(r3)}`);
   const r4 = await ask("tool", at("tool"), at("tool") + 4, { askKind: "domain" });
-  check("V7 点「从内容角度讲讲」：前缀仍然全部命中，且人设没被换掉", r4.hit >= tailStart(r4) - 5 && r4.messages[0].content === r1.messages[0].content && /资深的专业技术人员/.test(r4.messages.at(-1).content), `hit=${r4.hit}/${tailStart(r4)}`);
+  check("V7 点「从内容角度讲讲」：前缀仍然全部命中，且人设没被换掉", r4.hit >= tailStart(r4) - 5 && r4.messages[0].content === r1.messages[0].content && r4.messages.at(-1).content.includes("【本轮：从内容角度讲讲这句】") && /资深的专业技术人员/.test(r4.messages[0].content), `hit=${r4.hit}/${tailStart(r4)}`);
 
   // ---- 用量落库 ----
   const ev = dbq("SELECT layout, para_click_n, prompt_tokens, cache_hit_tokens FROM explain_events ORDER BY created_at");

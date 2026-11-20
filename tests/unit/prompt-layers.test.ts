@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { explainTurns, type ExplainParams } from "../../src/lib/ai";
-import { buildL0, buildL1, buildL3, windowFromLayers } from "../../src/lib/prompt/layers";
+import { DOMAIN_TRIGGER, buildL0, buildL1, buildL3, windowFromLayers } from "../../src/lib/prompt/layers";
 import { NEIGHBOR_MAX_CHARS, SENTENCE_MAX_CHARS, sentenceWindowOf } from "../../src/lib/prompt/sentence-window";
 import { buildLearnerBlock } from "../../src/lib/learner/profile-text";
 import { planHistory } from "../../src/lib/history-compress";
@@ -59,9 +59,10 @@ test("开关与变体不改前缀：制卡开关 / 领域 / 拆句 / 选区 / �
 test("尾部确实随这些变化：制卡关闭有一行指令；domain 带领域视角；structure 带拆句方法", () => {
   assert.match(tail(base({ cardsEnabled: false })), /本次不要输出「制卡建议」行/);
   assert.doesNotMatch(tail(base()), /本次不要输出「制卡建议」行/);
-  assert.match(tail(base({ askKind: "domain" })), /资深的专业技术人员/);
+  assert.match(tail(base({ askKind: "domain" })), new RegExp(DOMAIN_TRIGGER));
+  assert.doesNotMatch(tail(base({ askKind: "domain" })), /资深的专业技术人员/); // 领域视角全文在 L0，尾部只有触发行
   assert.match(tail(base({ askKind: "structure" })), /带学生拆开这个长句/);
-  assert.doesNotMatch(tail(base()), /资深的专业技术人员|带学生拆开/);
+  assert.doesNotMatch(tail(base()), /资深的专业技术人员|带学生拆开|本轮：从内容角度/);
 });
 
 test("同一句里点不同的词，前缀逐字相同（上下文窗口只取决于所在句的位置）", () => {
@@ -100,12 +101,30 @@ test("没有用户层 / 文章层 / 段落层时整层省略，不留空 system"
   assert.equal(turns.every((t) => t.content.trim().length > 0), true);
 });
 
-test("个性化的深度指引在 L1（用户层），不改 L0", () => {
+test("答案深度只有一份：有没有档案、个性化开不开，L0 与全部前缀都相同；不再有「替代上文」", () => {
   const on = explainTurns(base({ personalized: true }));
   const off = explainTurns(base({ personalized: false }));
-  assert.equal(on[0].content, off[0].content);
-  assert.match(on[1].content, /本学生的答案深度/);
-  assert.doesNotMatch(off[1].content, /本学生的答案深度/);
+  assert.deepEqual(on.slice(0, -1), off.slice(0, -1));
+  const l0 = buildL0();
+  assert.equal(l0.split("【答案深度").length - 1, 1, "L0 里只能有一个答案深度段");
+  assert.doesNotMatch(JSON.stringify(on), /替代上文/);
+  // 一份里同时写了「没有档案」和「有档案」两种判断
+  assert.match(l0, /没有：只按选区本身判断/);
+  assert.match(l0, /有：按下面的方式判断/);
+  assert.match(l0, /最近的反馈/); // 个性化的反馈含义保留
+});
+
+test("特殊问法「从内容角度讲讲」是 L0 里的一节：触发行才启用，写明上文的释义行/句子地图/制卡建议不适用", () => {
+  const l0 = buildL0();
+  assert.match(l0, /【特殊问法：从内容角度讲讲这句】/);
+  assert.match(l0, new RegExp(`只有当最后一条消息以「${DOMAIN_TRIGGER}」开头时才用本节`));
+  assert.match(l0, /释义行、句子地图、答案深度、制卡建议」的要求一律不适用/);
+  assert.match(l0, /资深的专业技术人员/);
+  // 原领域提示词里对「用户消息」的描述已改成 v2 的位置（文章层 + 尾部所在句）
+  assert.doesNotMatch(l0, /用户消息最前面是「这篇文章」/);
+  assert.match(l0, /【这篇文章】/);
+  // 领域那一轮：人设（第一条 system）与默认讲解逐字相同
+  assert.equal(explainTurns(base({ askKind: "domain" }))[0].content, explainTurns(base())[0].content);
 });
 
 test("尾部顺序：变体 → 易变档案 → 所在句 → 选区 → 观察 → 引用 → 问题（问题在最后）", () => {
@@ -136,7 +155,7 @@ function SENT_WIN() {
 }
 
 test("L1 / L3 纯函数：空输入返回空串", () => {
-  assert.equal(buildL1({ personalized: false }), "");
+  assert.equal(buildL1({}), "");
   assert.equal(buildL3(undefined), "");
   assert.equal(buildL3({ prev: "", sentence: "  ", next: "" }), "");
 });

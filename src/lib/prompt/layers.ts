@@ -24,17 +24,55 @@ import {
 import type { ChatTurn } from "../providers";
 import type { SentenceWindow } from "./sentence-window";
 
-/** L0：中文人设 + 制卡建议规则。制卡开关关闭时由 L5 的一行指令抑制，这里永远带着 */
-export function buildL0(): string {
-  return `${legacySystemPrompt("en", false)}\n\n${CARD_SUGGESTION_ZH}`;
+/**
+ * 答案深度（v2 唯一一份）：有没有档案都用同一段文字，不再有「默认版」和「个性化版」两份。
+ * 没有档案时按选区判断（原默认规则）；有档案时按档案、反馈、观察判断（原个性化指引）。
+ * 档案本身在后面的消息里：稳定部分在用户层，近况在最后一条消息的「学生近况」里。
+ */
+// 函数而不是常量：layers 与 ai 互相引用，模块加载时 ai 里的常量可能还没初始化
+function v2Depth(): string {
+  return `【答案深度由你判断，不要问我】
+先看后面的消息里有没有「学生档案」或「学生近况」：
+- 没有：只按选区本身判断，讲到这一层就停。选区是边缘成分 → 轻答：意思 + 一句为什么，1~2 句，不写句子地图；选区是主干成分，或涉及被动语态、倒装、从句 → 中答：意思 + 为什么 + 句子地图。不主动写「整句大意：」——学生需要整句时会自己点「整句没看懂」或「讲讲句子结构」。
+- 有：按下面的方式判断。
+${DEPTH_GUIDANCE_ZH.split("\n").slice(1).join("\n")}`;
 }
 
-/** L1：个性化深度指引（仅个性化用户）+ 讲解要求 + 稳定档案；都为空则整层省略 */
-export function buildL1(input: { personalized: boolean; teachingRules?: string; stableProfile?: string }): string {
+/**
+ * 特殊问法「从内容角度讲讲这句」（v2：作为 L0 里的一节，由最后一条消息的触发行启用）。
+ * 原来是整套换成另一个人设；换人设会让 system 的第一个字符就不同，整条缓存作废。
+ * 现在人设永远是同一份，这一节写明「只有触发行出现时才用，且上文的释义行、句子地图等不适用」，不靠一句「忽略上文」覆盖。
+ */
+export const DOMAIN_TRIGGER = "【本轮：从内容角度讲讲这句】";
+
+function domainModeSection(): string {
+  const body = buildDomainSystemPrompt();
+  const i = body.indexOf("【你收到的信息】");
+  const j = body.indexOf("【第一步");
+  if (i < 0 || j < 0) throw new Error("domain prompt markers changed");
+  const info = `【你收到的信息】
+标题与分类在「【这篇文章】」那条消息里（可能只有一项，也可能没有）；学生选中的是一整个句子，在最后一条消息的「所在句」里，那就是你要讲的对象。
+
+`;
+  return `【特殊问法：从内容角度讲讲这句】
+只有当最后一条消息以「${DOMAIN_TRIGGER}」开头时才用本节。那一轮你不再是英语老师：上文关于「释义行、句子地图、答案深度、制卡建议」的要求一律不适用，完全按本节回答；其余各轮照常，不要把本节用到别的问法上。
+
+${body.slice(0, i)}${info}${body.slice(j)}`;
+}
+
+/** L0：中文人设 + 唯一一份答案深度 + 制卡建议规则 + 特殊问法。所有开关与变体都不改这一层 */
+export function buildL0(): string {
+  const base = legacySystemPrompt("en", false);
+  const i = base.indexOf("【答案深度】");
+  const j = base.indexOf("【硬性禁止】", i);
+  if (i < 0 || j < 0) throw new Error("persona depth markers changed");
+  const persona = `${base.slice(0, i)}${v2Depth()}\n\n${base.slice(j)}`;
+  return `${persona}\n\n${CARD_SUGGESTION_ZH}\n\n${domainModeSection()}`;
+}
+
+/** L1：讲解要求 + 稳定档案；都为空则整层省略 */
+export function buildL1(input: { teachingRules?: string; stableProfile?: string }): string {
   const parts: string[] = [];
-  if (input.personalized) {
-    parts.push(`【本学生的答案深度：以下指引替代上文「答案深度」那一段】\n${DEPTH_GUIDANCE_ZH}`);
-  }
   if (input.teachingRules?.trim()) parts.push(input.teachingRules.trim());
   if (input.stableProfile?.trim()) parts.push(input.stableProfile.trim());
   return parts.join("\n\n");
@@ -67,11 +105,7 @@ ${win.sentence.trim()}${next}`;
 export function buildVariantBlock(params: ExplainParams): string {
   const lines: string[] = [];
   if (params.cardsEnabled === false) lines.push("本次不要输出「制卡建议」行。");
-  if (params.askKind === "domain") {
-    lines.push(
-      `【本轮改换视角：忽略上文英语老师人设里关于「释义行、句子地图、答案深度、制卡建议」的要求，只按下面的要求回答】\n${buildDomainSystemPrompt()}`,
-    );
-  }
+  if (params.askKind === "domain") lines.push(DOMAIN_TRIGGER);
   if (params.askKind === "structure") lines.push(buildSentenceStructureMethodPrompt());
   return lines.join("\n\n");
 }
@@ -79,7 +113,6 @@ export function buildVariantBlock(params: ExplainParams): string {
 /** v2：完整 messages */
 export function assembleExplain(params: ExplainParams): ChatTurn[] {
   const l1 = buildL1({
-    personalized: params.personalized === true,
     teachingRules: params.teachingRules,
     stableProfile: params.learnerStable,
   });
