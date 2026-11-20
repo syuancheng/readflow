@@ -43,8 +43,8 @@
   font-weight: 800;
 }
 .rf-toast-ready .rf-toast-icon {
-  background: var(--rf-accent-soft);
-  color: var(--rf-accent-text);
+  background: var(--rf-success-soft);
+  color: var(--rf-success-text);
 }
 .rf-toast-failed .rf-toast-icon {
   background: var(--rf-danger-soft);

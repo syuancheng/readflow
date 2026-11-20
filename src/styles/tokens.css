@@ -75,13 +75,18 @@
   --rf-border-strong: var(--rf-gray-300); /* 输入框、次按钮 */
   --rf-border-focus:  var(--rf-blue-500);
 
-  /* 品牌 / 主操作 —— 一屏只该有一个 */
-  --rf-accent:        var(--rf-green-500);
-  --rf-accent-edge:   var(--rf-green-600);
-  --rf-accent-text:   var(--rf-green-700);
-  --rf-accent-soft:   var(--rf-green-50);
+  /* 品牌色：只给 Logo。界面本身是中性的，不用品牌色做按钮、进度条、导航 */
+  --rf-brand:      var(--rf-green-500);
+  --rf-brand-edge: var(--rf-green-600);
+
+  /* 主操作：近黑色实心 —— 一屏只该有一个（参照 Claude / ChatGPT 的中性界面） */
+  --rf-accent:        var(--rf-gray-900);
+  --rf-accent-edge:   var(--rf-gray-900);
+  --rf-accent-text:   var(--rf-gray-800);
+  --rf-accent-soft:   var(--rf-gray-100);
 
   /* 查词高亮（阅读器 + 词库原句里的命中词） */
+  /* 你查过的词：绿色下划线 + 悬停 / 选中时的浅绿底。这是整站唯一保留的「内容层」绿色（用户 2026-11-20 确认保留） */
   --rf-highlight-bg:    var(--rf-green-100);
   --rf-highlight-line:  var(--rf-green-500);
 
@@ -90,10 +95,10 @@
   --rf-info-text: var(--rf-blue-700);
   --rf-info-soft: var(--rf-blue-50);
 
-  /* AI 相关（问 AI、AI 释义、小结） */
-  --rf-ai:      var(--rf-purple-600);
-  --rf-ai-text: var(--rf-purple-700);
-  --rf-ai-soft: var(--rf-purple-50);
+  /* AI 相关（问 AI、AI 释义、小结）：不再用紫色，AI 靠版式区分（右边是你、左边是 AI） */
+  --rf-ai:      var(--rf-gray-600);
+  --rf-ai-text: var(--rf-gray-800);
+  --rf-ai-soft: var(--rf-gray-100);
 
   /* 游戏化（XP、连续天数、成就） */
   --rf-reward:      var(--rf-amber-500);
@@ -109,17 +114,17 @@
   --rf-success-text: var(--rf-green-700);
   --rf-success-soft: var(--rf-green-50);
 
-  /* CEFR 难度：只用在难度徽章上 */
-  --rf-level-a-text: var(--rf-green-700);  --rf-level-a-bg: var(--rf-green-50);
-  --rf-level-b-text: var(--rf-blue-700);   --rf-level-b-bg: var(--rf-blue-50);
-  --rf-level-c-text: var(--rf-purple-700); --rf-level-c-bg: var(--rf-purple-50);
+  /* CEFR 难度：只用在难度徽章上。统一成灰色小标签，不靠颜色区分等级（字母本身就是信息） */
+  --rf-level-a-text: var(--rf-gray-800); --rf-level-a-bg: var(--rf-gray-100);
+  --rf-level-b-text: var(--rf-gray-800); --rf-level-b-bg: var(--rf-gray-100);
+  --rf-level-c-text: var(--rf-gray-800); --rf-level-c-bg: var(--rf-gray-100);
 
   /* 学习日历热力图 */
   --rf-heat-0: #ededed;
-  --rf-heat-1: var(--rf-green-100);
-  --rf-heat-2: #a8e86a;
-  --rf-heat-3: #7acb2e;
-  --rf-heat-4: var(--rf-green-600);
+  --rf-heat-1: #d4d4d4;
+  --rf-heat-2: #a3a3a3;
+  --rf-heat-3: #6b6b6b;
+  --rf-heat-4: var(--rf-gray-900);
 
   /* ---------- 3. 字体 ---------- */
   --rf-font-sans: var(--font-dm-sans), -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;

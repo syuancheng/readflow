@@ -1,6 +1,6 @@
 /**
  * ReadFlow 品牌 logo：三行「文字」流成一道波浪（Read → Flow）。
- * 徽章沿用全站的多邻国式立体按钮（绿色 + 底部深色边）。
+ * 徽章是全站唯一常驻的品牌绿（--rf-brand），界面其余地方都是中性色。
  */
 export default function LogoMark({ size = 32 }: { size?: number }) {
   return (
@@ -10,8 +10,8 @@ export default function LogoMark({ size = 32 }: { size?: number }) {
       style={{
         width: size,
         height: size,
-        background: "var(--duo-green)",
-        borderBottom: `${Math.max(2, Math.round(size / 16))}px solid var(--duo-green-dark)`,
+        // 品牌绿只在 Logo 里出现（P52）；界面其余地方是中性的
+        background: "var(--rf-brand)",
       }}
     >
       <svg viewBox="0 0 24 24" width={size * 0.6} height={size * 0.6} fill="none">
