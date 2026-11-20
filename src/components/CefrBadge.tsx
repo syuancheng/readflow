@@ -37,9 +37,9 @@ const LEVEL_STYLE: Record<CefrLevel, { bg: string; fg: string }> = {
 };
 
 const BAND_COLOR: Record<VocabBandKey, string> = {
-  core: "var(--rf-gray-800)",
-  mid: "var(--rf-gray-500)",
-  advanced: "var(--rf-gray-300)",
+  core: "var(--rf-green-500)",
+  mid: "var(--rf-blue-500)",
+  advanced: "var(--rf-amber-500)",
 };
 
 export default function CefrBadge({ level, score, detail }: Props) {

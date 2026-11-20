@@ -114,17 +114,20 @@
   --rf-success-text: var(--rf-green-700);
   --rf-success-soft: var(--rf-green-50);
 
-  /* CEFR 难度：只用在难度徽章上。统一成灰色小标签，不靠颜色区分等级（字母本身就是信息） */
-  --rf-level-a-text: var(--rf-gray-800); --rf-level-a-bg: var(--rf-gray-100);
-  --rf-level-b-text: var(--rf-gray-800); --rf-level-b-bg: var(--rf-gray-100);
-  --rf-level-c-text: var(--rf-gray-800); --rf-level-c-bg: var(--rf-gray-100);
+  /* CEFR 难度：只用在难度小标签上。标签可以有颜色（A 绿 / B 蓝 / C 琥珀，不用紫色）——颜色规则见 docs/design-system.md「颜色分三类」 */
+  --rf-level-a-text: var(--rf-green-700); --rf-level-a-bg: var(--rf-green-50);
+  --rf-level-b-text: var(--rf-blue-700);  --rf-level-b-bg: var(--rf-blue-50);
+  --rf-level-c-text: var(--rf-amber-700); --rf-level-c-bg: var(--rf-amber-50);
 
   /* 学习日历热力图 */
   --rf-heat-0: #ededed;
-  --rf-heat-1: #d4d4d4;
-  --rf-heat-2: #a3a3a3;
-  --rf-heat-3: #6b6b6b;
-  --rf-heat-4: var(--rf-gray-900);
+  --rf-heat-1: var(--rf-green-100);
+  --rf-heat-2: #a8e86a;
+  --rf-heat-3: #7acb2e;
+  --rf-heat-4: var(--rf-green-600);
+
+  /* 数据图表（柱状图、热力图）：有颜色，用绿——纯灰的统计页很沉闷 */
+  --rf-data: var(--rf-green-500);
 
   /* ---------- 3. 字体 ---------- */
   --rf-font-sans: var(--font-dm-sans), -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;

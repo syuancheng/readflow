@@ -105,7 +105,7 @@ export default async function StatsPage() {
                       background: empty
                         ? "var(--rf-bg-selected)"
                         : isToday
-                          ? "var(--rf-accent)"
+                          ? "var(--rf-data)"
                           : "var(--rf-heat-2)",
                     }}
                   />

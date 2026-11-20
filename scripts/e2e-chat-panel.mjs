@@ -352,7 +352,7 @@ try {
     meta: document.querySelectorAll(".text-list-item .tl-meta").length,
     rows: document.querySelectorAll(".text-list-item").length,
   }));
-  check("C31 首页文本行：没有序号方块；元信息是一行纯文字，只剩难度这一个小标签", rowLook.dots === 0 && rowLook.badgesInRows <= rowLook.rows && rowLook.meta === rowLook.rows && rowLook.rows > 0, JSON.stringify(rowLook));
+  check("C31 首页文本行：没有序号方块；来源、分类、难度、已读状态是小标签（可以有颜色）", rowLook.dots === 0 && rowLook.badgesInRows >= rowLook.rows && rowLook.meta === rowLook.rows && rowLook.rows > 0, JSON.stringify(rowLook));
   await page.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
   const wbox = await page.locator(".duo-card").first().boundingBox();
   check("C32 问卷是一个窄的居中栏（≤ 640px、左右对称），不再只占左半边", wbox && wbox.width <= 640 && Math.abs(wbox.x - (1440 - wbox.width - wbox.x)) <= 2, JSON.stringify(wbox));
