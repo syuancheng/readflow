@@ -2733,7 +2733,7 @@ body {
 .rf-source { font-size: var(--rf-text-xs); color: var(--duo-blue); text-decoration: none; white-space: nowrap; }
 .rf-source:hover { text-decoration: underline; }
 .rf-tb-progress { position: absolute; left: 0; bottom: -1px; width: 100%; height: 2px; }
-.rf-tb-progress i { display: block; height: 100%; background: var(--duo-green); transition: width .12s linear; }
+.rf-tb-progress i { display: block; height: 100%; background: var(--rf-brand); transition: width .12s linear; }
 
 /* 两列 grid：目录 | 整个 Reader（含它自己的正文+批注栏）。展开只挤压宽度，
    不改文本内容，data-pid 锚点与字符坐标契约不变。 */
