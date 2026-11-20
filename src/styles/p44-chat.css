@@ -453,7 +453,7 @@
 .rf-menu-del:hover { background: var(--rf-danger-soft); color: var(--rf-danger-text); }
 .rf-menu-item:focus-visible,
 .rf-menu-del:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
-.rf-menu-add { display: flex; align-items: center; gap: var(--rf-space-1); padding: var(--rf-space-1); }
+.rf-menu-add { display: flex; flex-wrap: wrap; align-items: center; gap: var(--rf-space-1); padding: 0; margin-top: var(--rf-space-1); }
 .rf-menu-input {
   flex: 1;
   min-width: 0;

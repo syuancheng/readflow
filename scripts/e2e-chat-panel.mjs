@@ -341,7 +341,7 @@ try {
   await page.locator("input[type=checkbox]").first().check();
   await page.waitForTimeout(300);
   const checkedBg = await page.evaluate(() => getComputedStyle(document.querySelector("input[type=checkbox]")).backgroundColor);
-  check("C30 下拉和复选框是统一的自绘样式（去掉浏览器默认外观，选中是墨绿填充）", ctl.selAppearance === "none" && ctl.selArrow && ctl.cbAppearance === "none" && ctl.cbRadius === "4px" && checkedBg === "rgb(31, 77, 54)", JSON.stringify({ ...ctl, checkedBg }));
+  check("C30 下拉和复选框是统一的自绘样式（去掉浏览器默认外观，选中是墨绿填充）", ctl.selAppearance === "none" && ctl.selArrow && ctl.cbAppearance === "none" && ctl.cbRadius === "4px" && checkedBg === "rgb(21, 58, 41)", JSON.stringify({ ...ctl, checkedBg }));
   await page.screenshot({ path: path.join(SHOTS, "controls-welcome.png") });
 
   // ===== P54：首页文本行精简、问卷版式 =====

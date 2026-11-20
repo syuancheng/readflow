@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReadFlow 色板预览</title>
+<style>
+:root{--ink:#2a3326;--sub:#5b6853;--line:#e0e8da;--forest:#153a29;--forest2:#1f4d36}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.6 -apple-system,"PingFang SC",sans-serif;color:var(--ink);background:#fff}
+main{max-width:980px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:40px 0 4px}
+p.n{margin:0 0 14px;color:var(--sub);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.sw{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.sw i{display:block;height:64px}
+.sw div{padding:8px 10px;font-size:12px;line-height:1.5}
+.sw b{display:block;font-size:13px}.sw code{color:var(--sub)}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.btn{font:600 14px inherit;font-family:inherit;border:1px solid transparent;border-radius:10px;padding:8px 18px;cursor:pointer}
+.tag{font-size:12px;padding:2px 8px;border-radius:6px;font-weight:600}
+.av{width:40px;height:40px;border-radius:50%;color:#fff;display:grid;place-items:center;font-weight:700}
+.panel{border:1px solid var(--line);border-radius:12px;padding:16px;background:#fff}
+.u{box-shadow:inset 0 -3px 0 #58cc02;background:#d7ffb8}
+.heat{display:flex;gap:6px}.heat span{width:36px;height:36px;border-radius:6px}
+</style></head><body><main>
+<h1>ReadFlow 色板（P56 草案）</h1>
+<p class="n">灰色全部带一点绿；黑色按钮改成墨绿；亮绿只留给 Logo、导航下划线、划词下划线、+1 词等「品牌点缀」。点击色块可复制色值。</p>
+
+<h2>1. 品牌绿 & 墨绿主色</h2>
+<p class="n">亮绿 = 品牌点缀；墨绿 = 按钮等控件（替代原来的黑色）。</p>
+<div class="grid" id="g1"></div>
+
+<h2>2. 带绿味的灰（替代纯灰）</h2>
+<p class="n">白 → 极浅绿灰用于背景、悬停、选中；中间用于边框；深色用于文字。</p>
+<div class="grid" id="g2"></div>
+
+<h2>3. 语义角色</h2>
+<div class="grid" id="g3"></div>
+
+<h2>4. 辅助色（只给标签、图表、头像）</h2>
+<div class="grid" id="g4"></div>
+
+<h2>5. 实际效果</h2>
+<div class="panel">
+<div class="row" style="margin-bottom:14px">
+<button class="btn" style="background:#153a29;color:#fff">主按钮</button>
+<button class="btn" style="background:#1f4d36;color:#fff">主按钮 悬停</button>
+<button class="btn" style="background:#fff;color:#2a3326;border-color:#cdd7c5">次按钮</button>
+<button class="btn" style="background:#f6f8f4;color:#2a3326;border-color:#e0e8da">悬停底色</button>
+<button class="btn" style="background:#fff;color:#c62828;border-color:#cdd7c5">危险</button>
+</div>
+<div class="row" style="margin-bottom:14px">
+<span class="tag" style="background:#f1fbe7;color:#3f7f00">A 难度 / 分类 / 已建卡</span>
+<span class="tag" style="background:#e8f6fe;color:#0a6fa3">B 难度</span>
+<span class="tag" style="background:#fff4d6;color:#b35500">C 难度</span>
+<span class="tag" style="background:#edf2e9;color:#5b6853">来源 / 阅读%</span>
+<span style="color:#58cc02;font-weight:700">+1 词</span>
+<span>阅读中「<span class="u">查过的词</span>」下划线</span>
+</div>
+<div class="row" style="margin-bottom:14px">
+<span style="padding:8px 4px;box-shadow:inset 0 -3px 0 #58cc02;font-weight:600">导航（当前）</span>
+<span style="padding:8px 4px;color:#5b6853">导航</span>
+<span style="padding:6px 12px;background:#edf2e9;border-radius:8px">选中行</span>
+<span style="padding:6px 12px;background:#f6f8f4;border-radius:8px">悬停行</span>
+</div>
+<div class="row" style="margin-bottom:14px"><span class="n" style="margin:0">头像（按昵称取色）：</span>
+<div class="av" style="background:#3f7f00">赵</div><div class="av" style="background:#0a6fa3">钱</div><div class="av" style="background:#b35500">孙</div><div class="av" style="background:#c62828">李</div><div class="av" style="background:#0f766e">周</div><div class="av" style="background:#be3a7d">吴</div></div>
+<div class="row"><span class="n" style="margin:0">统计热力图：</span>
+<div class="heat"><span style="background:#e8eee3"></span><span style="background:#d7ffb8"></span><span style="background:#a8e86a"></span><span style="background:#7acb2e"></span><span style="background:#58a700"></span></div></div>
+</div>
+
+<script>
+const S=(id,a)=>{document.getElementById(id).innerHTML=a.map(([n,h,r])=>{const c=cr(h,'#ffffff'),d=cr(h,'#2a3326');
+return `<div class="sw" onclick="navigator.clipboard&&navigator.clipboard.writeText('${h}')"><i style="background:${h}"></i><div><b>${n}</b><code>${h}</code><br>${r||''}<br><code>白字 ${c} · 墨字 ${d}</code></div></div>`}).join('')};
+function lum(h){const v=[1,3,5].map(i=>parseInt(h.substr(i,2),16)/255).map(x=>x<=.03928?x/12.92:Math.pow((x+.055)/1.055,2.4));return .2126*v[0]+.7152*v[1]+.0722*v[2]}
+function cr(a,b){const x=lum(a),y=lum(b);return ((Math.max(x,y)+.05)/(Math.min(x,y)+.05)).toFixed(1)}
+S('g1',[['品牌亮绿','#58cc02','Logo / 下划线 / +1 词'],['亮绿深边','#58a700','热力图最深'],['亮绿浅底','#d7ffb8','划词/悬停高亮'],['墨绿 主色','#153a29','按钮、选中勾选'],['墨绿 悬停','#1f4d36','按钮悬停'],['绿文字','#3f7f00','成功/A 级文字'],['绿标签底','#f1fbe7','A / 已建卡']]);
+S('g2',[['0 白','#ffffff','页面、卡片'],['50','#f6f8f4','悬停、表头'],['100','#edf2e9','选中、标签底'],['200','#e0e8da','普通边框'],['300','#cdd7c5','输入框边框'],['400','#a7b39d','禁用'],['500','#84917a','占位'],['600','#5b6853','次要文字'],['800','#2a3326','正文'],['900','#1c2319','最深']]);
+S('g3',[['文字 主','#2a3326'],['文字 次','#5b6853'],['边框','#e0e8da'],['输入框边框','#cdd7c5'],['焦点环','#1cb0f6'],['危险','#ea2b2b'],['危险文字','#c62828'],['危险底','#ffecec']]);
+S('g4',[['蓝 B 级','#0a6fa3','文字'],['蓝底','#e8f6fe'],['琥珀 C 级','#b35500','文字'],['琥珀底','#fff4d6'],['头像青','#0f766e'],['头像粉','#be3a7d']]);
+</script></main></body></html>
