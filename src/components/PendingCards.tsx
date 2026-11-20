@@ -56,11 +56,14 @@ export default function PendingCards({
   articleKey,
   focusWordId,
   onTotal,
+  onPushed,
 }: {
   /** 左侧选中的文章（textId）；空 = 全部 */
   articleKey: string;
   focusWordId?: string;
   onTotal: (n: number) => void;
+  /** 推送全部成功（没有失败）后通知上层：上层负责「退出」这个页面（切到已导出 / 显示结果提示） */
+  onPushed?: (r: { done: number; audioMissing: number; remaining: number }) => void;
 }) {
   const [data, setData] = useState<PendingData | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -81,8 +84,9 @@ export default function PendingCards({
   const [job, setJob] = useState<Job | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const defaultsApplied = useRef(false);
+  const notified = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<PendingData | null> => {
     try {
       const res = await fetch("/api/cards/pending");
       if (!res.ok) throw new Error();
@@ -97,8 +101,10 @@ export default function PendingCards({
         if (d.defaults.chapterId) setChapterId(d.defaults.chapterId);
         if (d.activeJobId) setJobId(d.activeJobId);
       }
+      return d;
     } catch {
       setLoadError("没能加载待推送的卡片，刷新页面再试");
+      return null;
     }
   }, [onTotal]);
 
@@ -141,8 +147,14 @@ export default function PendingCards({
         setJob(j);
         if (j.status !== "running") {
           setJobId(null);
-          void load();
           setSets({});
+          void load().then((d) => {
+            // 全部推送成功：不要把推送面板和满格进度条留在原地，交给上层收尾
+            if (j.status === "done" && j.failed === 0 && j.done > 0 && !notified.current) {
+              notified.current = true;
+              onPushed?.({ done: j.done, audioMissing: j.audioMissing ?? 0, remaining: d?.wordCount ?? 0 });
+            }
+          });
         }
       } catch {
         /* 下一次再查 */
@@ -204,6 +216,7 @@ export default function PendingCards({
       return setBarError(d?.error ?? "推送失败");
     }
     setJob(null);
+    notified.current = false;
     setJobId(d.jobId);
   }
 
@@ -286,7 +299,8 @@ export default function PendingCards({
             <span className="pc-note">墨墨里的卡片删不掉，推送前请先检查。</span>
           </div>
           {barError && <p className="pc-error" role="alert">{barError}</p>}
-          {job && (
+          {/* 进度条只在推送过程中出现；推完不留满格的条。全部成功由上层收尾，这里只处理「还没完 / 有失败」 */}
+          {job && job.status === "running" && (
             <div className="pc-progress" aria-live="polite">
               <div className="duo-progress-wrap">
                 <div className="duo-progress">
@@ -294,15 +308,21 @@ export default function PendingCards({
                 </div>
               </div>
               <p>
-                {job.status === "running" ? "正在推送：" : job.status === "done" ? "推送完成：" : "已停下："}
+                正在推送：已推送 {job.done} / 共 {job.total}
+                {job.failed > 0 ? `，${job.failed} 张失败` : ""}
+              </p>
+            </div>
+          )}
+          {job && job.status !== "running" && (job.failed > 0 || job.error || job.status !== "done") && (
+            <div className="pc-progress" aria-live="polite">
+              <p>
+                {job.status === "done" ? "推送完成，但有失败：" : "已停下："}
                 已推送 {job.done} / 共 {job.total}
                 {job.failed > 0 ? `，${job.failed} 张失败` : ""}
               </p>
-              {job.status !== "running" && (job.audioMissing ?? 0) > 0 && (
-                <p className="rf-audio-missing">有 {job.audioMissing} 张卡没配上音频</p>
-              )}
+              {(job.audioMissing ?? 0) > 0 && <p className="rf-audio-missing">有 {job.audioMissing} 张卡没配上音频</p>}
               {job.error && <p className="pc-error">{job.error}</p>}
-              {job.status !== "running" && job.failures.length > 0 && (
+              {job.failures.length > 0 && (
                 <div>
                   <ul className="pc-failures">
                     {job.failures.map((f) => (

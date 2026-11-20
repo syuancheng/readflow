@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
 import { speak } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
@@ -107,6 +108,7 @@ export default function WordList({
   cardsEnabled = false,
   initialStatus,
   focusWordId,
+  pushedNotice,
 }: {
   words: WordRow[];
   articles: ArticleOption[];
@@ -114,11 +116,17 @@ export default function WordList({
   cardsEnabled?: boolean;
   /** URL ?status=pending 直接打开待推送 */
   initialStatus?: string;
+  /** 刚把待推送的卡推完（URL ?pushed=）：在页面上方显示一行结果 */
+  pushedNotice?: { done: number; audioMissing: number };
   /** URL ?word= 直接展开这个词 */
   focusWordId?: string;
 }) {
   const [words, setWords] = useState(initial);
-  const [status, setStatus] = useState<StatusFilter>(cardsEnabled && initialStatus === "pending" ? "pending" : "all");
+  const router = useRouter();
+  const [notice, setNotice] = useState(pushedNotice ?? null);
+  const [status, setStatus] = useState<StatusFilter>(
+    cardsEnabled && initialStatus === "pending" ? "pending" : initialStatus === "done" ? "done" : "all",
+  );
   const [pendingTotal, setPendingTotal] = useState<number | null>(null);
   useEffect(() => {
     if (!cardsEnabled) return;
@@ -290,8 +298,28 @@ export default function WordList({
           </div>
         </div>
 
+        {notice && (
+          <div className="rf-result" role="status">
+            <span className="rf-result-icon"><Icon name="check" size={16} /></span>
+            <span className="rf-result-text">
+              已推送 {notice.done} 张卡到墨墨
+              {notice.audioMissing > 0 ? `，其中 ${notice.audioMissing} 张没配上音频` : ""}。
+            </span>
+            <button type="button" className="rf-btn-text" onClick={() => setNotice(null)}>知道了</button>
+          </div>
+        )}
+
         {status === "pending" ? (
-          <PendingCards articleKey={article} focusWordId={focusWordId} onTotal={setPendingTotal} />
+          <PendingCards
+            articleKey={article}
+            focusWordId={focusWordId}
+            onTotal={setPendingTotal}
+            onPushed={(r) => {
+              // 全部推完：退出「待推送」，切到「已导出」并显示一行结果；还有没推的词就留在原地只显示结果
+              if (r.remaining === 0) router.replace(`/words?status=done&pushed=${r.done}&missing=${r.audioMissing}`);
+              else setNotice({ done: r.done, audioMissing: r.audioMissing });
+            }}
+          />
         ) : (
         <div className="wl-table">
           {/* 工具条：平时只有「选择 · 数量 · 排序」；选择模式下换成批量操作 */}

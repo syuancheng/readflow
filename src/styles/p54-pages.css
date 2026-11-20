@@ -1,0 +1,37 @@
+/*
+ * P54：页面级修复（第三阶段）。只用设计令牌，间距走 4px 阶梯。
+ * - 推送完成后的结果提示（.rf-result）：一行小字 + 绿色 ✓（成功是状态，绿色只在这里表示它），没有进度条、没有大面板。
+ * - 首页文本列表行（.tl-meta）：元信息改成一行纯文字，不再是 5 种小徽章。
+ */
+
+/* ===== 结果提示 ===== */
+.rf-result {
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-3);
+  margin-bottom: var(--rf-space-3);
+  padding: var(--rf-space-2) var(--rf-space-3);
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-md);
+  background: var(--rf-bg-surface);
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+}
+.rf-result-icon { display: inline-flex; color: var(--rf-success-text); }
+.rf-result-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* ===== 首页文本列表行 ===== */
+.tl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rf-space-1) var(--rf-space-3);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-text-secondary);
+}
+.tl-done { color: var(--rf-success-text); }
+.tl-go { margin-left: auto; font-size: var(--rf-text-sm); font-weight: 600; color: var(--rf-text-secondary); }
+.text-list-item:hover .tl-go,
+.text-list-item:focus-within .tl-go { color: var(--rf-text-primary); }

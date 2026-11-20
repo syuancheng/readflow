@@ -9,6 +9,7 @@
 @import "../styles/p49-scrollbar.css";
 @import "../styles/p51-wordlib.css";
 @import "../styles/p53-controls.css";
+@import "../styles/p54-pages.css";
 
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）
@@ -3198,7 +3199,6 @@ a:focus-visible,
 .rf-survey-select {
   display: block;
   width: 100%;
-  max-width: 400px;
   height: 44px;
   padding: 0 12px;
   border: 1px solid var(--rf-gray-200);
