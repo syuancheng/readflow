@@ -5,6 +5,7 @@ import Link from "next/link";
 import CefrBadge from "./CefrBadge";
 import TextManageDialog, { CATEGORIES, type TextMeta } from "./TextManageDialog";
 import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
+import Icon from "@/components/Icon";
 
 export type TextCardRow = {
   id: string;
@@ -183,7 +184,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
       {shown.length === 0 ? (
         hasFilter ? (
           <div className="duo-card duo-empty">
-            <div className="duo-empty-icon">🔍</div>
+            <div className="duo-empty-icon"><Icon name="search" size={40} /></div>
             <p className="text-lg font-bold mb-2">这个筛选条件下没有文本</p>
             <p className="text-sm text-ink-faint">
               <button
@@ -200,7 +201,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
           </div>
         ) : (
           <div className="duo-card duo-empty">
-            <div className="duo-empty-icon">🎯</div>
+            <div className="duo-empty-icon"><Icon name="inbox" size={40} /></div>
             <p className="text-lg font-bold mb-2">开始你的第一关</p>
             <p className="text-sm text-ink-faint">在右边粘贴一段文字，或上传一个 txt 文件</p>
           </div>
@@ -252,7 +253,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
                   title="编辑：重命名 / 分类 / 删除"
                   aria-label={`编辑文本 ${t.title}`}
                 >
-                  ✏️
+                  <Icon name="pencil" size={16} />
                 </button>
               </li>
             );

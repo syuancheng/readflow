@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Icon from "@/components/Icon";
 
 // 导出走词库页右上角按钮，避免顶部/底部再加一个重复入口
 const ITEMS = [
-  { href: "/", label: "阅读", icon: "📖" },
-  { href: "/words", label: "词库", icon: "⚡" },
-  { href: "/stats", label: "战绩", icon: "🏆" },
+  { href: "/", label: "阅读", icon: "book" as const },
+  { href: "/words", label: "词库", icon: "bookmark" as const },
+  { href: "/stats", label: "战绩", icon: "chart" as const },
 ];
 
 export default function BottomNav() {
@@ -32,7 +33,7 @@ export default function BottomNav() {
               className={`duo-bottom-link ${active ? "duo-bottom-link-active" : ""}`}
               aria-current={active ? "page" : undefined}
             >
-              <span className="text-2xl leading-none mb-1">{item.icon}</span>
+              <span className="mb-1"><Icon name={item.icon} size={22} /></span>
               <span className="text-xs font-bold">{item.label}</span>
             </Link>
           );

@@ -2098,7 +2098,7 @@ function DictView({
         <div className="flex items-center gap-1 mt-2">
           <span className="text-xs font-bold text-ink-faint">柯林斯</span>
           {"★".repeat(Math.min(entry.collins, 5)).split("").map((s, i) => (
-            <span key={i} className="text-xs" style={{ color: "var(--duo-orange)" }}>{s}</span>
+            <span key={i} className="text-xs" style={{ color: "var(--rf-text-secondary)" }}>{s}</span>
           ))}
         </div>
       )}

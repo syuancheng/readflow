@@ -324,6 +324,26 @@ try {
   check("C25 首页只留「导入文本」：没有「我的战绩」，右栏不钉住、不自己滚动（整页只有一条滚动条）", !home.hasStats && home.position === "static" && home.overflowY === "visible", JSON.stringify(home));
   await page.screenshot({ path: path.join(SHOTS, "footer-home-1440.png"), fullPage: true });
 
+  // ===== P53：图标统一（没有彩色 emoji）、表单控件统一（不是浏览器自带的样子） =====
+  const emojiRe = /\p{Emoji_Presentation}/u;
+  const found = {};
+  for (const [name, url] of [["首页", "/"], ["战绩", "/stats"], ["词库", "/words"], ["问卷", "/welcome"]]) {
+    await page.goto(`${BASE}${url}`, { waitUntil: "networkidle" });
+    found[name] = (await page.locator("body").innerText()).match(new RegExp(emojiRe.source, "gu")) ?? [];
+  }
+  check("C29 首页、战绩、词库、问卷里没有彩色 emoji（都是统一的线条图标）", Object.values(found).every((a) => a.length === 0), JSON.stringify(found));
+  await page.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
+  const ctl = await page.evaluate(() => {
+    const sel = document.querySelector("select"), cb = document.querySelector("input[type=checkbox]");
+    const gs = (e) => getComputedStyle(e);
+    return { selAppearance: gs(sel).appearance, selArrow: gs(sel).backgroundImage.includes("svg"), cbAppearance: gs(cb).appearance, cbRadius: gs(cb).borderTopLeftRadius };
+  });
+  await page.locator("input[type=checkbox]").first().check();
+  await page.waitForTimeout(300);
+  const checkedBg = await page.evaluate(() => getComputedStyle(document.querySelector("input[type=checkbox]")).backgroundColor);
+  check("C30 下拉和复选框是统一的自绘样式（去掉浏览器默认外观，选中是近黑填充）", ctl.selAppearance === "none" && ctl.selArrow && ctl.cbAppearance === "none" && ctl.cbRadius === "4px" && checkedBg === "rgb(38, 38, 38)", JSON.stringify({ ...ctl, checkedBg }));
+  await page.screenshot({ path: path.join(SHOTS, "controls-welcome.png") });
+
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });
   await page.waitForTimeout(400);

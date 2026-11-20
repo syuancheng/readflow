@@ -12,6 +12,7 @@ import {
 } from "@/lib/profile-form";
 import type { NavId } from "@/lib/settings-form";
 import SettingsDialog from "./SettingsDialog";
+import Icon from "@/components/Icon";
 
 /**
  * 右上角用户菜单（仿 Readlang）：头像按钮 + 下拉面板。
@@ -209,14 +210,14 @@ export default function ProfileMenu() {
           <p className="pm-section-title">账户</p>
           <button className="pm-row" role="menuitem" onClick={() => openSettings("profile")}>
             <span className="pm-row-label">
-              👤 个人资料
+              <span className="pm-row-title"><Icon name="user" />个人资料</span>
               <span className="pm-row-hint">昵称 · 头像 · 签名</span>
             </span>
             <span className="pm-row-arrow" aria-hidden>›</span>
           </button>
           <button className="pm-row" role="menuitem" onClick={() => openSettings("models")}>
             <span className="pm-row-label">
-              ⚙ 设置
+              <span className="pm-row-title"><Icon name="settings" />设置</span>
               <span className="pm-row-hint">AI 模型 · 墨墨 · 浏览器插件</span>
             </span>
             <span className="pm-row-arrow" aria-hidden>›</span>
@@ -231,14 +232,14 @@ export default function ProfileMenu() {
             }}
           >
             <span className="pm-row-label">
-              🔑 账号与安全
+              <span className="pm-row-title"><Icon name="key" />账号与安全</span>
               <span className="pm-row-hint">修改密码</span>
             </span>
             <span className="pm-row-arrow" aria-hidden>›</span>
           </button>
           <button className="pm-row" role="menuitem" onClick={logout}>
             <span className="pm-row-label">
-              ↪ 退出登录
+              <span className="pm-row-title"><Icon name="logout" />退出登录</span>
               <span className="pm-row-hint">下次进入需要重新输入密码</span>
             </span>
             <span className="pm-row-arrow" aria-hidden>›</span>

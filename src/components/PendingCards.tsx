@@ -11,6 +11,7 @@ import CardPreview from "@/components/CardPreview";
 import CardEditor from "@/components/CardEditor";
 import type { PreviewModel } from "@/lib/cards/render";
 import type { CardSpec } from "@/lib/cards/spec";
+import Icon from "@/components/Icon";
 
 type PendingCard = { cardId: string; setId: string; seq: number; needsReview: string | null; edited: boolean };
 type PendingWord = { wordId: string; lemma: string; displayForm: string; phonetic: string | null; isPhrase: boolean; cards: PendingCard[] };
@@ -321,7 +322,7 @@ export default function PendingCards({
       {/* ---------- 词列表 ---------- */}
       {texts.length === 0 ? (
         <div className="duo-empty">
-          <div className="duo-empty-icon">🃏</div>
+          <div className="duo-empty-icon"><Icon name="cards" size={40} /></div>
           <p className="text-lg font-bold mb-2">没有待推送的卡片</p>
           <p className="text-sm text-ink-faint">在阅读页点词，查看讲解后点「＋ 做成卡片」</p>
         </div>
