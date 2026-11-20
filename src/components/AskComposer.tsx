@@ -20,6 +20,7 @@ export default function AskComposer({
   onMakeCard,
   quote,
   onClearQuote,
+  prefill,
 }: {
   presets: AskPreset[];
   /** AI 正在回答：菜单里的问题和发送暂停，输入框仍可输入 */
@@ -33,6 +34,8 @@ export default function AskComposer({
   /** 用户在 AI 回答里划选、要随这次提问一起发的引用；显示在输入框上方 */
   quote?: { text: string; turnIndex: number } | null;
   onClearQuote?: () => void;
+  /** 从失败轮次「修改」过来的预填文字：填进输入框、聚焦、光标到末尾，不自动发送。序号变化才生效 */
+  prefill?: { text: string; seq: number } | null;
 }) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
@@ -42,6 +45,18 @@ export default function AskComposer({
   const root = useRef<HTMLDivElement>(null);
   const plus = useRef<HTMLButtonElement>(null);
   const quick = useQuickQuestions();
+
+  // 失败轮次点「修改」：把原问题填回输入框，聚焦并把光标放到末尾；用户改完自己发
+  useEffect(() => {
+    if (!prefill) return;
+    setText(prefill.text);
+    const el = box.current;
+    if (el) {
+      el.focus();
+      const end = prefill.text.length;
+      el.setSelectionRange(end, end);
+    }
+  }, [prefill?.seq]); // 只认序号：文本相同但再次点「修改」时也要重新触发
 
   // 随内容增高，上限 160px，超过内部滚动
   useEffect(() => {

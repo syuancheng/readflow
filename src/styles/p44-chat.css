@@ -57,6 +57,26 @@
   overflow-wrap: anywhere;
 }
 
+/* 失败轮次：用户问题气泡下的「重试 / 复制 / 修改」，贴气泡右缘、次要色 */
+.rf-turn-actions {
+  align-self: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--rf-space-1);
+  margin-top: calc(-1 * var(--rf-space-1));
+}
+.rf-turn-action {
+  padding: 2px var(--rf-space-2);
+  border-radius: var(--rf-radius-full);
+  font-size: var(--rf-text-xs);
+  font-weight: 600;
+  color: var(--rf-text-secondary);
+  cursor: pointer;
+  transition: background var(--rf-duration-fast) var(--rf-ease), color var(--rf-duration-fast) var(--rf-ease);
+}
+.rf-turn-action:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+
 /* 用户气泡里的引用行：这次提问针对 AI 回答里的哪段话，回看也能追溯 */
 .rf-bubble-quote {
   display: flex;

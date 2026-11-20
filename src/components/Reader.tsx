@@ -1597,6 +1597,8 @@ function PickCard({
   };
   // 用户在 AI 回答里划选的引用：先进输入框上方的 chip，发送时才随问题一起交给模型
   const [askQuote, setAskQuote] = useState<{ text: string; turnIndex: number } | null>(null);
+  // 失败轮次点「修改」：把原问题填回输入框。seq 每次自增，文本相同也能再次触发
+  const [prefill, setPrefill] = useState<{ text: string; seq: number } | null>(null);
   const busy = turns.some((t) => t.status === "loading" || t.status === "streaming");
   const hasDefault = turns.some((t) => !t.ask);
 
@@ -1664,6 +1666,7 @@ function PickCard({
     turnsRef.current = turnsFrom(initialGloss);
     setTurns(turnsRef.current);
     setAskQuote(null); // 引用只属于当前这条批注的对话，换词就清掉
+    setPrefill(null); // 预填同理，不把上一个词的问题带到这个词
 
     // 回看：词典 / AI 都不查，直接展示存下来的结果。
     // P34 F4：只额外取一次这条批注保存过的回答，给每段对上 answerId 和当时的反馈，
@@ -1882,6 +1885,14 @@ function PickCard({
     void triggerAI(req);
   }
 
+  /** 失败轮次点「修改」：把这条问题填回输入框，用户改完自己发；原失败轮次保留 */
+  function editQuestion(index: number) {
+    const t = turnsRef.current[index];
+    const q = t?.req?.ask ?? t?.ask ?? "";
+    if (!q) return;
+    setPrefill((prev) => ({ text: q, seq: (prev?.seq ?? 0) + 1 }));
+  }
+
   /** 做成卡片：对话里追加一条消息和状态块（做卡本身在服务端后台跑，切走也不中断） */
   function makeCard() {
     if (!pick.contextId || busy) return;
@@ -2033,6 +2044,7 @@ function PickCard({
                     }
                     onMakeCard={makeCard}
                     onRetry={() => retry(i)}
+                    onEditQuestion={() => editQuestion(i)}
                     onRate={(r) => void rate(i, r)}
                     onReason={(r: string | null) => {
                       if (!t.feedback) return;
@@ -2059,6 +2071,7 @@ function PickCard({
         onMakeCard={makeCard}
         quote={askQuote}
         onClearQuote={() => setAskQuote(null)}
+        prefill={prefill}
       />
     </div>
   );

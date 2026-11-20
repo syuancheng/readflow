@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import FeedbackRow from "@/components/FeedbackRow";
 import MarkdownText from "@/components/MarkdownText";
 import SelectionAskBar, { type SelectionAsk } from "@/components/SelectionAskBar";
@@ -32,6 +32,7 @@ export default function ChatTurn({
   suggestion,
   onMakeCard,
   onRetry,
+  onEditQuestion,
   onRate,
   onReason,
   onQuote,
@@ -44,6 +45,8 @@ export default function ChatTurn({
   suggestion: string | null;
   onMakeCard: () => void;
   onRetry: () => void;
+  /** 把这条问题填回输入框，让用户改完自己发（失败态专用） */
+  onEditQuestion?: () => void;
   onRate: (r: Feedback) => void;
   onReason: (r: string | null) => void;
   /** 划选这段回答里的文字并点「提问」：把选中的原话交给上层当引用 */
@@ -52,8 +55,25 @@ export default function ChatTurn({
   // 「暂不需要」只对这一条建议生效：关掉后这条回答下面不再出现
   const [dismissed, setDismissed] = useState(false);
   const [selection, setSelection] = useState<SelectionAsk | null>(null);
+  const [copied, setCopied] = useState(false);
   const replyRef = useRef<HTMLDivElement>(null);
   const failed = turn.status === "error" || (turn.status === "done" && isNotAGloss(turn.text));
+
+  // 「已复制」一闪即逝，重设计时避免连点后提前消失
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  async function copyQuestion() {
+    try {
+      await navigator.clipboard.writeText(question);
+      setCopied(true);
+    } catch {
+      /* 剪贴板不可用就什么都不做：失败态还有「修改」可以手动复制 */
+    }
+  }
 
   // 只在已完成的回答里允许划选；选区必须完全落在本条回答容器内，避免跨轮/跨正文
   const captureSelection = useCallback(() => {
@@ -97,6 +117,17 @@ export default function ChatTurn({
         )}
         {question}
       </div>
+      {failed && (
+        <div className="rf-turn-actions" role="group" aria-label="问题操作">
+          <button type="button" className="rf-turn-action" onClick={onRetry}>重试</button>
+          <button type="button" className="rf-turn-action" onClick={() => void copyQuestion()}>
+            {copied ? "已复制" : "复制"}
+          </button>
+          {onEditQuestion && (
+            <button type="button" className="rf-turn-action" onClick={onEditQuestion}>修改</button>
+          )}
+        </div>
+      )}
       <div className="rf-ai-reply" ref={replyRef} onMouseUp={captureSelection}>
         {(turn.status === "loading" || turn.status === "streaming" || failed) && (
           <div className="rf-chat-status">
