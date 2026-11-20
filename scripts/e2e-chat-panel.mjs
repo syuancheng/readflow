@@ -344,6 +344,20 @@ try {
   check("C30 下拉和复选框是统一的自绘样式（去掉浏览器默认外观，选中是近黑填充）", ctl.selAppearance === "none" && ctl.selArrow && ctl.cbAppearance === "none" && ctl.cbRadius === "4px" && checkedBg === "rgb(38, 38, 38)", JSON.stringify({ ...ctl, checkedBg }));
   await page.screenshot({ path: path.join(SHOTS, "controls-welcome.png") });
 
+  // ===== P54：首页文本行精简、问卷版式 =====
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const rowLook = await page.evaluate(() => ({
+    dots: document.querySelectorAll(".duo-level-dot").length,
+    badgesInRows: document.querySelectorAll(".text-list-item .duo-badge").length,
+    meta: document.querySelectorAll(".text-list-item .tl-meta").length,
+    rows: document.querySelectorAll(".text-list-item").length,
+  }));
+  check("C31 首页文本行：没有序号方块；元信息是一行纯文字，只剩难度这一个小标签", rowLook.dots === 0 && rowLook.badgesInRows <= rowLook.rows && rowLook.meta === rowLook.rows && rowLook.rows > 0, JSON.stringify(rowLook));
+  await page.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
+  const wbox = await page.locator(".duo-card").first().boundingBox();
+  check("C32 问卷是一个窄的居中栏（≤ 640px、左右对称），不再只占左半边", wbox && wbox.width <= 640 && Math.abs(wbox.x - (1440 - wbox.width - wbox.x)) <= 2, JSON.stringify(wbox));
+  await page.screenshot({ path: path.join(SHOTS, "welcome-1440.png") });
+
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });
   await page.waitForTimeout(400);

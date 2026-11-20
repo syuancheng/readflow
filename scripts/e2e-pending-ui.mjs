@@ -174,6 +174,29 @@ try {
   check("V7 「修改」打开编辑器、「取消」关闭；编辑器里的按钮也不再是 3D 厚按钮", (await page.locator(".ce-form").count()) === 0 && ed.thick === 0);
   await page.locator(".cp-flip").first().click();
   check("V8 「看提示」「看答案」翻面仍然可用", (await page.locator(".cp-flip").first().getAttribute("aria-pressed")) === "true");
+  // ===== P54：推送完成后「退出」待推送页 =====
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${BASE}/words?status=pending`, { waitUntil: "networkidle" });
+  await page.locator("select.duo-input").first().selectOption({ label: "测试牌组" });
+  await page.waitForTimeout(400);
+  await page.locator("select.duo-input").nth(1).selectOption({ index: 1 });
+  await page.getByRole("button", { name: /推送全部/ }).click();
+  await page.waitForURL(/status=done/, { timeout: 30000 });
+  await page.locator(".rf-result").waitFor({ timeout: 10000 });
+  const done = await page.evaluate(() => ({
+    bar: document.querySelectorAll(".duo-progress, .duo-progress-fill").length,
+    emptyPending: document.body.innerText.includes("没有待推送的卡片"),
+    notice: document.querySelector(".rf-result")?.textContent ?? "",
+    activeSide: document.querySelector(".wl-side-item-on")?.textContent ?? "",
+    pushBtn: [...document.querySelectorAll("button")].some((b) => /推送全部/.test(b.textContent || "")),
+    exportedTag: document.querySelectorAll(".wl-export-tag").length,
+  }));
+  check("V11 推完后离开「待推送」：切到「已导出」，页面上没有进度条、没有「没有待推送的卡片」、没有推送按钮", done.bar === 0 && !done.emptyPending && !done.pushBtn && done.activeSide.includes("已导出"), JSON.stringify(done));
+  check("V12 页面上方一行结果：「已推送 3 张卡到墨墨」（有音频没配上会注明）", /已推送 3 张卡到墨墨/.test(done.notice), done.notice);
+  check("V13 词的导出状态是最新的（行里出现「墨墨 ✓」）", done.exportedTag >= 1);
+  await page.screenshot({ path: path.join(SHOTS, "pushed-done-1440.png") });
+  await page.getByRole("button", { name: "知道了" }).click();
+  check("V14 点「知道了」关掉结果提示", (await page.locator(".rf-result").count()) === 0);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   check("V9 390px 无横向溢出", await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));

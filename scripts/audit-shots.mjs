@@ -158,7 +158,7 @@ try {
   await page.waitForTimeout(400);
   await page.locator("select.duo-input").nth(1).selectOption({ index: 1 });
   await page.getByRole("button", { name: /推送全部/ }).click();
-  await page.getByText(/推送完成/).waitFor({ timeout: 30000 });
+  await page.waitForURL(/status=done/, { timeout: 30000 });
   await page.waitForTimeout(500);
   await shot(page, "07-pushed.png");
   // 阅读页：点词 + AI 回答

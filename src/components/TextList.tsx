@@ -39,12 +39,7 @@ function ReadBadge({ ratio }: { ratio: number | null }) {
   if (ratio === null || ratio < 0.02) return null;
   const pct = Math.round(Math.min(ratio, 1) * 100);
   return (
-    <span
-      className="duo-badge"
-      title="上次离开时的滚动位置；往回翻会下降。100% 不等于已读完"
-    >
-      已读 {pct}%
-    </span>
+    <span title="上次离开时的滚动位置；往回翻会下降。100% 不等于已读完">已读 {pct}%</span>
   );
 }
 
@@ -52,7 +47,7 @@ function ReadBadge({ ratio }: { ratio: number | null }) {
 function CompletedBadge({ completedAt }: { completedAt: number | null }) {
   if (completedAt === null) return null;
   return (
-    <span className="duo-badge duo-badge-success" title="你手动标记过已读完（阅读页可再点一次取消）">
+    <span className="tl-done" title="你手动标记过已读完（阅读页可再点一次取消）">
       ✓ 已读完
     </span>
   );
@@ -208,15 +203,13 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
         )
       ) : (
         <ul className="space-y-4">
-          {shown.map((t, i) => {
+          {shown.map((t) => {
             const style = SOURCE_STYLE[t.sourceType] ?? SOURCE_STYLE.paste;
             const cefrDetail = parseCefrDetail(t.cefrDetail);
             return (
               <li key={t.id} className="relative group text-list-item">
                 <Link href={`/texts/${t.id}`} className="duo-text-item block">
                   <div className="flex items-start gap-4">
-                    <span className="duo-level-dot">{i + 1}</span>
-
                     <div className="flex-1 min-w-0">
                       <div className="flex items-baseline justify-between gap-4 mb-1 pr-9">
                         <h2 className="text-base font-bold truncate">{t.title}</h2>
@@ -224,11 +217,9 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
                           {t.wordCount.toLocaleString()} 词
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={style.cls}>{style.label}</span>
-                        {t.category && (
-                          <span className="duo-badge">{t.category}</span>
-                        )}
+                      <div className="tl-meta">
+                        <span>{style.label}</span>
+                        {t.category && <span>{t.category}</span>}
                         <CefrBadge
                           level={asCefrLevel(t.cefrLevel)}
                           score={t.cefrScore ?? null}
@@ -236,10 +227,8 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
                         />
                         <ReadBadge ratio={t.readRatio} />
                         <CompletedBadge completedAt={t.completedAt} />
-                        <span className="text-xs text-ink-soft">
-                          {new Date(t.createdAt).toLocaleDateString("zh-CN")}
-                        </span>
-                        <span className="text-sm font-semibold text-ink-soft ml-auto group-hover:text-ink">
+                        <span>{new Date(t.createdAt).toLocaleDateString("zh-CN")}</span>
+                        <span className="tl-go">
                           {t.completedAt !== null ? "继续回味 →" : "开始阅读 →"}
                         </span>
                       </div>

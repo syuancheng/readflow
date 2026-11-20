@@ -47,7 +47,7 @@ function fullSentence(c: {
 export default async function WordsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; word?: string }>;
+  searchParams: Promise<{ status?: string; word?: string; pushed?: string; missing?: string }>;
 }) {
   const sp = await searchParams;
   const user = await currentUser();
@@ -159,6 +159,9 @@ export default async function WordsPage({
       <p className="rf-page-desc">阅读时点过的词都在这里，带着原句，可跳回原文定位。点一行看完整释义。</p>
 
       <WordList
+        // 推送完成后用 router.replace 带新参数回到这里：key 变了就重新挂载，词的导出状态才是最新的
+        key={`${sp.status ?? ""}|${sp.pushed ?? ""}`}
+        pushedNotice={Number(sp.pushed) > 0 ? { done: Number(sp.pushed), audioMissing: Math.max(0, Number(sp.missing) || 0) } : undefined}
         words={words}
         articles={articles}
         cardsEnabled={cardsEnabled(siteCardsSettings())}
