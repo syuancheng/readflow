@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { describeSignals, detectFormat } from "@/lib/import/detect";
 import type { ImportFormatChoice } from "@/lib/import/types";
-import { CATEGORIES } from "@/components/TextManageDialog";
+import CategoryPicker from "@/components/CategoryPicker";
 import Icon, { type IconName } from "@/components/Icon";
 
 type Mode = "paste" | "file" | "url";
@@ -115,14 +115,7 @@ export default function ImportForm() {
         onChange={(e) => setTitle(e.target.value)}
       />
 
-      <select className="duo-input mb-3" aria-label="文章分类" value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="">选择分类（可选）</option>
-        {CATEGORIES.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
+      <CategoryPicker value={category} onChange={setCategory} />
 
       {mode === "url" ? (
         <input
@@ -195,7 +188,7 @@ export default function ImportForm() {
       )}
 
       <div className="flex items-center justify-between mt-2">
-        <p className="text-sm font-semibold text-ink-faint">
+        <p className="rf-import-hint">
           {mode === "url" ? "自动提取网页正文，优先取官方 Markdown" : "支持 .txt / .md / 粘贴 Markdown"}
         </p>
         <button type="submit" className="duo-btn duo-btn-primary" disabled={busy}>

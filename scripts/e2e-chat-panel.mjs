@@ -368,14 +368,29 @@ try {
 
   // ===== 导入时可以选分类 =====
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
-  const opts = await page.locator('select[aria-label="文章分类"] option').allInnerTexts();
-  await page.locator('select[aria-label="文章分类"]').selectOption("技术文档");
+  const ph = await page.locator('button[aria-label="文章分类"]').innerText();
+  await page.locator('button[aria-label="文章分类"]').click();
+  const opts = [ph, ...(await page.locator('ul[aria-label="文章分类"] button').allInnerTexts())];
+  const listBg = await page.locator('ul[aria-label="文章分类"]').evaluate((el) => getComputedStyle(el).backgroundColor);
+  await page.locator('ul[aria-label="文章分类"] button', { hasText: "技术文档" }).click();
   await page.locator("textarea").first().fill("A short imported text about databases and agents, imported with a category chosen in the form.");
   await page.getByRole("button", { name: /导入并开始阅读/ }).click();
   await page.waitForURL(/\/texts\//, { timeout: 20000 });
   const imported = await api("/api/texts", { cookie });
   const mine = (imported.data?.texts ?? []).find((t) => t.title.startsWith("A short imported text"));
-  check("C34 导入文本时可以选分类：下拉里第一项是提示「选择分类（可选）」、后面是预设分类，选了「技术文档」就存成「技术文档」（不再全是未分类）", opts[0] === "选择分类（可选）" && opts.includes("技术文档") && mine?.category === "技术文档", JSON.stringify({ opts, category: mine?.category }));
+  check("C34 导入文本时可以选分类：下拉里第一项是提示「选择分类（可选）」、后面是预设分类，选了「技术文档」就存成「技术文档」（不再全是未分类）", opts[0] === "选择分类（可选）" && opts.includes("技术文档") && opts.some((o) => o.includes("自定义")) && listBg === "rgb(255, 255, 255)" && mine?.category === "技术文档", JSON.stringify({ opts, listBg, category: mine?.category }));
+
+  // 自定义分类
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await page.locator('button[aria-label="文章分类"]').click();
+  await page.locator('ul[aria-label="文章分类"] button', { hasText: "自定义" }).click();
+  await page.locator('input[aria-label="自定义分类"]').fill("读书笔记");
+  await page.locator("textarea").first().fill("Another imported text about custom categories and notebooks, for the custom category check.");
+  await page.getByRole("button", { name: /导入并开始阅读/ }).click();
+  await page.waitForURL(/\/texts\//, { timeout: 20000 });
+  const imported2 = await api("/api/texts", { cookie });
+  const mine2 = (imported2.data?.texts ?? []).find((t) => t.title.startsWith("Another imported text"));
+  check("C35 导入时可以自定义分类：选「＋ 自定义…」输入「读书笔记」，导入后分类就是「读书笔记」", mine2?.category === "读书笔记", JSON.stringify({ category: mine2?.category }));
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });

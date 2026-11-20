@@ -38,3 +38,58 @@
 /* 推送：按钮小一点（32px 高），进度是一个小圆环 + 一行字，不再是一根很长的横条 */
 .rf-push-btn { min-height: var(--rf-space-8); padding: 0 var(--rf-space-4); font-size: var(--rf-text-sm); }
 .pc-progress-run { flex-direction: row; align-items: center; gap: var(--rf-space-2); }
+
+/* ===== 导入框分类：自绘下拉（浅色弹层）+ 自定义输入 ===== */
+.rf-catpick { position: relative; }
+.rf-catpick-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  padding-right: var(--rf-space-8);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6853' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--rf-space-3) center;
+  background-size: var(--rf-space-4);
+}
+.rf-catpick-ph { color: var(--rf-text-secondary); }
+.rf-catpick-list {
+  position: absolute;
+  z-index: var(--rf-z-dropdown);
+  left: 0;
+  right: 0;
+  top: calc(100% + var(--rf-space-1));
+  margin: 0;
+  padding: var(--rf-space-1);
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--rf-bg-surface);
+  border: var(--rf-border-width) solid var(--rf-border);
+  border-radius: var(--rf-radius-md);
+  box-shadow: var(--rf-shadow-md);
+}
+.rf-catpick-opt {
+  display: block;
+  width: 100%;
+  padding: var(--rf-space-2) var(--rf-space-3);
+  border: 0;
+  border-radius: var(--rf-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.rf-catpick-opt:hover { background: var(--rf-bg-hover); }
+.rf-catpick-opt-on { background: var(--rf-bg-selected); font-weight: 600; }
+.rf-catpick-opt-custom, .rf-catpick-opt-clear { color: var(--rf-text-secondary); }
+.rf-catpick-opt:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
+.rf-catpick-custom { display: flex; gap: var(--rf-space-2); align-items: center; }
+.rf-catpick-custom .duo-input { flex: 1; min-width: 0; }
+
+/* 导入框底部说明：弱化成小号浅色，不抢「导入并开始阅读」 */
+.rf-import-hint { margin: 0; font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); font-weight: 400; color: var(--rf-text-secondary); }
