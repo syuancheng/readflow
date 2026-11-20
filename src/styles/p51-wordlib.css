@@ -153,8 +153,9 @@
   overflow: hidden;
   text-wrap: pretty;
 }
+/* 生词高亮只靠底色，不加粗；b 标签保留语义，但字重与例句正文一致 */
 .wl-snippet b {
-  font-weight: 700;
+  font-weight: 400;
   color: var(--rf-text-primary);
   background: var(--rf-highlight-bg);
   border-radius: var(--rf-radius-xs);
