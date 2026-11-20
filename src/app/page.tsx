@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { texts } from "@/db/schema";
 import { currentUser } from "@/lib/auth";
-import { getStats } from "@/lib/stats";
 import ImportForm from "@/components/ImportForm";
 import TextList, { type TextCardRow } from "@/components/TextList";
 import SurveyPrompt from "@/components/SurveyPrompt";
@@ -15,16 +14,15 @@ export default async function Home() {
   // proxy 只挡「没 cookie」；伪造 / 过期 cookie 在这里兜底
   const user = await currentUser();
   if (!user) redirect("/login");
-  const [rows, stats] = await Promise.all([
+  const rows = await (
     db
       .select()
       .from(texts)
       // P31 决策 D4：网页摘录（插件记词时顺带建的 source_type='web'）不是完整文章，
       // 不进「我的文本」书架；它的词在词库里照常见。
       .where(and(eq(texts.userId, user.id), ne(texts.sourceType, "web")))
-      .orderBy(desc(texts.createdAt)),
-    getStats(7, 18, user.id),
-  ]);
+      .orderBy(desc(texts.createdAt))
+  );
 
   const cards: TextCardRow[] = rows.map((t) => ({
     id: t.id,
@@ -50,10 +48,6 @@ export default async function Home() {
         <p className="text-sm text-ink-soft">
           导入想读的文章，边读边查词，生词会带着原句收进词库。
         </p>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="duo-xp">⚡ {stats.todayCount * 10} XP</span>
-          <span className="duo-streak">🔥 {stats.savedCount}</span>
-        </div>
       </div>
 
       {showSurvey && <SurveyPrompt />}

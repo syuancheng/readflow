@@ -105,7 +105,7 @@
   line-height: var(--rf-leading-xs);
   color: var(--rf-text-secondary);
 }
-.rf-chat-status-live { color: var(--rf-accent-text); font-weight: 700; }
+.rf-chat-status-live { color: var(--rf-text-primary); font-weight: 700; }
 
 .rf-stream-caret {
   display: inline-block;
@@ -185,7 +185,7 @@
   color: var(--rf-text-primary);
 }
 .rf-run-block[data-state="ready"] > span:first-child,
-.rf-run-block[data-state="pushed"] > span:first-child { color: var(--rf-accent-text); font-weight: 700; }
+.rf-run-block[data-state="pushed"] > span:first-child { color: var(--rf-success-text); font-weight: 700; } /* ✓ = 成功，绿色只用来表示状态 */
 .rf-run-block[data-state="failed"] { color: var(--rf-danger-text); }
 .rf-run-note {
   font-size: var(--rf-text-xs);

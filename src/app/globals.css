@@ -12,16 +12,17 @@
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）
      规范：docs/design-system.md　token：src/styles/tokens.css */
-  --duo-green: var(--rf-green-500);
-  --duo-green-dark: var(--rf-green-600);
-  --duo-green-hover: var(--rf-green-500);
-  --duo-green-soft: var(--rf-green-100);
+  /* P52：旧的「绿」别名改指向中性主色——界面不再用品牌绿做按钮、进度条、导航（品牌绿只在 Logo：--rf-brand） */
+  --duo-green: var(--rf-accent);
+  --duo-green-dark: var(--rf-gray-800);
+  --duo-green-hover: var(--rf-gray-800);
+  --duo-green-soft: var(--rf-gray-100);
   --duo-blue: var(--rf-blue-500);
   --duo-blue-dark: var(--rf-blue-600);
   --duo-blue-soft: var(--rf-blue-50);
-  --duo-purple: var(--rf-purple-500);
-  --duo-purple-dark: var(--rf-purple-600);
-  --duo-purple-soft: var(--rf-purple-50);
+  --duo-purple: var(--rf-gray-500);
+  --duo-purple-dark: var(--rf-gray-600);
+  --duo-purple-soft: var(--rf-gray-50);
   --duo-orange: var(--rf-amber-500);
   --duo-orange-dark: var(--rf-amber-600);
   --duo-orange-soft: var(--rf-amber-50);
@@ -118,35 +119,35 @@ body {
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
-  border-bottom: 4px solid var(--duo-border-dark);
+  /* P52：扁平按钮，不再有多邻国式的厚底边 */
+  border: 1px solid transparent;
 }
 
 .duo-btn:active {
-  transform: translateY(2px);
-  border-bottom-width: 2px;
+  transform: translateY(1px);
 }
 
 .duo-btn-primary {
   background: var(--duo-green);
   color: var(--rf-text-inverse);
-  border-bottom-color: var(--duo-green-dark);
+  border-color: var(--duo-green);
 }
 
 .duo-btn-primary:hover {
-  filter: brightness(1.05);
+  background: var(--rf-gray-800);
+  border-color: var(--rf-gray-800);
 }
 
 .duo-btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
-  border-bottom-width: 4px;
 }
 
 .duo-btn-blue {
   background: var(--duo-blue);
   color: var(--rf-text-inverse);
-  border-bottom-color: var(--duo-blue-dark);
+  border-color: var(--duo-blue);
 }
 
 .duo-btn-blue:hover {
@@ -155,19 +156,16 @@ body {
 
 .duo-btn-white {
   background: var(--duo-bg);
-  color: var(--duo-blue);
-  border: 2px solid var(--duo-border);
-  border-bottom-width: 4px;
-  border-bottom-color: var(--duo-border);
+  color: var(--rf-text-primary);
+  border: 1px solid var(--rf-border-strong);
 }
 
 .duo-btn-white:hover {
-  background: var(--duo-surface);
+  background: var(--rf-bg-hover);
 }
 
 .duo-btn-white:active {
-  transform: translateY(2px);
-  border-bottom-width: 2px;
+  transform: translateY(1px);
 }
 
 /* 多邻国 Tab 按钮 */
@@ -772,8 +770,7 @@ body {
   width: 100%;
   padding: 12px 16px;
   border-radius: var(--rf-radius-md);
-  border: 2px solid var(--duo-border);
-  border-bottom-width: 3px;
+  border: 1px solid var(--rf-border-strong);
   background: var(--duo-bg, var(--rf-gray-0));
   color: var(--duo-ink-faint);
   font-size: var(--rf-text-sm);
@@ -857,12 +854,10 @@ body {
   font-size: var(--rf-text-sm);
   border-radius: var(--rf-radius-md);
   gap: 4px;
-  border-bottom-width: 3px;
 }
 
 .duo-btn-sm:active {
-  transform: translateY(2px);
-  border-bottom-width: 1px;
+  transform: translateY(1px);
 }
 
 /* 轻量文字按钮：没有填充色，用于次要操作 */
@@ -983,7 +978,7 @@ body {
 }
 
 .duo-progress-fill-done {
-  background: linear-gradient(90deg, var(--duo-green), var(--rf-green-500));
+  background: var(--duo-green);
 }
 
 /* 进度条上的流光 —— 多邻国招牌动效 */
@@ -1032,21 +1027,6 @@ body {
   flex-shrink: 0;
 }
 
-/* XP 徽章 */
-.duo-xp,
-.duo-streak {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: var(--rf-radius-full);
-  font-size: var(--rf-text-sm);
-  font-weight: 700;
-  color: var(--rf-reward-text);
-  background: var(--rf-reward-soft);
-}
-
 /* 首页大标题（规范 3xl / 800，只此一处用 heavy） */
 .rf-home-hero {
   font-size: var(--rf-text-3xl);
@@ -1063,7 +1043,6 @@ body {
   font-weight: 800;
   color: var(--duo-green);
   animation: duo-float-up 1.1s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
-  text-shadow: 0 2px 8px rgba(88, 204, 2, 0.35);
 }
 
 @keyframes duo-float-up {
@@ -1314,7 +1293,8 @@ body {
    词与词间空白也带下划线，连成一整条；当前选中（.w-anchor）在下面覆盖成底色 + 深绿底线。
    右栏「已存批注」列表已移除，点回这条标记是唯一的回看入口。 */
 .w-annotated {
-  box-shadow: inset 0 -3px 0 var(--duo-green);
+  /* 你查过的词：绿色下划线（用户确认保留，P52 不改）；界面其它地方的绿色已全部去掉 */
+  box-shadow: inset 0 -3px 0 var(--rf-highlight-line);
 }
 
 /* ====== P23 划线上方的中文短释义 ======
@@ -1377,7 +1357,7 @@ body {
 /* 悬停到已存批注区间内的任意一个词：整条一起铺浅绿底，连成一条而不是逐词亮。
    短语里的几个词属于同一条批注，交互单位就是这条区间。 */
 .w-ann-hover {
-  background: var(--duo-green-soft);
+  background: var(--rf-highlight-bg);
   border-radius: 0;
 }
 .w-ann-hover-l {
@@ -1392,8 +1372,8 @@ body {
 /* 正文当前批注锚点的高亮 */
 .w-anchor,
 .w-anchor:hover {
-  background: var(--duo-green-soft);
-  box-shadow: inset 0 -3px 0 var(--duo-green);
+  background: var(--rf-highlight-bg);
+  box-shadow: inset 0 -3px 0 var(--rf-highlight-line);
   border-radius: 0;
 }
 .w-anchor-l {
@@ -1473,7 +1453,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--duo-green), var(--duo-green-dark));
+  background: var(--rf-gray-800);
   color: var(--rf-text-inverse);
   font-size: var(--rf-text-md);
   font-weight: 800;
@@ -1957,9 +1937,9 @@ body {
   white-space: nowrap;
 }
 .st-btn:disabled { opacity: 0.55; cursor: default; }
-/* 主按钮全站同一种绿（规范 §1.1） */
-.st-btn-primary { background: var(--rf-accent); border-color: var(--rf-accent); border-bottom: 4px solid var(--rf-accent-edge); color: var(--rf-text-inverse); }
-.st-btn-primary:hover:not(:disabled) { filter: brightness(1.05); }
+/* 主按钮全站同一种近黑色（P52） */
+.st-btn-primary { background: var(--rf-accent); border-color: var(--rf-accent); color: var(--rf-text-inverse); }
+.st-btn-primary:hover:not(:disabled) { background: var(--rf-gray-800); border-color: var(--rf-gray-800); }
 .st-btn-ghost { background: var(--rf-gray-0); border-color: var(--rf-gray-200); color: var(--wb-ink-soft); }
 .st-btn-ghost:hover:not(:disabled) { border-color: var(--rf-gray-300); color: var(--wb-blue-dark); }
 .st-btn-quiet { color: var(--wb-muted); }
@@ -2367,7 +2347,7 @@ body {
 .rf-sec-line {
   flex: 1;
   height: 1px;
-  background: var(--rf-green-100);
+  background: var(--rf-border);
 }
 
 .rf-sec-btn {
@@ -2388,14 +2368,14 @@ body {
 }
 
 .rf-sec-btn:hover {
-  background: var(--rf-green-50);
-  border-color: var(--rf-green-500);
+  background: var(--rf-bg-hover);
+  border-color: var(--rf-border-strong);
 }
 
 .rf-sec-btn.is-open {
-  background: var(--rf-green-50);
-  border-color: var(--rf-green-600);
-  color: var(--rf-green-700);
+  background: var(--rf-bg-selected);
+  border-color: var(--rf-border-strong);
+  color: var(--rf-text-primary);
 }
 
 /* 已生成过小结的区间：标记右上角小圆点 */
@@ -2406,7 +2386,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--rf-green-600);
+  background: var(--rf-gray-600);
   box-shadow: 0 0 0 2px var(--rf-gray-0);
 }
 
@@ -2490,7 +2470,7 @@ body {
   height: 13px;
   margin-left: 2px;
   vertical-align: middle;
-  background: var(--rf-green-600);
+  background: var(--rf-gray-800);
   animation: rf-caret-blink 1s steps(2) infinite;
 }
 
@@ -3121,7 +3101,7 @@ main h1:not(.rf-tb-title):not(.rf-home-hero) + p {
   border-radius: var(--rf-radius-sm);
 }
 
-/* 按钮尺寸（规范 §8）：高 44 / 圆角 md / md 字号；4px 实体底边是全站唯一粗边 */
+/* 按钮尺寸（规范 §8）：高 44 / 圆角 md / md 字号。P52：不再有 4px 实体底边，全站按钮都是扁平的 */
 .duo-btn {
   min-height: 44px;
   padding: 8px 20px;
@@ -3138,7 +3118,6 @@ main h1:not(.rf-tb-title):not(.rf-home-hero) + p {
 .duo-btn-white {
   color: var(--rf-text-primary);
   border: 1px solid var(--rf-border-strong);
-  border-bottom: 4px solid var(--rf-border-strong);
 }
 
 /* 筛选区：标签右对齐，两行靠近；不再套灰底边框（规范 §5 不嵌套框） */
