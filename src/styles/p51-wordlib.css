@@ -130,7 +130,18 @@
   overflow-wrap: anywhere;
 }
 .wl-meaning { font-size: var(--rf-text-sm); line-height: var(--rf-leading-sm); font-weight: 400; color: var(--rf-text-primary); }
-.wl-tag { font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); color: var(--rf-text-secondary); white-space: nowrap; }
+/* 小标签（插件、已导出）：可以有颜色——已导出是绿色小标签（成功状态），插件是灰色小标签 */
+.wl-tag {
+  padding: 0 var(--rf-space-2);
+  border-radius: var(--rf-radius-sm);
+  background: var(--rf-bg-subtle);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-md);
+  font-weight: 600;
+  color: var(--rf-text-secondary);
+  white-space: nowrap;
+}
+.wl-export-tag { background: var(--rf-success-soft); color: var(--rf-success-text); }
 .wl-snippet {
   margin: var(--rf-space-1) 0 0;
   font-size: var(--rf-text-sm);
@@ -226,9 +237,9 @@
 .cp-tag-kind {
   padding: var(--rf-space-1) var(--rf-space-2);
   border-radius: var(--rf-radius-sm);
-  background: var(--rf-bg-subtle);
+  background: var(--rf-success-soft);
   font-weight: 700;
-  color: var(--rf-text-primary);
+  color: var(--rf-success-text);
 }
 .cp-tag-style { color: var(--rf-text-secondary); }
 .cp-actions { display: flex; align-items: center; gap: var(--rf-space-1); }

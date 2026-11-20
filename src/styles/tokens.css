@@ -49,6 +49,10 @@
   --rf-amber-600: #e08600;
   --rf-amber-700: #b35500;
 
+  /* 头像底色用的两个额外色相（青、粉）。头像按用户名从 6 种颜色里稳定地挑一个，不用黑白灰 */
+  --rf-teal-700: #0f766e;
+  --rf-pink-700: #be3a7d;
+
   --rf-red-50:  #ffecec;
   --rf-red-500: #ff4b4b;
   --rf-red-600: #ea2b2b;
@@ -114,17 +118,28 @@
   --rf-success-text: var(--rf-green-700);
   --rf-success-soft: var(--rf-green-50);
 
-  /* CEFR 难度：只用在难度徽章上。统一成灰色小标签，不靠颜色区分等级（字母本身就是信息） */
-  --rf-level-a-text: var(--rf-gray-800); --rf-level-a-bg: var(--rf-gray-100);
-  --rf-level-b-text: var(--rf-gray-800); --rf-level-b-bg: var(--rf-gray-100);
-  --rf-level-c-text: var(--rf-gray-800); --rf-level-c-bg: var(--rf-gray-100);
+  /* CEFR 难度：只用在难度小标签上。标签可以有颜色（A 绿 / B 蓝 / C 琥珀，不用紫色）——颜色规则见 docs/design-system.md「颜色分三类」 */
+  --rf-level-a-text: var(--rf-green-700); --rf-level-a-bg: var(--rf-green-50);
+  --rf-level-b-text: var(--rf-blue-700);  --rf-level-b-bg: var(--rf-blue-50);
+  --rf-level-c-text: var(--rf-amber-700); --rf-level-c-bg: var(--rf-amber-50);
 
   /* 学习日历热力图 */
   --rf-heat-0: #ededed;
-  --rf-heat-1: #d4d4d4;
-  --rf-heat-2: #a3a3a3;
-  --rf-heat-3: #6b6b6b;
-  --rf-heat-4: var(--rf-gray-900);
+  --rf-heat-1: var(--rf-green-100);
+  --rf-heat-2: #a8e86a;
+  --rf-heat-3: #7acb2e;
+  --rf-heat-4: var(--rf-green-600);
+
+  /* 头像底色：6 种，按昵称稳定地挑（avatarColorVar）；白字，对比度都 > 4.5:1 */
+  --rf-avatar-1: var(--rf-green-700);
+  --rf-avatar-2: var(--rf-blue-700);
+  --rf-avatar-3: var(--rf-amber-700);
+  --rf-avatar-4: var(--rf-red-700);
+  --rf-avatar-5: var(--rf-teal-700);
+  --rf-avatar-6: var(--rf-pink-700);
+
+  /* 数据图表（柱状图、热力图）：有颜色，用绿——纯灰的统计页很沉闷 */
+  --rf-data: var(--rf-green-500);
 
   /* ---------- 3. 字体 ---------- */
   --rf-font-sans: var(--font-dm-sans), -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;

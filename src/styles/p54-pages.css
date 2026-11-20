@@ -26,12 +26,15 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--rf-space-1) var(--rf-space-3);
+  gap: var(--rf-space-1) var(--rf-space-2);
   font-size: var(--rf-text-xs);
   line-height: var(--rf-leading-xs);
   color: var(--rf-text-secondary);
 }
-.tl-done { color: var(--rf-success-text); }
 .tl-go { margin-left: auto; font-size: var(--rf-text-sm); font-weight: 600; color: var(--rf-text-secondary); }
 .text-list-item:hover .tl-go,
 .text-list-item:focus-within .tl-go { color: var(--rf-text-primary); }
+
+/* 导入表单里的「分类」：标签 + 下拉同一行，下拉占满剩余宽度 */
+.rf-import-category { display: flex; align-items: center; gap: var(--rf-space-3); }
+.rf-import-category select { flex: 1; min-width: 0; }

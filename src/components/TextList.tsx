@@ -39,7 +39,9 @@ function ReadBadge({ ratio }: { ratio: number | null }) {
   if (ratio === null || ratio < 0.02) return null;
   const pct = Math.round(Math.min(ratio, 1) * 100);
   return (
-    <span title="上次离开时的滚动位置；往回翻会下降。100% 不等于已读完">已读 {pct}%</span>
+    <span className="duo-badge" title="上次离开时的滚动位置；往回翻会下降。100% 不等于已读完">
+      已读 {pct}%
+    </span>
   );
 }
 
@@ -47,7 +49,7 @@ function ReadBadge({ ratio }: { ratio: number | null }) {
 function CompletedBadge({ completedAt }: { completedAt: number | null }) {
   if (completedAt === null) return null;
   return (
-    <span className="tl-done" title="你手动标记过已读完（阅读页可再点一次取消）">
+    <span className="duo-badge duo-badge-success" title="你手动标记过已读完（阅读页可再点一次取消）">
       ✓ 已读完
     </span>
   );
@@ -218,8 +220,8 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
                         </span>
                       </div>
                       <div className="tl-meta">
-                        <span>{style.label}</span>
-                        {t.category && <span>{t.category}</span>}
+                        <span className="duo-badge">{style.label}</span>
+                        {t.category && <span className="duo-badge duo-badge-green">{t.category}</span>}
                         <CefrBadge
                           level={asCefrLevel(t.cefrLevel)}
                           score={t.cefrScore ?? null}

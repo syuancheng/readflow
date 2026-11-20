@@ -352,11 +352,30 @@ try {
     meta: document.querySelectorAll(".text-list-item .tl-meta").length,
     rows: document.querySelectorAll(".text-list-item").length,
   }));
-  check("C31 首页文本行：没有序号方块；元信息是一行纯文字，只剩难度这一个小标签", rowLook.dots === 0 && rowLook.badgesInRows <= rowLook.rows && rowLook.meta === rowLook.rows && rowLook.rows > 0, JSON.stringify(rowLook));
+  const navLine = await page.evaluate(() => getComputedStyle(document.querySelector(".duo-nav-link-active")).boxShadow);
+  check("C31a 顶部导航当前页的指示条是品牌绿", navLine.includes("88, 204, 2"), navLine);
+  check("C31 首页文本行：没有序号方块；来源、分类、难度、已读状态是小标签（可以有颜色）", rowLook.dots === 0 && rowLook.badgesInRows >= rowLook.rows && rowLook.meta === rowLook.rows && rowLook.rows > 0, JSON.stringify(rowLook));
   await page.goto(`${BASE}/welcome`, { waitUntil: "networkidle" });
   const wbox = await page.locator(".duo-card").first().boundingBox();
   check("C32 问卷是一个窄的居中栏（≤ 640px、左右对称），不再只占左半边", wbox && wbox.width <= 640 && Math.abs(wbox.x - (1440 - wbox.width - wbox.x)) <= 2, JSON.stringify(wbox));
   await page.screenshot({ path: path.join(SHOTS, "welcome-1440.png") });
+
+  // ===== 头像有颜色（不是黑白灰）、原生下拉弹层是浅色 =====
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const av = await page.evaluate(() => ({ bg: getComputedStyle(document.querySelector(".pm-avatar")).backgroundColor, scheme: getComputedStyle(document.documentElement).colorScheme }));
+  const grays = ["rgb(60, 60, 60)", "rgb(38, 38, 38)", "rgb(107, 107, 107)"];
+  check("C33 头像是有颜色的（按昵称稳定地挑一种，不是黑白灰）；页面声明浅色 color-scheme（原生下拉弹层是白的）", !grays.includes(av.bg) && /^rgb\(\d+, \d+, \d+\)$/.test(av.bg) && av.scheme === "light", JSON.stringify(av));
+
+  // ===== 导入时可以选分类 =====
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const opts = await page.locator('select[aria-label="文章分类"] option').allInnerTexts();
+  await page.locator('select[aria-label="文章分类"]').selectOption("技术文档");
+  await page.locator("textarea").first().fill("A short imported text about databases and agents, imported with a category chosen in the form.");
+  await page.getByRole("button", { name: /导入并开始阅读/ }).click();
+  await page.waitForURL(/\/texts\//, { timeout: 20000 });
+  const imported = await api("/api/texts", { cookie });
+  const mine = (imported.data?.texts ?? []).find((t) => t.title.startsWith("A short imported text"));
+  check("C34 导入文本时可以选分类：下拉里有「未分类」和预设分类，选了「技术文档」就存成「技术文档」（不再全是未分类）", opts[0] === "未分类" && opts.includes("技术文档") && mine?.category === "技术文档", JSON.stringify({ opts, category: mine?.category }));
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });

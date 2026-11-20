@@ -89,3 +89,15 @@ test("文字头像：中文首字 / 英文首字母 / emoji 不被拆坏", () =>
   assert.equal(initialsFrom(""), "?");
   assert.equal(initialsFrom("📚 读书"), "📚");
 });
+
+import { AVATAR_COLORS, avatarColorVar } from "../../src/lib/profile-form";
+
+test("avatarColorVar：同一个昵称永远同一个颜色；颜色在 6 种之内；不同昵称大多不同", () => {
+  assert.equal(avatarColorVar("Siyuan Cheng"), avatarColorVar("  Siyuan Cheng "));
+  const names = ["Siyuan Cheng", "张三", "李四", "alice", "bob", "王五", "Chen", "Zoe", "小明", "John"];
+  const seen = new Set(names.map(avatarColorVar));
+  for (const v of seen) assert.match(v, /^var\(--rf-avatar-[1-6]\)$/);
+  assert.ok(seen.size >= 3, `10 个昵称至少落在 3 种颜色上，实际 ${seen.size}`);
+  assert.equal(AVATAR_COLORS, 6);
+  assert.match(avatarColorVar(""), /^var\(--rf-avatar-[1-6]\)$/);
+});

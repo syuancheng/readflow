@@ -94,6 +94,15 @@ export function validateProfile(p: Profile): ProfileErrors {
   return errors;
 }
 
+export const AVATAR_COLORS = 6;
+
+/** 文字头像的底色：按昵称稳定地挑 6 种颜色之一（同一个昵称永远同一个颜色，不同人大多不同） */
+export function avatarColorVar(name: string): string {
+  let h = 0;
+  for (const ch of name.trim()) h = (h * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
+  return `var(--rf-avatar-${(h % AVATAR_COLORS) + 1})`;
+}
+
 /**
  * 文字头像：中文取第一个字，英文取首字母（两个单词时取两个首字母）。
  * emoji 昵称原样取第一个 emoji，避免拆成乱码代理对。

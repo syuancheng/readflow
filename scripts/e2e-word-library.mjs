@@ -133,7 +133,7 @@ try {
   const tag = item("skill").locator(".wl-export-tag");
   const tagText = await tag.innerText().catch(() => "");
   const tagTitle = (await tag.getAttribute("title").catch(() => "")) ?? "";
-  check("2 已导出的词带小标签，悬停可见卡片类型", tagText.includes("墨墨") && tagTitle.includes("看词猜义") && tagTitle.includes("挖空填空"), `${tagText} | ${tagTitle}`);
+  check("2 已导出的词带一个清楚的「已建卡」小标签，悬停可见卡片类型", tagText.trim() === "已建卡" && tagTitle.includes("看词猜义") && tagTitle.includes("挖空填空"), `${tagText} | ${tagTitle}`);
   check("3 只有失败记录的词不算已导出", (await item("owner").locator(".wl-export-tag").count()) === 0);
 
   await side("已导出").click();
