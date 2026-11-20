@@ -206,10 +206,12 @@ export default function AskComposer({
           <div className="rf-replies" role="group" aria-label="要回复的回答片段">
             {replies.map((r, i) => (
               <div className="rf-quote-chip" key={`${i}-${r.text.slice(0, 20)}`}>
-                <div className="rf-quote-chip-main">
-                  <span className="rf-quote-chip-text" title={r.text}>{r.text}</span>
-                  {r.note && <span className="rf-quote-chip-note" title={r.note}>{r.note}</span>}
-                </div>
+                <svg className="rf-quote-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M9 14L4 9l5-5" />
+                  <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                </svg>
+                <span className="rf-quote-chip-text" title={r.text}>{`“${r.text}”`}</span>
+                {r.note && <span className="rf-quote-chip-note" title={r.note}>{r.note}</span>}
                 <button
                   type="button"
                   className="rf-quote-chip-del"

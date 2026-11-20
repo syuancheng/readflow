@@ -12,7 +12,7 @@ import { MAX_REPLIES, REPLY_NOTE_MAX_CHARS } from "@/lib/ai-thread";
 export type SelectionAsk = { text: string; top: number; left: number; below: boolean };
 
 /** 展开后输入框的宽度（px）：窄右栏里也放得下，且用视口边界约束，不超出窗口 */
-const INPUT_WIDTH = 288;
+const INPUT_WIDTH = 320;
 
 export default function SelectionAskBar({
   selection,
@@ -86,7 +86,7 @@ export default function SelectionAskBar({
   return (
     <div
       ref={bar}
-      className="rf-selection-ask"
+      className={`rf-selection-ask${editing ? " rf-selection-ask-editing" : ""}`}
       role="toolbar"
       aria-label="回复选中的内容"
       style={{
@@ -99,27 +99,39 @@ export default function SelectionAskBar({
       }}
     >
       {editing ? (
-        <input
-          ref={input}
-          className="rf-selection-ask-input"
-          style={{ width: INPUT_WIDTH }}
-          aria-label="对这段话的批注"
-          placeholder="对这段话说点什么（可不写），回车加入"
-          maxLength={REPLY_NOTE_MAX_CHARS}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            } else if (e.key === "Escape") {
-              // 阅读页「Esc 关右栏」的监听也挂在 document 上，要 stopImmediatePropagation 才拦得住
-              e.nativeEvent.stopImmediatePropagation();
-              e.stopPropagation();
-              onDismiss();
-            }
-          }}
-        />
+        <div className="rf-selection-ask-card" style={{ width: INPUT_WIDTH }}>
+          {/* 被回复的那段原话：左竖线 + 灰字单行（Claude Code 的 Reply 同款，也和对话气泡里的引用一致） */}
+          <div className="rf-selection-ask-quote" title={selection.text}>{selection.text}</div>
+          <div className="rf-selection-ask-field">
+          <input
+            ref={input}
+            className="rf-selection-ask-input"
+            aria-label="对这段话的批注"
+            placeholder="回复这段话"
+            maxLength={REPLY_NOTE_MAX_CHARS}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              } else if (e.key === "Escape") {
+                // 阅读页「Esc 关右栏」的监听也挂在 document 上，要 stopImmediatePropagation 才拦得住
+                e.nativeEvent.stopImmediatePropagation();
+                e.stopPropagation();
+                onDismiss();
+              }
+            }}
+          />
+          {/* 只留一个回车标志：点它或按回车都是加入（Claude Code 的 Reply 同款） */}
+          <button type="button" className="rf-selection-ask-enter" aria-label="加入回复" title="加入回复（回车）" onMouseDown={(e) => e.preventDefault()} onClick={submit}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 5v6a3 3 0 0 1-3 3H5" />
+              <path d="M9 10l-4 4 4 4" />
+            </svg>
+          </button>
+          </div>
+        </div>
       ) : (
         <button
           type="button"

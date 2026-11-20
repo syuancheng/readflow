@@ -226,17 +226,19 @@ try {
   const inputBox = await page.evaluate(() => {
     const i = document.querySelector(".rf-selection-ask-input");
     const r = i?.getBoundingClientRect();
-    return r ? { width: Math.round(r.width), inView: r.left >= 0 && r.right <= window.innerWidth, focused: document.activeElement === i } : null;
+    const field = document.querySelector(".rf-selection-ask-card")?.getBoundingClientRect();
+    return r ? { width: Math.round(field?.width ?? r.width), inView: r.left >= 0 && r.right <= window.innerWidth, focused: document.activeElement === i, enter: document.querySelectorAll(".rf-selection-ask-enter").length, placeholder: i.placeholder, text: document.querySelector(".rf-selection-ask").innerText.trim(), quote: Boolean(document.querySelector(".rf-selection-ask-quote")?.textContent.trim()) } : null;
   });
-  check("C36a 选中 AI 回答后浮出「回复」；点开后原地变成单行输入（≈288px、在视口内、已聚焦）", btnLabel === "回复" && inputBox && inputBox.width >= 280 && inputBox.inView && inputBox.focused, JSON.stringify({ btnLabel, inputBox }));
+  check("C36a 选中 AI 回答后浮出「回复」；点开后原地变成单行输入（≈288px、在视口内、已聚焦），上面是被回复的原话，右边只有一个回车标志，没有别的说明文字", btnLabel === "回复" && inputBox && inputBox.width >= 280 && inputBox.inView && inputBox.focused && inputBox.enter === 1 && !/回车加入|可不写/.test(inputBox.text) && inputBox.quote === true, JSON.stringify({ btnLabel, inputBox }));
   await page.locator(".rf-selection-ask-input").fill("这里是什么意思");
+  await page.screenshot({ path: path.join(SHOTS, "chat-reply-popover-1440.png") });
   await page.locator(".rf-selection-ask-input").press("Enter");
   await replyTo(1, "");
   const replyChips = await page.evaluate(() => [...document.querySelectorAll(".rf-composer-box .rf-quote-chip")].map((c) => {
     const cs = getComputedStyle(c);
-    return { text: c.querySelector(".rf-quote-chip-text").textContent.slice(0, 8), note: c.querySelector(".rf-quote-chip-note")?.textContent ?? null, height: Math.round(c.getBoundingClientRect().height), bg: cs.backgroundColor, border: cs.borderLeftWidth, icons: c.querySelectorAll("svg").length };
+    return { text: c.querySelector(".rf-quote-chip-text").textContent.slice(0, 8), note: c.querySelector(".rf-quote-chip-note")?.textContent ?? null, height: Math.round(c.getBoundingClientRect().height), bg: cs.backgroundColor, radius: cs.borderTopLeftRadius, icons: c.querySelectorAll("svg").length };
   }));
-  check("C37 输入框里按顺序有两条回复：第一条带批注，第二条没有；都在输入框内、无底色、左竖线 3px、没有小图标；不带批注的一行 ≤ 26px", replyChips.length === 2 && replyChips[0].note === "这里是什么意思" && replyChips[1].note === null && replyChips.every((c) => c.bg === "rgba(0, 0, 0, 0)" && c.border === "3px" && c.icons === 0) && replyChips[1].height <= 26, JSON.stringify(replyChips));
+  check("C37 输入框里按顺序有两条回复：都是极浅绿灰色的圆角小药丸（回复图标 + “引用”，≤ 36px 高），第一条右边有批注小标签，第二条没有；都在输入框内", replyChips.length === 2 && replyChips[0].note === "这里是什么意思" && replyChips[1].note === null && replyChips.every((c) => c.bg === "rgb(246, 248, 244)" && c.radius === "12px" && c.icons === 1 && c.height <= 36 && c.text.startsWith("“")), JSON.stringify(replyChips));
   await page.screenshot({ path: path.join(SHOTS, "chat-quote-chip-1440.png") });
   await page.locator(".rf-quote-chip-del").first().click();
   const left = await page.locator(".rf-quote-chip").count();
