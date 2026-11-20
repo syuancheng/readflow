@@ -16,9 +16,9 @@
      规范：docs/design-system.md　token：src/styles/tokens.css */
   /* P52：旧的「绿」别名改指向中性主色——界面不再用品牌绿做按钮、进度条、导航（品牌绿只在 Logo：--rf-brand） */
   --duo-green: var(--rf-accent);
-  --duo-green-dark: var(--rf-gray-800);
-  --duo-green-hover: var(--rf-gray-800);
-  --duo-green-soft: var(--rf-gray-100);
+  --duo-green-dark: var(--rf-forest-600);
+  --duo-green-hover: var(--rf-forest-600);
+  --duo-green-soft: var(--rf-brand-soft);
   --duo-blue: var(--rf-blue-500);
   --duo-blue-dark: var(--rf-blue-600);
   --duo-blue-soft: var(--rf-blue-50);
@@ -136,8 +136,8 @@ body {
 }
 
 .duo-btn-primary:hover {
-  background: var(--rf-gray-800);
-  border-color: var(--rf-gray-800);
+  background: var(--rf-forest-600);
+  border-color: var(--rf-forest-600);
 }
 
 .duo-btn-primary:disabled {
@@ -1048,7 +1048,7 @@ body {
   pointer-events: none;
   font-size: var(--rf-text-xl);
   font-weight: 800;
-  color: var(--duo-green);
+  color: var(--rf-brand); /* +1 词：品牌亮绿 */
   animation: duo-float-up 1.1s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
 }
 
@@ -1946,7 +1946,7 @@ body {
 .st-btn:disabled { opacity: 0.55; cursor: default; }
 /* 主按钮全站同一种近黑色（P52） */
 .st-btn-primary { background: var(--rf-accent); border-color: var(--rf-accent); color: var(--rf-text-inverse); }
-.st-btn-primary:hover:not(:disabled) { background: var(--rf-gray-800); border-color: var(--rf-gray-800); }
+.st-btn-primary:hover:not(:disabled) { background: var(--rf-forest-600); border-color: var(--rf-forest-600); }
 .st-btn-ghost { background: var(--rf-gray-0); border-color: var(--rf-gray-200); color: var(--wb-ink-soft); }
 .st-btn-ghost:hover:not(:disabled) { border-color: var(--rf-gray-300); color: var(--wb-blue-dark); }
 .st-btn-quiet { color: var(--wb-muted); }

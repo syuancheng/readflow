@@ -35,6 +35,6 @@
 .text-list-item:hover .tl-go,
 .text-list-item:focus-within .tl-go { color: var(--rf-text-primary); }
 
-/* 导入表单里的「分类」：标签 + 下拉同一行，下拉占满剩余宽度 */
-.rf-import-category { display: flex; align-items: center; gap: var(--rf-space-3); }
-.rf-import-category select { flex: 1; min-width: 0; }
+/* 推送：按钮小一点（32px 高），进度是一个小圆环 + 一行字，不再是一根很长的横条 */
+.rf-push-btn { min-height: var(--rf-space-8); padding: 0 var(--rf-space-4); font-size: var(--rf-text-sm); }
+.pc-progress-run { flex-direction: row; align-items: center; gap: var(--rf-space-2); }

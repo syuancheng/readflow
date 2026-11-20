@@ -43,7 +43,7 @@ function renderMdInline(text: string): ReactNode[] {
               className="rf-md-spine"
               style={{
                 textDecorationLine: "underline",
-                textDecorationColor: "var(--duo-green, currentColor)",
+                textDecorationColor: "var(--rf-brand, currentColor)",
                 textDecorationThickness: "2px",
                 textUnderlineOffset: "3px",
                 fontWeight: 600,
@@ -73,7 +73,7 @@ function renderMdInline(text: string): ReactNode[] {
             className="rf-md-spine"
             style={{
               textDecorationLine: "underline",
-              textDecorationColor: "var(--duo-green, currentColor)",
+              textDecorationColor: "var(--rf-brand, currentColor)",
               textDecorationThickness: "2px",
               textUnderlineOffset: "3px",
               fontWeight: 600,

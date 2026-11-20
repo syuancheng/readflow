@@ -115,17 +115,14 @@ export default function ImportForm() {
         onChange={(e) => setTitle(e.target.value)}
       />
 
-      <label className="rf-import-category mb-3">
-        <span className="text-xs font-bold text-ink-faint shrink-0">分类</span>
-        <select className="duo-input" aria-label="文章分类" value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="">未分类</option>
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </label>
+      <select className="duo-input mb-3" aria-label="文章分类" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">选择分类（可选）</option>
+        {CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
 
       {mode === "url" ? (
         <input

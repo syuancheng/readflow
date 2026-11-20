@@ -341,7 +341,7 @@ try {
   await page.locator("input[type=checkbox]").first().check();
   await page.waitForTimeout(300);
   const checkedBg = await page.evaluate(() => getComputedStyle(document.querySelector("input[type=checkbox]")).backgroundColor);
-  check("C30 下拉和复选框是统一的自绘样式（去掉浏览器默认外观，选中是近黑填充）", ctl.selAppearance === "none" && ctl.selArrow && ctl.cbAppearance === "none" && ctl.cbRadius === "4px" && checkedBg === "rgb(38, 38, 38)", JSON.stringify({ ...ctl, checkedBg }));
+  check("C30 下拉和复选框是统一的自绘样式（去掉浏览器默认外观，选中是墨绿填充）", ctl.selAppearance === "none" && ctl.selArrow && ctl.cbAppearance === "none" && ctl.cbRadius === "4px" && checkedBg === "rgb(31, 77, 54)", JSON.stringify({ ...ctl, checkedBg }));
   await page.screenshot({ path: path.join(SHOTS, "controls-welcome.png") });
 
   // ===== P54：首页文本行精简、问卷版式 =====
@@ -363,7 +363,7 @@ try {
   // ===== 头像有颜色（不是黑白灰）、原生下拉弹层是浅色 =====
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   const av = await page.evaluate(() => ({ bg: getComputedStyle(document.querySelector(".pm-avatar")).backgroundColor, scheme: getComputedStyle(document.documentElement).colorScheme }));
-  const grays = ["rgb(60, 60, 60)", "rgb(38, 38, 38)", "rgb(107, 107, 107)"];
+  const grays = ["rgb(60, 60, 60)", "rgb(38, 38, 38)", "rgb(107, 107, 107)", "rgb(42, 51, 38)", "rgb(28, 35, 25)"];
   check("C33 头像是有颜色的（按昵称稳定地挑一种，不是黑白灰）；页面声明浅色 color-scheme（原生下拉弹层是白的）", !grays.includes(av.bg) && /^rgb\(\d+, \d+, \d+\)$/.test(av.bg) && av.scheme === "light", JSON.stringify(av));
 
   // ===== 导入时可以选分类 =====
@@ -375,7 +375,7 @@ try {
   await page.waitForURL(/\/texts\//, { timeout: 20000 });
   const imported = await api("/api/texts", { cookie });
   const mine = (imported.data?.texts ?? []).find((t) => t.title.startsWith("A short imported text"));
-  check("C34 导入文本时可以选分类：下拉里有「未分类」和预设分类，选了「技术文档」就存成「技术文档」（不再全是未分类）", opts[0] === "未分类" && opts.includes("技术文档") && mine?.category === "技术文档", JSON.stringify({ opts, category: mine?.category }));
+  check("C34 导入文本时可以选分类：下拉里第一项是提示「选择分类（可选）」、后面是预设分类，选了「技术文档」就存成「技术文档」（不再全是未分类）", opts[0] === "选择分类（可选）" && opts.includes("技术文档") && mine?.category === "技术文档", JSON.stringify({ opts, category: mine?.category }));
 
   // ===== 窄屏：不要求手机体验，只保证不横向溢出 =====
   await page.setViewportSize({ width: 768, height: 900 });

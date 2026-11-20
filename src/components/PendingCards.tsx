@@ -12,6 +12,7 @@ import CardEditor from "@/components/CardEditor";
 import type { PreviewModel } from "@/lib/cards/render";
 import type { CardSpec } from "@/lib/cards/spec";
 import Icon from "@/components/Icon";
+import ProgressRing from "@/components/ProgressRing";
 
 type PendingCard = { cardId: string; setId: string; seq: number; needsReview: string | null; edited: boolean };
 type PendingWord = { wordId: string; lemma: string; displayForm: string; phonetic: string | null; isPhrase: boolean; cards: PendingCard[] };
@@ -290,7 +291,7 @@ export default function PendingCards({
           <div className="pc-bar-row">
             <button
               type="button"
-              className="duo-btn duo-btn-primary duo-btn-sm"
+              className="duo-btn duo-btn-primary duo-btn-sm rf-push-btn"
               disabled={running || pushIds.length === 0}
               onClick={() => void push(pushIds)}
             >
@@ -301,12 +302,8 @@ export default function PendingCards({
           {barError && <p className="pc-error" role="alert">{barError}</p>}
           {/* 进度条只在推送过程中出现；推完不留满格的条。全部成功由上层收尾，这里只处理「还没完 / 有失败」 */}
           {job && job.status === "running" && (
-            <div className="pc-progress" aria-live="polite">
-              <div className="duo-progress-wrap">
-                <div className="duo-progress">
-                  <div className="duo-progress-fill" style={{ width: `${job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0}%` }} />
-                </div>
-              </div>
+            <div className="pc-progress pc-progress-run" aria-live="polite">
+              <ProgressRing ratio={job.total ? (job.done + job.failed) / job.total : 0} size={20} label="推送进度" />
               <p>
                 正在推送：已推送 {job.done} / 共 {job.total}
                 {job.failed > 0 ? `，${job.failed} 张失败` : ""}

@@ -22,16 +22,22 @@
   --rf-green-700: #3f7f00; /* 绿色文字、图标 */
 
   /* 中性灰：全站唯一的灰阶 */
+  /* P56：「灰」带一点点绿（很浅很浅的绿灰），和 Logo 的绿是一家人，不再是纯灰。
+     对比度：600 在白底 5.9:1、在 50 / 100 底上 ≥ 5.2:1；800 在白底 13.1:1。 */
   --rf-gray-0:   #ffffff;
-  --rf-gray-50:  #f7f7f7;
-  --rf-gray-100: #f0f0f0;
-  --rf-gray-200: #e5e5e5;
-  --rf-gray-300: #d4d4d4;
-  --rf-gray-400: #afafaf;
-  --rf-gray-500: #8a8a8a;
-  --rf-gray-600: #6b6b6b; /* 白底 5.3:1，次要文字的下限 */
-  --rf-gray-800: #3c3c3c;
-  --rf-gray-900: #262626;
+  --rf-gray-50:  #f6f8f4;
+  --rf-gray-100: #edf2e9;
+  --rf-gray-200: #e0e8da;
+  --rf-gray-300: #cdd7c5;
+  --rf-gray-400: #a7b39d;
+  --rf-gray-500: #84917a;
+  --rf-gray-600: #5b6853;
+  --rf-gray-800: #2a3326;
+  --rf-gray-900: #1c2319;
+
+  /* 墨绿：主操作按钮、进度环、勾选 / 开关。很暗、不亮，和亮绿的 Logo 同色相。白字对比度 9.7:1 */
+  --rf-forest-700: #1f4d36;
+  --rf-forest-600: #2b6346;
 
   /* 辅助色：每种都有固定含义，见文档「颜色语义」 */
   --rf-blue-50:  #e8f6fe;
@@ -84,10 +90,13 @@
   --rf-brand-edge: var(--rf-green-600);
 
   /* 主操作：近黑色实心 —— 一屏只该有一个（参照 Claude / ChatGPT 的中性界面） */
-  --rf-accent:        var(--rf-gray-900);
-  --rf-accent-edge:   var(--rf-gray-900);
-  --rf-accent-text:   var(--rf-gray-800);
+  --rf-accent:        var(--rf-forest-700);
+  --rf-accent-edge:   var(--rf-forest-700);
+  --rf-accent-text:   var(--rf-forest-700);
   --rf-accent-soft:   var(--rf-gray-100);
+
+  /* 品牌浅绿：悬停 / 拖选一个词时的底色（原来的浅绿，不是灰） */
+  --rf-brand-soft: var(--rf-green-100);
 
   /* 查词高亮（阅读器 + 词库原句里的命中词） */
   /* 你查过的词：绿色下划线 + 悬停 / 选中时的浅绿底。这是整站唯一保留的「内容层」绿色（用户 2026-11-20 确认保留） */
@@ -124,7 +133,7 @@
   --rf-level-c-text: var(--rf-amber-700); --rf-level-c-bg: var(--rf-amber-50);
 
   /* 学习日历热力图 */
-  --rf-heat-0: #ededed;
+  --rf-heat-0: #e8eee3;
   --rf-heat-1: var(--rf-green-100);
   --rf-heat-2: #a8e86a;
   --rf-heat-3: #7acb2e;
