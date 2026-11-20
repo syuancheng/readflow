@@ -194,23 +194,25 @@ export function getProfileForPrompt(userId: string): PromptProfile {
 }
 
 /** 发给模型的画像文本不超过 LEARNER_BLOCK_MAX_CHARS，由 buildLearnerBlock 保证 */
-export function learnerBlockFor(userId: string): { block: string; detailed: boolean; personalized: boolean; rules: TeachingRules } {
+export function learnerBlockFor(userId: string): { block: string; stable: string; volatile: string; detailed: boolean; personalized: boolean; rules: TeachingRules } {
   const p = getProfileForPrompt(userId);
-  if (!p.personalized) return { block: "", detailed: false, personalized: false, rules: p.rules };
+  if (!p.personalized) return { block: "", stable: "", volatile: "", detailed: false, personalized: false, rules: p.rules };
   const recent = recentFeedbackFor(userId);
   // 没有可依据的档案：画像按个性化关闭处理；但明确规则仍生效——那不是「推断」，是学生的直接要求。
   const usable = hasUsableProfile({ survey: p.survey, stats: p.stats, note: p.note, recentFeedbackCount: recent.count });
+  const blockInput = {
+    level: p.level,
+    survey: p.survey,
+    stats: p.stats,
+    note: p.note,
+    recentFeedback: recent.lines,
+    levelOverride: p.levelOverride,
+  };
   return {
-    block: usable
-      ? buildLearnerBlock({
-          level: p.level,
-          survey: p.survey,
-          stats: p.stats,
-          note: p.note,
-          recentFeedback: recent.lines,
-          levelOverride: p.levelOverride,
-        })
-      : "",
+    block: usable ? buildLearnerBlock(blockInput) : "",
+    // P57：分层提示词用——稳定部分进用户层缓存，易变部分只放尾部
+    stable: usable ? buildLearnerBlock({ ...blockInput, part: "stable" }) : "",
+    volatile: usable ? buildLearnerBlock({ ...blockInput, part: "volatile" }) : "",
     detailed: p.survey?.stylePref === "detailed",
     personalized: usable,
     rules: p.rules,

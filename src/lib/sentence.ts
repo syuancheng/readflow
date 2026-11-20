@@ -111,7 +111,7 @@ export function splitSentences(text: string): Span[] {
 }
 
 /** 提取一段文本里的英文单词（小写），用于词数/生词密度统计 */
-function wordsOf(text: string): string[] {
+export function wordsOf(text: string): string[] {
   return [...text.matchAll(/[A-Za-z]+(?:['’-][A-Za-z]+)*/g)].map((m) => m[0].toLowerCase());
 }
 

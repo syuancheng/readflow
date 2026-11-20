@@ -81,10 +81,20 @@ export const DIGEST_PREFIX = "[要点] ";
  * 给一串历史排一个压缩方案。输入必须是已经筛过的、有内容的轮次（进行中 / 出错的不在里面）。
  * 输入少于等于「1 + 最近 3」轮时，所有轮次都是完整的，内容和原来逐字一致（只做清理和超长截断）。
  */
-export function planHistory(input: readonly HistoryTurn[], budget = HISTORY_BUDGET_TOKENS): HistoryPlan {
+export function planHistory(
+  input: readonly HistoryTurn[],
+  budget = HISTORY_BUDGET_TOKENS,
+  opts?: { blockSize?: number },
+): HistoryPlan {
   const n = input.length;
   const cleaned = input.map((t) => cleanAnswer(t.text));
-  const tiers: Tier[] = input.map((_, i) => (i === 0 ? "pinned" : i >= n - HISTORY_RECENT_TURNS ? "full" : "digest"));
+  // 默认（P45）：最近 3 轮完整，更早的都压成要点——每多一轮，最老的「近期」一轮就翻转一次。
+  // 分块（P57，提示词缓存用）：压成要点的轮数只能是 blockSize 的整数倍，攒满一块才压一次，
+  // 压后不再变，历史前缀每 blockSize 轮才变一次。完整轮数在 RECENT ~ RECENT+blockSize-1 之间。
+  const digestCount = opts?.blockSize
+    ? Math.floor(Math.max(0, n - 1 - HISTORY_RECENT_TURNS) / opts.blockSize) * opts.blockSize
+    : Math.max(0, n - 1 - HISTORY_RECENT_TURNS);
+  const tiers: Tier[] = input.map((_, i) => (i === 0 ? "pinned" : i <= digestCount ? "digest" : "full"));
   const caps = input.map(() => HISTORY_FULL_MAX_CHARS);
 
   const askOf = (i: number) => input[i].ask?.trim().slice(0, HISTORY_ASK_MAX_CHARS) || undefined;

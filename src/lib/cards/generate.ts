@@ -248,9 +248,9 @@ function buildRun(user: Who, ctx: CardContext, answerId: string | undefined): Ru
   let learnerBlock: string;
   if (cached) {
     base = [...cached.messages, { role: "assistant", content: cached.assistantText }];
-    learnerBlock = learnerBlockOfMessages(cached.messages);
+    learnerBlock = cached.learnerBlock ?? learnerBlockOfMessages(cached.messages);
   } else {
-    let profile: ReturnType<typeof learnerBlockFor> = { block: "", detailed: false, personalized: false, rules: { can: [], cannot: [] } };
+    let profile: ReturnType<typeof learnerBlockFor> = { block: "", stable: "", volatile: "", detailed: false, personalized: false, rules: { can: [], cannot: [] } };
     try {
       profile = learnerBlockFor(user.id);
     } catch (err) {

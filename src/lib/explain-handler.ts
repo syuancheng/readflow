@@ -17,6 +17,8 @@ import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
 import { learnerBlockFor, linkExplainContext, logExplain, recordExplainUsage, saveAnswer } from "@/lib/learner-store";
 import type { ChatUsage } from "@/lib/providers";
+import { paragraphWindowFor, promptLayout } from "@/lib/prompt/layout-flag";
+import { windowFromLayers } from "@/lib/prompt/layers";
 import { buildRulesSystemPrompt } from "@/lib/learner/teaching-rules";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
 import { cardsEnabled } from "@/lib/cards/flags";
@@ -112,7 +114,7 @@ export async function handleExplain(
 
   // P32 F4：画像只在这一处接入，网站与插件自动一致。开关关闭时 block 为空串、
   // personalized 为 false，提示词逐字回到旧规则。
-  let profile: ReturnType<typeof learnerBlockFor> = { block: "", detailed: false, personalized: false, rules: { can: [], cannot: [] } };
+  let profile: ReturnType<typeof learnerBlockFor> = { block: "", stable: "", volatile: "", detailed: false, personalized: false, rules: { can: [], cannot: [] } };
   try {
     profile = learnerBlockFor(user.id);
   } catch (err) {
@@ -133,7 +135,7 @@ export async function handleExplain(
       dictHit: params.signals?.dictHit,
       repeatCount: params.signals?.repeatCount,
       paraId: params.anchor?.paragraphId,
-      layout: "v1",
+      layout: params.monolingual === true ? "v1" : promptLayout(),
     });
   } catch (err) {
     console.error("[learner] 记录讲解事件失败:", err);
@@ -161,8 +163,23 @@ export async function handleExplain(
     console.error("[cards] 读取做卡开关失败，按开启处理:", err);
   }
 
+  // P57b：提示词结构。v2 只支持中文讲解；monolingual 的老调用一律走 v1
+  const layout = params.monolingual === true ? "v1" : promptLayout();
+  const v2: Partial<ExplainParams> =
+    layout === "v2"
+      ? {
+          layout: "v2",
+          learnerStable: profile.stable || undefined,
+          learnerVolatile: profile.volatile || undefined,
+          articleBlock: domainBlockFor(params.textId, user.id) || undefined,
+          paragraphWindow:
+            paragraphWindowFor(user.id, params.textId, params.anchor) ??
+            (params.contextLayers ? windowFromLayers(params.contextLayers) : undefined),
+        }
+      : {};
   const enriched: ExplainParams = {
     ...params,
+    ...v2,
     learnerBlock: profile.block || undefined,
     personalized: profile.personalized,
     detailed: profile.detailed,
@@ -217,6 +234,7 @@ export async function handleExplain(
               userId: user.id,
               contextId: linkedContextId,
               messages: explainTurns(enriched),
+              learnerBlock: profile.block,
               assistantText,
               provider: ai.settings?.activeProvider ?? "",
               model: "",

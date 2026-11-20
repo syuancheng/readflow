@@ -1,5 +1,7 @@
 import { ASK_MAX_CHARS } from "./ask-presets";
 import { planHistory } from "./history-compress";
+import { assembleExplain } from "./prompt/layers";
+import type { ParagraphWindow } from "./prompt/paragraph-window";
 import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
@@ -115,6 +117,19 @@ export type ExplainParams = {
    * 空/不传时 explainTurns 仍是原来的 [system, user] 两条，逐字不变。
    */
   history?: ExplainHistoryTurn[];
+  /**
+   * P57b：提示词结构。缺省 / "v1" = 原来的拼法（逐字不变）；"v2" = 分层结构（见 prompt/layers.ts）。
+   * v2 只支持中文讲解（monolingual 为真时自动退回 v1）。
+   */
+  layout?: "v1" | "v2";
+  /** v2 L3：段落窗口，由服务端按 textId + anchor 算，客户端传值只作回退 */
+  paragraphWindow?: ParagraphWindow;
+  /** v2 L1：学习档案里变动慢的部分（身份、阅读目的、备考、风格、老师笔记） */
+  learnerStable?: string;
+  /** v2 L5：学习档案里变动快的部分（水平、难点、反馈） */
+  learnerVolatile?: string;
+  /** v2 L2：标题与分类（任何 askKind 都带；v1 只在 domain 时带） */
+  articleBlock?: string;
 };
 
 /**
@@ -128,7 +143,7 @@ export type ExplainParams = {
  * P32：个性化讲解的深度指引（中文人设）。逐字取自实现说明 §5.3。
  * 只替换「答案深度」那一段，其余提示词一个字都不动——开关关闭时就是回退保障。
  */
-const DEPTH_GUIDANCE_ZH = `【答案深度由你判断，不要问我】
+export const DEPTH_GUIDANCE_ZH = `【答案深度由你判断，不要问我】
 根据「学生档案」和「观察」判断讲多深：L1 只给这句里的意思；L2 加上在这句里怎么理解或搭配；L3 再加「整句大意：」一句话概括；L4 再加句子地图，必要时给一个例句。拖选长片段、档案显示长句是难点时往深处走；档案显示水平高、偏好简洁、以往反馈「太深」偏多，都是判断的线索。「之前问过的选区」只用来避免重复讲同一内容，不决定讲多深。偏好简洁的学生最多加「整句大意：」，不主动画句子地图。学生档案里的「最近的反馈」是他对你最近几次讲解的评价（「太浅」「刚好」「太深」各一条）：「太浅」是讲完他还是没懂，「刚好」是他借着你的讲解自己读懂了，「太深」是你讲得太透、他没机会自己想。设这三档只为提醒你一件事——别每次都直接把答案、把句子意思告诉他，那样他会失去自己去理解的机会。这是评价的含义和设它的原因，不是操作清单：不要照着某次讲法复制或规避，怎么讲仍由你按这次的选区和档案判断；「最近的反馈」与「以往反馈」不一致时，以最近的为准。阅读目的会影响义项选择（例如技术文档读者优先给技术含义）。不论讲多深，第一行永远是「释义：」。
 判断句法角色、两次选区是否重叠是老师的本职；不要输出判断过程，直接用答案体现。`;
 
@@ -153,7 +168,7 @@ function personalizeDepth(prompt: string, monolingual: boolean): string {
  * 个性化开关打开和关闭时都追加（PRD 规定两者互不依赖）——「P32 快照逐字不变」
  * 指的是讲解深度那部分，制卡建议是 P33 新增的，快照测试同步更新（用户已确认）。
  */
-const CARD_SUGGESTION_ZH = `【制卡建议（可选，只在最后一行）】
+export const CARD_SUGGESTION_ZH = `【制卡建议（可选，只在最后一行）】
 回答结束后，如果你认为这个词值得做成记忆卡，在最后一行输出：
 制卡建议：<理由，一句话不超过 30 个字>
 - 值得做：正好在他词汇量的边缘；和他的阅读目的相关；在不同文章里第二次遇到；是值得掌握的搭配或短语。
@@ -300,7 +315,7 @@ export function buildSystemPrompt(
 }
 
 /** 旧提示词原样保留：开关关闭时逐字返回，不做任何「顺手优化」 */
-function legacySystemPrompt(language: string, monolingual: boolean): string {
+export function legacySystemPrompt(language: string, monolingual: boolean): string {
   if (monolingual) {
     return `You are a native ${language} teacher who also understands Chinese. Your student is a Chinese native speaker reading a real ${language} text and has selected a piece of it to ask about. Knowing Chinese means you can anticipate where Chinese speakers misread ${language}: tense, articles, prepositions, polysemy, clause structures Chinese lacks, tone and register.
 
@@ -516,11 +531,18 @@ export function narrowQuote(v: unknown): ExplainQuote | undefined {
  * 先过 planHistory 压缩（P45）：首次讲解和最近 3 轮完整，中间压成要点；轮数不多时内容与原来逐字一致。
  * 有整轮被丢掉时，开头加一句说明，让模型知道前面有省略。空文本轮次丢弃。
  */
-export function historyTurns(history: readonly ExplainHistoryTurn[] | undefined): ChatTurn[] {
+export function historyTurns(
+  history: readonly ExplainHistoryTurn[] | undefined,
+  opts?: { blockSize?: number },
+): ChatTurn[] {
   if (!history || history.length === 0) return [];
   const eligible = history.filter((t) => t.text?.trim());
   if (eligible.length === 0) return [];
-  const plan = planHistory(eligible.map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text.trim() })));
+  const plan = planHistory(
+    eligible.map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text.trim() })),
+    undefined,
+    opts?.blockSize ? { blockSize: opts.blockSize } : undefined,
+  );
   const out: ChatTurn[] = [];
   if (plan.omitted > 0) {
     out.push({ role: "system", content: `（这处批注上更早的 ${plan.omitted} 轮对话已省略，下面只保留了要点和最近的几轮。）` });
@@ -533,7 +555,36 @@ export function historyTurns(history: readonly ExplainHistoryTurn[] | undefined)
   return out;
 }
 
+/**
+ * v2 的最后一条 user 消息（L5）：变体指令 → 易变档案 → 所在句 → 选区 → 观察 → 引用 → 问题。
+ * 顺序固定、缺项整行省略；问题放最后。
+ */
+export function buildUserTail(params: ExplainParams, variantBlock: string): string {
+  const question = params.prompt
+    ? `学生的问题: ${params.prompt}`
+    : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
+  const sentence = (params.paragraphWindow?.sentence || params.contextLayers?.sentence || params.signals?.sentence || "").trim();
+  const quoteText = params.quote?.text?.trim();
+  const quote = quoteText
+    ? `你引用了自己上一条回答里的这段话：\n「${quoteText.slice(0, EXPLAIN_QUOTE_MAX_CHARS)}」`
+    : "";
+  // observations() 在有 contextLayers 时不重复所在句；v2 所在句单独成行，所以这里同样跳过
+  const obs = observations({ ...params, contextLayers: params.contextLayers ?? { sentence, nearContext: [] } });
+  return [
+    variantBlock.trim(),
+    params.learnerVolatile?.trim() ?? "",
+    sentence ? `所在句: "${sentence}"` : "",
+    `用户选中: "${params.word}"`,
+    obs,
+    quote,
+    question,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function explainTurns(params: ExplainParams): ChatTurn[] {
+  if (params.layout === "v2" && params.monolingual !== true) return assembleExplain(params);
   const language = params.language ?? "en";
   const monolingual = params.monolingual ?? false;
   // P40：只有「从内容角度讲讲」这一轮换人设；其他所有 askKind 仍走逐字不变的英语老师。

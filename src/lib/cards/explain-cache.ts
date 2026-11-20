@@ -14,6 +14,8 @@ export type CacheEntry = {
   contextId: string;
   messages: CacheTurn[];
   assistantText: string;
+  /** P57b：做卡要用的完整学习档案文本。v2 的档案拆在两处，不能再从第一条 user 消息里抠 */
+  learnerBlock?: string;
   provider: string;
   model: string;
   at: number;

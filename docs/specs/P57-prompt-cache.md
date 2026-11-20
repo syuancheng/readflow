@@ -151,6 +151,16 @@
 - `settings` 站级行 `prompt.layout`，默认 `v1`；`handleExplain` 读取（沿用 `siteCardsSettings` 的读法，`explain-handler.ts` 里的 `cardsOn`）。
 - 账号级灰度：可按用户 id 取模，先对 owner 账号开启，看度量再放量。
 
+### 3.10 P57b 实现说明（已完成，与上文的差异）
+
+- **开关**：环境变量 `READFLOW_PROMPT_LAYOUT=v1|v2` 优先，其次站级设置行 `prompt.layout`（user_id=`local`），默认 v1；读取在每次请求时发生，改完立即生效。见 `src/lib/prompt/layout-flag.ts`（含一行 SQL）。
+- **L0 不带深度变体**：个性化用户的「答案深度」指引放在 **L1**（用户层，标题写明"替代上文答案深度"），L0 永远是同一份；制卡规则永远在 L0，关闭时尾部加一行"本次不要输出制卡建议行"。
+- **档案拆分与设计稿不同**：「估计水平」依赖提问次数、会随每次提问变化，所以**放在易变段（尾部）**；稳定段只含身份、阅读目的、备考、讲解风格、老师笔记。`buildLearnerBlock` 新增 `part: "stable" | "volatile"`，不传则与原来逐字一致。
+- **段落窗口服务端计算**：`paragraphWindowFor(userId, textId, anchor)`（只取该用户自己的文章）；取不到则用客户端的两层上下文折成窗口（`windowFromLayers`）。窗口不跨段取后文，长段落按固定网格取"前一块 + 所在块 + 后一块"。
+- **做卡**：讲解缓存新增 `learnerBlock` 字段（v2 的档案分在两处，不能再从第一条 user 里抠）；无缓存命中的重算分支仍按 v1 拼（做卡命中缓存时直接复用讲解的 messages，不受影响）。
+- **历史分块压缩**：`planHistory(input, budget, { blockSize })`；v2 用 3。阅读页界面的"更早的对话已压缩"提示仍按默认规则算，块内可能与服务端略有出入，只影响提示。
+- **测试**：`tests/unit/prompt-layers.test.ts`（前缀不变量、窗口、档案拆分、历史分块）与 `scripts/e2e-prompt-layout.mjs`（假模型模拟前缀缓存，对比 v1/v2，13 项）。
+
 ## 4. P57c 内容改写
 
 - 独立文件 `src/lib/prompt/l0-v2.ts`，v1 的 `legacySystemPrompt` 不动。

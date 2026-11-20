@@ -41,6 +41,9 @@ export function hasUsableProfile(input: {
 }
 
 const HEAD = "学生档案（供你判断讲多深、讲什么；回答里不要提到这些信息）：";
+const HEAD_VOLATILE = "学生近况（随提问变化，供你判断讲多深；回答里不要提到这些信息）：";
+const STABLE_KEYS = new Set(["identity", "goals", "target", "style", "note"]);
+const VOLATILE_KEYS = new Set(["level", "difficulties", "feedback", "recent-head", "recent"]);
 const P_LEVEL = "- 估计水平：";
 /** 2026-11-18：低置信时提示模型「仅供参考」，避免把 29 次查词的猜测当定论 */
 const P_LEVEL_LOW = "（低置信，仅供参考）";
@@ -97,6 +100,13 @@ export function buildLearnerBlock(input: {
   recentFeedback?: string[];
   /** 用户手填的水平覆盖：显示时标注「你设定的」，且不加低置信提示 */
   levelOverride?: { cefr: Cefr | null; vocab: number | null } | null;
+  /**
+   * P57：只要档案的一部分（分层提示词用）。
+   * stable = 身份 / 阅读目的 / 备考 / 讲解风格 / 老师笔记（以天计才变，进用户层缓存）；
+   * volatile = 估计水平 / 常见难点 / 反馈统计 / 最近反馈（随提问次数变，只放尾部）。
+   * 不传 = 完整档案，逐字与原来一致。
+   */
+  part?: "stable" | "volatile";
 }): string {
   const { level, survey, stats, note } = input;
   const recent = (input.recentFeedback ?? []).filter((l) => l.trim());
@@ -145,9 +155,14 @@ export function buildLearnerBlock(input: {
   }
   if (note?.trim()) lines.push({ key: "note", text: P_NOTE + note.trim() });
 
+  if (input.part) {
+    const keep = input.part === "stable" ? STABLE_KEYS : VOLATILE_KEYS;
+    for (let i = lines.length - 1; i >= 0; i--) if (!keep.has(lines[i].key)) lines.splice(i, 1);
+  }
   if (lines.length === 0) return "";
 
-  const join = (ls: Line[]) => `${HEAD}\n${ls.map((l) => l.text).join("\n")}`;
+  const head = input.part === "volatile" ? HEAD_VOLATILE : HEAD;
+  const join = (ls: Line[]) => `${head}\n${ls.map((l) => l.text).join("\n")}`;
   let result = join(lines);
   if (result.length <= LEARNER_BLOCK_MAX_CHARS) return result;
 
