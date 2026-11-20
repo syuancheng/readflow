@@ -295,6 +295,15 @@ try {
   await page.locator(".rf-totop-in").waitFor({ timeout: 3000 });
   await page.screenshot({ path: path.join(SHOTS, "chat-totop-1440.png") });
   const inMain = await page.evaluate(() => Boolean(document.querySelector(".rf-totop-in")?.closest(".reader-main")));
+  // 按钮整个在正文右侧的空白里，不压在文章上
+  const clear = await page.evaluate(() => {
+    const b = document.querySelector(".rf-totop-in").getBoundingClientRect();
+    const rects = [...document.querySelectorAll(".reader-main .reading-body, .reader-main pre, .reader-main p, .reader-main table")].map((e) => e.getBoundingClientRect());
+    const maxRight = Math.max(...rects.map((r) => r.right));
+    const sc = document.querySelector(".reader-main").getBoundingClientRect();
+    return { btnLeft: b.left, contentRight: maxRight, btnRight: b.right, scrollerRight: sc.right };
+  });
+  check("C26c 回到顶部按钮不压在文章上（按钮左边缘在正文最右边缘之右），也没超出正文栏", clear.btnLeft >= clear.contentRight && clear.btnRight <= clear.scrollerRight, JSON.stringify(clear));
   await page.locator(".rf-totop-in").click();
   await page.waitForFunction(() => document.querySelector(".reader-main").scrollTop < 5, null, { timeout: 5000 });
   await page.waitForTimeout(300);

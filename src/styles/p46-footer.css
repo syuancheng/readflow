@@ -48,9 +48,10 @@
 .rf-totop:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 /* 阅读页宽屏：挂在正文栏里。外层是高度为 0 的粘性容器（不增加滚动高度），按钮浮在它上面 */
 .rf-totop-slot { position: sticky; bottom: 0; height: 0; z-index: var(--rf-z-sticky); }
+/* 正文栏右侧专门留了一条空白（.reader-main 的 padding-right），按钮整个放在空白里，不盖住文章 */
 .rf-totop-in {
   position: absolute;
-  right: var(--rf-space-2);
+  right: calc(-1 * var(--rf-space-12));
   bottom: var(--rf-space-4);
 }
 /* 手机有底部导航（64px），按钮抬到它上面 */
