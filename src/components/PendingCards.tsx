@@ -31,6 +31,15 @@ type Job = {
   audioMissing?: number;
 };
 
+/** 与设置页 .st-select-arrow 同款的 17px chevron，两个 select 共用（R-01） */
+function ChevronIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 /** 待推送总数；词库左侧筛选栏的「待推送 (N)」用 */
 export async function fetchPendingTotal(): Promise<number | null> {
   try {
@@ -237,21 +246,27 @@ export default function PendingCards({
           <div className="pc-bar-row">
             <label className="pc-field">
               牌组
-              <select className="duo-input" value={deckId} onChange={(e) => { setDeckId(e.target.value); setChapterId(""); }}>
-                <option value="">选择牌组</option>
-                {decks.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
+              <span className="st-select-wrap">
+                <select className="duo-input duo-select" value={deckId} onChange={(e) => { setDeckId(e.target.value); setChapterId(""); }}>
+                  <option value="">选择牌组</option>
+                  {decks.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+                <span className="st-select-arrow"><ChevronIcon /></span>
+              </span>
             </label>
             <label className="pc-field">
               章节
-              <select className="duo-input" value={chapterId} disabled={perArticle || !deckId} onChange={(e) => setChapterId(e.target.value)}>
-                <option value="">{perArticle ? "按文章自动建章节" : "选择章节"}</option>
-                {chapters.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+              <span className="st-select-wrap">
+                <select className="duo-input duo-select" value={chapterId} disabled={perArticle || !deckId} onChange={(e) => setChapterId(e.target.value)}>
+                  <option value="">{perArticle ? "按文章自动建章节" : "选择章节"}</option>
+                  {chapters.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <span className="st-select-arrow"><ChevronIcon /></span>
+              </span>
             </label>
           </div>
           <label className="pc-check">

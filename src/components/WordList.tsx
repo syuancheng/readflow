@@ -87,7 +87,6 @@ function sourceTarget(c: WordContextRow): { href: string; external: boolean } | 
 
 /** 状态筛选：不绑死墨墨，以后接 Anki 等也是这几档 */
 type StatusFilter = "all" | "starred" | "todo" | "done" | "pending";
-type TypeFilter = "all" | "word" | "phrase";
 type SortKey = "recent" | "oldest" | "alpha";
 
 const DELETED_KEY = "__deleted__";
@@ -126,7 +125,6 @@ export default function WordList({
       if (n !== null) setPendingTotal(n);
     });
   }, [cardsEnabled]);
-  const [type, setType] = useState<TypeFilter>("all");
   const [article, setArticle] = useState<string>("");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
@@ -162,8 +160,6 @@ export default function WordList({
       if (status === "todo" && w.exported.length) return false;
       if (status === "done" && !w.exported.length) return false;
       if (article && w.articleKey !== article) return false;
-      if (type === "word" && w.isPhrase) return false;
-      if (type === "phrase" && !w.isPhrase) return false;
       if (q) {
         const hay = `${w.displayForm} ${w.lemma} ${w.translation}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -174,7 +170,7 @@ export default function WordList({
     else if (sort === "oldest") list.sort((a, b) => a.lastAt - b.lastAt);
     else list.sort((a, b) => a.displayForm.localeCompare(b.displayForm, "en", { sensitivity: "base" }));
     return list;
-  }, [words, status, type, article, query, sort]);
+  }, [words, status, article, query, sort]);
 
   const shownSelected = shown.filter((w) => selected.has(w.id));
   const allChecked = shown.length > 0 && shownSelected.length === shown.length;
@@ -255,24 +251,6 @@ export default function WordList({
             >
               <span className="truncate">{label}</span>
               <span className="wl-side-count">{n}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="wl-type" role="group" aria-label="单词或短语">
-          {(
-            [
-              ["all", "全部"],
-              ["word", "单词"],
-              ["phrase", "短语"],
-            ] as [TypeFilter, string][]
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              className={`wl-type-btn${type === k ? " wl-type-btn-on" : ""}`}
-              onClick={() => setType(k)}
-            >
-              {label}
             </button>
           ))}
         </div>

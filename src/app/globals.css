@@ -2889,38 +2889,6 @@ body {
   color: var(--rf-text-secondary);
 }
 
-/* 全部 / 单词 / 短语：分段控件 */
-.wl-type {
-  display: flex;
-  gap: 4px;
-  margin-top: 16px;
-  padding: 4px;
-  background: var(--rf-bg-subtle);
-  border-radius: var(--rf-radius-md);
-}
-
-.wl-type-btn {
-  flex: 1;
-  height: 32px;
-  border-radius: var(--rf-radius-sm);
-  font-size: var(--rf-text-sm);
-  font-weight: 600;
-  color: var(--rf-text-secondary);
-  cursor: pointer;
-  transition: background var(--rf-duration-fast) var(--rf-ease), color var(--rf-duration-fast) var(--rf-ease);
-}
-
-.wl-type-btn:hover {
-  color: var(--rf-text-primary);
-}
-
-.wl-type-btn-on,
-.wl-type-btn-on:hover {
-  background: var(--rf-bg-surface);
-  color: var(--rf-text-primary);
-  box-shadow: var(--rf-shadow-sm);
-}
-
 .wl-search {
   flex: 1;
   display: flex;
@@ -2998,10 +2966,6 @@ body {
   .wl-side-title {
     margin: 12px 0 4px;
     padding: 0;
-  }
-
-  .wl-type {
-    max-width: 260px;
   }
 
 }
@@ -3404,6 +3368,9 @@ a:focus-visible,
   font-weight: 700;
   color: var(--rf-text-secondary);
 }
+/* 原生 select 去掉默认小三角，右侧留给自定义箭头（与设置页 .st-select-arrow 同款） */
+.duo-select { appearance: none; padding-right: 40px; cursor: pointer; }
+.duo-select:disabled { cursor: default; }
 .pc-check { display: flex; align-items: center; gap: 8px; font-size: var(--rf-text-sm); font-weight: 600; }
 .pc-note, .pc-count { font-size: var(--rf-text-xs); color: var(--rf-text-secondary); }
 .pc-link { margin-left: 8px; text-decoration: underline; }
