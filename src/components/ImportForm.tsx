@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { describeSignals, detectFormat } from "@/lib/import/detect";
 import type { ImportFormatChoice } from "@/lib/import/types";
+import { CATEGORIES } from "@/components/TextManageDialog";
 import Icon, { type IconName } from "@/components/Icon";
 
 type Mode = "paste" | "file" | "url";
@@ -27,6 +28,8 @@ export default function ImportForm() {
   const [body, setBody] = useState("");
   const [url, setUrl] = useState("");
   const [format, setFormat] = useState<ImportFormatChoice>("auto");
+  // 导入时就能选分类（原来只能导入后再去「编辑」里改，所以所有文本都是「未分类」）
+  const [category, setCategory] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -63,6 +66,7 @@ export default function ImportForm() {
           text: mode === "url" ? undefined : body,
           format: mode === "url" ? undefined : format,
           sourceType: mode === "file" ? "file" : "paste",
+          category: category || undefined,
         }),
       });
       const data = await res.json();
@@ -72,6 +76,7 @@ export default function ImportForm() {
       setBody("");
       setUrl("");
       setFormat("auto");
+      setCategory("");
       if (fileRef.current) fileRef.current.value = "";
       router.push(`/texts/${data.id}`);
     } catch (err) {
@@ -109,6 +114,18 @@ export default function ImportForm() {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
+
+      <label className="rf-import-category mb-3">
+        <span className="text-xs font-bold text-ink-faint shrink-0">分类</span>
+        <select className="duo-input" aria-label="文章分类" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">未分类</option>
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </label>
 
       {mode === "url" ? (
         <input

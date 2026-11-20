@@ -32,6 +32,8 @@ export async function POST(req: Request) {
     url?: string;
     format?: ImportFormatChoice;
     sourceType?: "paste" | "file";
+    /** 导入时选的分类（可选，≤30 字符；空 = 未分类） */
+    category?: unknown;
   };
   try {
     body = await req.json();
@@ -75,6 +77,7 @@ export async function POST(req: Request) {
       blocks,
       sourceFormat,
       sourceRaw,
+      category: typeof body.category === "string" ? body.category.trim().slice(0, 30) || null : null,
     });
     return NextResponse.json(created);
   } catch (e) {

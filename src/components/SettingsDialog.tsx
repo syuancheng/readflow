@@ -7,6 +7,7 @@ import { withRetry } from "@/lib/retry";
 import {
   DEFAULT_PROFILE,
   initialsFrom,
+  avatarColorVar,
   normalizeProfile,
   PROFILE_CHANGED_EVENT,
   PROFILE_LIMITS,
@@ -762,7 +763,7 @@ export default function SettingsDialog({
                           style={
                             profileDraft.avatar
                               ? { backgroundImage: `url("${profileDraft.avatar}")` }
-                              : undefined
+                              : { background: avatarColorVar(profileDraft.displayName) }
                           }
                         >
                           {!profileDraft.avatar && initialsFrom(profileDraft.displayName)}

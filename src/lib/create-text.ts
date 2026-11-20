@@ -44,6 +44,8 @@ export type CreateTextInput = {
   blocks: Block[];
   sourceFormat: SourceFormat;
   sourceRaw: string;
+  /** 分类（导入时可选）；空 = 未分类 */
+  category?: string | null;
 };
 
 export type CreatedText = {
@@ -92,6 +94,7 @@ export function createText(input: CreateTextInput): CreatedText {
         title,
         sourceType: input.sourceType,
         sourceUrl: input.sourceUrl,
+        category: input.category?.trim() ? input.category.trim().slice(0, 30) : null,
         language: "en",
         wordCount,
         createdAt: now,

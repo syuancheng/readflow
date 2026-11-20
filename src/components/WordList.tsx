@@ -435,11 +435,14 @@ export default function WordList({
                                   插件
                                 </span>
                               )}
-                              {w.exported.map((b) => (
-                                <span key={b.target} className="wl-tag wl-export-tag" title={`已导出到${b.app}：${b.cardTypes.join("、")}`}>
-                                  {b.app} ✓
+                              {w.exported.length > 0 && (
+                                <span
+                                  className="wl-tag wl-export-tag"
+                                  title={w.exported.map((b) => `已导出到${b.app}：${b.cardTypes.join("、")}`).join("；")}
+                                >
+                                  已建卡
                                 </span>
-                              ))}
+                              )}
                             </div>
                             <p className="wl-snippet">
                               {c && c.snippet.hit ? (
@@ -476,7 +479,7 @@ export default function WordList({
                                   w.phonetic ? `/${normalizePhonetic(w.phonetic)}/` : null,
                                   w.isPhrase ? "短语" : null,
                                   w.pos,
-                                  ...w.exported.map((b) => `${b.app} ✓ ${b.cardTypes.join("·")}`),
+                                  ...w.exported.map((b) => `已建卡 · ${b.cardTypes.join("·")}`),
                                 ]
                                   .filter(Boolean)
                                   .join(" · ") || "\u00a0"}

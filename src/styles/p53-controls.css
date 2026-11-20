@@ -7,6 +7,12 @@
  * - 对比：未选中是白底灰边，选中是近黑实心——一眼分清。
  */
 
+/* 浏览器原生的下拉列表弹层（点开 select 后那个小菜单）会跟着系统深色模式变成黑色半透明。
+   产品没有深色模式，统一声明浅色：弹层、滚动条、原生控件都是白底 */
+:root { color-scheme: light; }
+select option,
+select optgroup { background-color: var(--rf-bg-surface); color: var(--rf-text-primary); }
+
 /* ===== 下拉：去掉浏览器自带的箭头，统一一个灰色的小箭头 =====
    设置页的 .st-select 和 .duo-select 自己叠了一个箭头元素，排除掉免得出现两个箭头 */
 select:not(.st-select):not(.duo-select) {

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   DEFAULT_PROFILE,
   initialsFrom,
+  avatarColorVar,
   normalizeProfile,
   PROFILE_CHANGED_EVENT,
   type Profile,
@@ -183,7 +184,7 @@ export default function ProfileMenu() {
         <span
           className="pm-avatar"
           data-avatar={profile.avatar ? "image" : "initials"}
-          style={profile.avatar ? { backgroundImage: `url("${profile.avatar}")` } : undefined}
+          style={profile.avatar ? { backgroundImage: `url("${profile.avatar}")` } : { background: avatarColorVar(profile.displayName) }}
           aria-hidden
         >
           {!profile.avatar && initialsFrom(profile.displayName)}
