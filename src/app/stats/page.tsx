@@ -42,22 +42,18 @@ export default async function StatsPage() {
         <BigStat
           value={stats.savedCount}
           label="收集生词"
-          icon="⚡"
         />
         <BigStat
           value={stats.streakDays}
           label="连续天数"
-          icon="🔥"
         />
         <BigStat
           value={stats.bestStreak}
           label="最长连续"
-          icon="🏅"
         />
         <BigStat
           value={stats.textCount}
           label="读过的文本"
-          icon="📚"
         />
       </div>
 
@@ -187,13 +183,10 @@ export default async function StatsPage() {
 }
 
 /** 统计数字卡：数字用主文字色，emoji 是唯一的游戏化点缀（规范 §1.1 / §7） */
-function BigStat({ value, label, icon }: { value: number; label: string; icon: string }) {
+function BigStat({ value, label }: { value: number; label: string }) {
   return (
     <div className="duo-card p-6">
-      <div className="flex items-center gap-2 text-sm text-ink-soft">
-        <span aria-hidden>{icon}</span>
-        {label}
-      </div>
+      <div className="text-sm text-ink-soft">{label}</div>
       <div className="text-3xl font-extrabold mt-2">{value}</div>
     </div>
   );

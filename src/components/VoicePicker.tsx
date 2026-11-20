@@ -39,7 +39,7 @@ export default function VoicePicker() {
         speak("Hello, this is how I sound.");
       }}
     >
-      <option value="">🔊 自动音色</option>
+      <option value="">自动音色</option>
       {voices.map((v) => (
         <option key={v.name} value={v.name}>
           {v.name} · {v.lang.replace("_", "-")}

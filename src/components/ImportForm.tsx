@@ -4,13 +4,14 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { describeSignals, detectFormat } from "@/lib/import/detect";
 import type { ImportFormatChoice } from "@/lib/import/types";
+import Icon, { type IconName } from "@/components/Icon";
 
 type Mode = "paste" | "file" | "url";
 
-const TABS: { key: Mode; label: string; icon: string }[] = [
-  { key: "paste", label: "粘贴", icon: "📋" },
-  { key: "file", label: "上传", icon: "📁" },
-  { key: "url", label: "网页", icon: "🔗" },
+const TABS: { key: Mode; label: string; icon: IconName }[] = [
+  { key: "paste", label: "粘贴", icon: "paste" as const },
+  { key: "file", label: "上传", icon: "upload" as const },
+  { key: "url", label: "网页", icon: "link" as const },
 ];
 
 const FORMATS: { key: ImportFormatChoice; label: string }[] = [
@@ -96,7 +97,7 @@ export default function ImportForm() {
             }}
             className={`duo-tab ${mode === t.key ? "duo-tab-active" : ""}`}
           >
-            <span>{t.icon}</span>
+            <Icon name={t.icon} size={16} />
             {t.label}
           </button>
         ))}

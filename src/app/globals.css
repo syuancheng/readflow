@@ -8,6 +8,7 @@
 @import "../styles/p46-footer.css";
 @import "../styles/p49-scrollbar.css";
 @import "../styles/p51-wordlib.css";
+@import "../styles/p53-controls.css";
 
 :root {
   /* 旧变量名 → 设计 token 的别名（迁移期保留，新代码只写 --rf-*）
@@ -493,14 +494,18 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
+/* P53：和词库的筛选 chip（.duo-filter-chip）同一种形态：1px 细线、胶囊、600 字重；选中是灰底 */
 .rf-format-chip {
-  font-size: var(--rf-text-xs);
-  font-weight: 800;
-  padding: 4px 12px;
-  border-radius: var(--rf-radius-sm);
-  border: 2px solid var(--duo-border);
-  background: var(--duo-bg);
-  color: var(--duo-ink-soft);
+  display: inline-flex;
+  align-items: center;
+  height: var(--rf-space-8);
+  font-size: var(--rf-text-sm);
+  font-weight: 600;
+  padding: 0 var(--rf-space-3);
+  border-radius: var(--rf-radius-full);
+  border: 1px solid var(--rf-border);
+  background: var(--rf-bg-surface);
+  color: var(--rf-text-secondary);
   cursor: pointer;
   transition: border-color 90ms ease, background-color 90ms ease;
 }
@@ -3226,7 +3231,7 @@ a:focus-visible,
   color: var(--rf-text-primary);
   cursor: pointer;
 }
-.rf-survey-check input { flex: none; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--rf-text-primary); }
+.rf-survey-check input { flex: none; margin: 0; } /* 外观统一由 p53-controls.css 管 */
 /* 面板标题 + 说明，与设置里其它面板同一个结构；和第一题之间留出组间距 */
 .rf-survey-head { margin-bottom: 20px; }
 /* 保存行：按钮在表单最下面、与表单左边对齐，「已保存」紧挨着按钮 */

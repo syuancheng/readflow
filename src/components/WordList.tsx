@@ -16,6 +16,7 @@ import type { ExportBadge, Snippet } from "@/lib/word-library";
 import { textFragmentUrl } from "@/lib/web-anchor";
 import PendingCards, { fetchPendingTotal } from "@/components/PendingCards";
 import { groupByArticle } from "@/lib/word-groups";
+import Icon from "@/components/Icon";
 
 export type WordContextRow = {
   id: string;
@@ -333,7 +334,7 @@ export default function WordList({
 
           {shown.length === 0 ? (
             <div className="duo-empty">
-              <div className="duo-empty-icon">📝</div>
+              <div className="duo-empty-icon"><Icon name="inbox" size={40} /></div>
               <p className="text-lg font-bold mb-2">这里没有词</p>
               <p className="text-sm text-ink-faint">换个筛选条件，或者去阅读器里点几个词</p>
               <Link href="/" className="duo-btn duo-btn-primary mt-5">
@@ -435,7 +436,7 @@ export default function WordList({
                             aria-label={w.starred ? "取消星标" : "星标"}
                             title={w.starred ? "取消星标" : "星标"}
                           >
-                            {w.starred ? "★" : "☆"}
+                            <Icon name="star" size={18} filled={Boolean(w.starred)} />
                           </button>
                         </div>
 

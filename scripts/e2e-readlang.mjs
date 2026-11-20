@@ -372,10 +372,12 @@ try {
   // 星标第一个词
   await page.locator(".wl-star").first().click();
   await page.waitForTimeout(500);
-  const starredNow = await page.evaluate(() =>
-    document.querySelectorAll(".wl-star")[0].textContent.trim(),
-  );
-  check("F2 星标切换", starredNow === "★", `图标=${starredNow}`);
+  // P53：星标是 SVG 图标（实心 = 已加星标），不再是 ★ / ☆ 文字
+  const starredNow = await page.evaluate(() => {
+    const b = document.querySelectorAll(".wl-star")[0];
+    return { on: b.classList.contains("wl-star-on"), label: b.getAttribute("aria-label"), filled: b.querySelector("svg")?.getAttribute("fill") };
+  });
+  check("F2 星标切换", starredNow.on && starredNow.filled === "currentColor", JSON.stringify(starredNow));
 
   // P27：不再有「学习中 / 已掌握」，改为按导出状态筛选
   const noLearned = chips.every((t) => !t.includes("已掌握") && !t.includes("学习中"));
