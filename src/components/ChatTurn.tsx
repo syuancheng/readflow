@@ -6,12 +6,15 @@ import MarkdownText from "@/components/MarkdownText";
 import SelectionAskBar, { type SelectionAsk } from "@/components/SelectionAskBar";
 import { shownText } from "@/lib/chat-view";
 import { isNotAGloss } from "@/lib/explain-policy";
+import { REPLY_ONLY_ASK, type Reply } from "@/lib/ai-thread";
 import type { Feedback } from "@/lib/learner/types";
 
 export type ChatTurnData = {
   ask?: string;
-  /** 这次提问针对的、用户在 AI 回答里划选的原文片段 */
+  /** 这次提问针对的、用户在 AI 回答里划选的原文片段（旧数据：单条引用） */
   quote?: string;
+  /** P58：这次提问带的回复（引用 + 批注），按顺序 */
+  replies?: Reply[];
   text: string;
   status: "loading" | "streaming" | "done" | "error";
   answerId?: string;
@@ -35,7 +38,8 @@ export default function ChatTurn({
   onEditQuestion,
   onRate,
   onReason,
-  onQuote,
+  onReply,
+  repliesFull = false,
 }: {
   turn: ChatTurnData;
   /** 这条回答对应的用户问题：显示在右边。每条 AI 回答都有，首次讲解用统一的默认问题 */
@@ -49,8 +53,10 @@ export default function ChatTurn({
   onEditQuestion?: () => void;
   onRate: (r: Feedback) => void;
   onReason: (r: string | null) => void;
-  /** 划选这段回答里的文字并点「提问」：把选中的原话交给上层当引用 */
-  onQuote?: (text: string) => void;
+  /** 划选这段回答里的文字、写好批注后回车：把「原话 + 批注」交给上层加进输入框 */
+  onReply?: (text: string, note: string) => void;
+  /** 输入框里的回复已加满：浮层按钮禁用 */
+  repliesFull?: boolean;
 }) {
   // 「暂不需要」只对这一条建议生效：关掉后这条回答下面不再出现
   const [dismissed, setDismissed] = useState(false);
@@ -77,7 +83,7 @@ export default function ChatTurn({
 
   // 只在已完成的回答里允许划选；选区必须完全落在本条回答容器内，避免跨轮/跨正文
   const captureSelection = useCallback(() => {
-    if (turn.status !== "done" || !onQuote) return;
+    if (turn.status !== "done" || !onReply) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     const text = sel.toString().trim();
@@ -93,25 +99,30 @@ export default function ChatTurn({
       left: Math.max(8, Math.min(window.innerWidth - 120, rect.left)),
       below: !above,
     });
-  }, [turn.status, onQuote]);
+  }, [turn.status, onReply]);
 
-  const askAboutSelection = useCallback(
-    (text: string) => {
+  const replyToSelection = useCallback(
+    (text: string, note: string) => {
       setSelection(null);
       window.getSelection()?.removeAllRanges();
-      onQuote?.(text);
+      onReply?.(text, note);
     },
-    [onQuote],
+    [onReply],
   );
+  // 这一轮带的回复；旧数据只有单条引用时还原成一条无批注的回复
+  const replies: Reply[] = turn.replies?.length ? turn.replies : turn.quote ? [{ text: turn.quote }] : [];
   return (
     <div className="rf-chat-turn">
       <div className="rf-bubble-user">
-        {turn.quote && (
-          <div className="rf-bubble-quote" title={turn.quote}>
-            {turn.quote}
+        {replies.map((r, i) => (
+          <div className="rf-bubble-reply" key={i}>
+            <div className="rf-bubble-quote" title={r.text}>
+              {r.text}
+            </div>
+            {r.note && <p className="rf-bubble-note">{r.note}</p>}
           </div>
-        )}
-        {question}
+        ))}
+        {!(replies.length > 0 && turn.ask === REPLY_ONLY_ASK) && question}
       </div>
       {failed && (
         <div className="rf-turn-actions" role="group" aria-label="问题操作">
@@ -166,7 +177,7 @@ export default function ChatTurn({
           />
         )}
       </div>
-      <SelectionAskBar selection={selection} onAsk={askAboutSelection} onDismiss={() => setSelection(null)} />
+      <SelectionAskBar selection={selection} full={repliesFull} onAsk={replyToSelection} onDismiss={() => setSelection(null)} />
     </div>
   );
 }

@@ -136,6 +136,13 @@ type Reply = { text: string; note?: string }      // 一条回复：引用的原
 - 不让引用可跨多条回答合并成一条；不支持编辑已加入的条目（要改就删掉重加）；不做引用块点击跳转到被引用的回答（可作为后续）。
 - 不改变历史压缩和做卡对引用的处理（历史本来就不带引用）。
 
+## 9.1 实现说明（已完成）
+
+- 「只发回复」的问题由前端给出：`REPLY_ONLY_ASK`（对话串里的问题标题，气泡里不显示）与 `REPLY_ONLY_PROMPT`（发给模型的问题），服务端不需要特殊处理。
+- 选区浮层的 Esc 监听改为**立刻**挂在捕获阶段并 `stopImmediatePropagation`：只关浮层，不会把阅读页右栏一起关掉（原来的实现有一个空档，刚弹出时按 Esc 会漏过去）。
+- 失败轮次「修改」会把该轮的回复放回输入框。
+- 测试：`tests/unit/ai-thread.test.ts`（多组引用/批注往返）、`tests/unit/ai-replies.test.ts`（校验与提示词）、`scripts/e2e-chat-panel.mjs` C36a–C37e。
+
 ## 10. 分期
 
 | 期 | 内容 |

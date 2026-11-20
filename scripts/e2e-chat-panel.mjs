@@ -201,58 +201,80 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 7 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const seq = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].map((b) => b.textContent));
   check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|为什么用 skills？|做成卡片|整句没看懂", seq.join("|"));
-  // 引用 AI 回答里的一段话再提问：气泡里是 Claude Code 式的左竖线引用，不是带「AI」方块的卡片
-  await page.evaluate(() => {
+  // ===== P58：多条回复（选中 AI 回答 → 回复 → 写批注 → 回车加入输入框，可加多条，可只发回复） =====
+  const selectIn = (n) => page.evaluate((k) => {
     const md = [...document.querySelectorAll(".rf-ai-reply .rf-md")].at(-1);
+    const target = md.querySelectorAll("p")[k] ?? md;
     const range = document.createRange();
-    range.selectNodeContents(md);
+    range.selectNodeContents(target);
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
     md.closest(".rf-ai-reply").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
+  }, n);
+  const replyTo = async (k, note) => {
+    await selectIn(k);
+    await page.locator(".rf-selection-ask-btn").click();
+    const input = page.locator(".rf-selection-ask-input");
+    await input.waitFor({ timeout: 3000 });
+    if (note) await input.fill(note);
+    await input.press("Enter");
+  };
+  await selectIn(0);
+  const btnLabel = (await page.locator(".rf-selection-ask-btn").innerText()).trim();
   await page.locator(".rf-selection-ask-btn").click();
-  const chip = await page.evaluate(() => {
-    const c = document.querySelector(".rf-quote-chip");
-    if (!c) return null;
+  const inputBox = await page.evaluate(() => {
+    const i = document.querySelector(".rf-selection-ask-input");
+    const r = i?.getBoundingClientRect();
+    return r ? { width: Math.round(r.width), inView: r.left >= 0 && r.right <= window.innerWidth, focused: document.activeElement === i } : null;
+  });
+  check("C36a 选中 AI 回答后浮出「回复」；点开后原地变成单行输入（≈288px、在视口内、已聚焦）", btnLabel === "回复" && inputBox && inputBox.width >= 280 && inputBox.inView && inputBox.focused, JSON.stringify({ btnLabel, inputBox }));
+  await page.locator(".rf-selection-ask-input").fill("这里是什么意思");
+  await page.locator(".rf-selection-ask-input").press("Enter");
+  await replyTo(1, "");
+  const replyChips = await page.evaluate(() => [...document.querySelectorAll(".rf-composer-box .rf-quote-chip")].map((c) => {
     const cs = getComputedStyle(c);
-    return { inBox: Boolean(c.closest(".rf-composer-box")), height: Math.round(c.getBoundingClientRect().height), bg: cs.backgroundColor, border: cs.borderLeftWidth, icons: c.querySelectorAll("svg").length };
-  });
-  check("C37 输入框里的引用条：在输入框内部、窄（≤ 26px）、无底色、左竖线 3px、没有小图标", chip && chip.inBox && chip.height <= 26 && chip.bg === "rgba(0, 0, 0, 0)" && chip.border === "3px" && chip.icons === 0, JSON.stringify(chip));
+    return { text: c.querySelector(".rf-quote-chip-text").textContent.slice(0, 8), note: c.querySelector(".rf-quote-chip-note")?.textContent ?? null, height: Math.round(c.getBoundingClientRect().height), bg: cs.backgroundColor, border: cs.borderLeftWidth, icons: c.querySelectorAll("svg").length };
+  }));
+  check("C37 输入框里按顺序有两条回复：第一条带批注，第二条没有；都在输入框内、无底色、左竖线 3px、没有小图标；不带批注的一行 ≤ 26px", replyChips.length === 2 && replyChips[0].note === "这里是什么意思" && replyChips[1].note === null && replyChips.every((c) => c.bg === "rgba(0, 0, 0, 0)" && c.border === "3px" && c.icons === 0) && replyChips[1].height <= 26, JSON.stringify(replyChips));
   await page.screenshot({ path: path.join(SHOTS, "chat-quote-chip-1440.png") });
-  await page.locator(".rf-quote-chip-del").click();
-  check("C37b 点 × 能清除引用", (await page.locator(".rf-quote-chip").count()) === 0);
-  await page.evaluate(() => {
-    const md = [...document.querySelectorAll(".rf-ai-reply .rf-md")].at(-1);
-    const range = document.createRange();
-    range.selectNodeContents(md);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    md.closest(".rf-ai-reply").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
-  await page.locator(".rf-selection-ask-btn").click();
-  await page.locator(".rf-composer-input").fill("这一段是什么意思？");
-  await page.keyboard.press("Enter");
+  await page.locator(".rf-quote-chip-del").first().click();
+  const left = await page.locator(".rf-quote-chip").count();
+  check("C37b 点某一条的 × 只删那一条", left === 1 && !(await page.locator(".rf-quote-chip-note").count()));
+  // 加到 5 条：之后「回复」按钮禁用
+  for (const n of ["批注二", "批注三", "批注四", "批注五"]) await replyTo(0, n);
+  const five = await page.locator(".rf-quote-chip").count();
+  await selectIn(0);
+  const disabled = await page.locator(".rf-selection-ask-btn").isDisabled();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const escState = { bar: await page.locator(".rf-selection-ask").count(), box: await page.locator(".rf-composer-box").count() };
+  check("C37e 按 Esc 只关掉浮层，不会把右栏一起关掉", escState.bar === 0 && escState.box === 1, JSON.stringify(escState));
+  check("C37c 最多 5 条回复；加满后「回复」按钮禁用", five === 5 && disabled, `chips=${five} disabled=${disabled}`);
+  // 底部不写字，直接发送：有回复就能发
+  check("C37d 底部没写字、有回复时出现发送按钮", (await page.locator(".rf-composer-send").count()) === 1);
+  const reqPromise = page.waitForRequest((r) => r.url().includes("/api/explain") && r.method() === "POST");
+  await page.locator(".rf-composer-send").click();
+  const sent = JSON.parse((await reqPromise).postData() || "{}");
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 8 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
+  check("C36b 请求体：replies 共 5 条，批注与界面一致；问题是「只发回复」的固定问法", Array.isArray(sent.replies) && sent.replies.length === 5 && sent.replies[0].note === undefined && sent.replies[1].note === "批注二" && sent.replies[4].note === "批注五" && /学生没有另外提问/.test(sent.prompt || ""), JSON.stringify({ n: sent.replies?.length, prompt: sent.prompt }));
   const qb = await page.evaluate(() => {
     const bubble = [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].at(-1);
-    const q = bubble.querySelector(".rf-bubble-quote");
-    if (!q) return null;
-    const cs = getComputedStyle(q);
-    const root = getComputedStyle(document.documentElement);
+    const qs = [...bubble.querySelectorAll(".rf-bubble-quote")];
+    if (!qs.length) return null;
+    const cs = getComputedStyle(qs[0]);
     return {
-      text: q.textContent.trim().slice(0, 12),
+      n: qs.length,
+      notes: [...bubble.querySelectorAll(".rf-bubble-note")].map((n) => n.textContent),
       borderLeft: cs.borderLeftWidth,
-      borderColor: cs.borderLeftColor,
       weight: cs.fontWeight,
-      color: cs.color,
       noBadge: !bubble.querySelector(".rf-bubble-quote-badge") && !/Selected Text/.test(bubble.textContent),
-      height: Math.round(q.getBoundingClientRect().height),
-      question: bubble.textContent.includes("这一段是什么意思？"),
+      noLabel: !bubble.textContent.includes("针对引用的回复"),
+      height: Math.round(qs[0].getBoundingClientRect().height),
     };
   });
-  check("C36 引用 AI 回答里的话再提问：气泡里是带左竖线的引用（3px、次要色、非粗体），没有「AI」方块和「Selected Text」，最多两行", qb && qb.borderLeft === "3px" && Number(qb.weight) <= 400 && qb.noBadge && qb.question && qb.height <= 50, JSON.stringify(qb));
+  check("C36 发送后气泡里按顺序显示 5 条回复（左竖线 3px、非粗体、各自的批注），不显示「针对引用的回复」标签，也没有「AI」方块和「Selected Text」", qb && qb.n === 5 && qb.notes.join("|") === "批注二|批注三|批注四|批注五" && qb.borderLeft === "3px" && Number(qb.weight) <= 400 && qb.noBadge && qb.noLabel && qb.height <= 50, JSON.stringify(qb));
+  check("C36c 发送后输入框里的回复清空", (await page.locator(".rf-quote-chip").count()) === 0);
   const note = await page.evaluate(() => {
     const n = document.querySelector(".rf-compress-note");
     const replies = [...document.querySelectorAll(".rf-chat-turns .rf-ai-reply")];

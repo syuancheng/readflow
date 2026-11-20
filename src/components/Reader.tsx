@@ -13,7 +13,7 @@ import { bgFetch } from "@/lib/bg-fetch";
 import { createCoalescer } from "@/lib/request-gate";
 import { isNotAGloss, shouldAutoExplain } from "@/lib/explain-policy";
 import { inlineGloss } from "@/lib/gloss";
-import { attachAnswers, parseThread, serializeThread, type ThreadTurn } from "@/lib/ai-thread";
+import { MAX_REPLIES, REPLY_ONLY_ASK, attachAnswers, parseThread, serializeThread, type Reply, type ThreadTurn } from "@/lib/ai-thread";
 import { findCoveringRange } from "@/lib/annotation-range";
 import { renderMath } from "@/lib/math";
 import MarkdownText from "@/components/MarkdownText";
@@ -1595,8 +1595,8 @@ function PickCard({
     turnsRef.current = fn(turnsRef.current);
     setTurns(turnsRef.current);
   };
-  // 用户在 AI 回答里划选的引用：先进输入框上方的 chip，发送时才随问题一起交给模型
-  const [askQuote, setAskQuote] = useState<{ text: string; turnIndex: number } | null>(null);
+  // 用户在 AI 回答里划选并写好批注的回复（P58，最多 5 条）：先进输入框里，发送时才随问题一起交给模型
+  const [replies, setReplies] = useState<Reply[]>([]);
   // 失败轮次点「修改」：把原问题填回输入框。seq 每次自增，文本相同也能再次触发
   const [prefill, setPrefill] = useState<{ text: string; seq: number } | null>(null);
   const busy = turns.some((t) => t.status === "loading" || t.status === "streaming");
@@ -1665,7 +1665,7 @@ function PickCard({
     setDictLoading(!recall);
     turnsRef.current = turnsFrom(initialGloss);
     setTurns(turnsRef.current);
-    setAskQuote(null); // 引用只属于当前这条批注的对话，换词就清掉
+    setReplies([]); // 回复只属于当前这条批注的对话，换词就清掉
     setPrefill(null); // 预填同理，不把上一个词的问题带到这个词
 
     // 回看：词典 / AI 都不查，直接展示存下来的结果。
@@ -1765,11 +1765,12 @@ function PickCard({
       .map((t) => ({ ...(t.ask ? { ask: t.ask } : {}), text: t.text }));
 
     const index = turnsRef.current.length;
+    const sentReplies = (req.replies ?? []).slice(0, MAX_REPLIES);
     updateTurns((prev) => [
       ...prev,
       {
         ask: req.ask,
-        ...(askQuote ? { quote: askQuote.text } : {}),
+        ...(sentReplies.length > 0 ? { replies: sentReplies, quote: sentReplies[0].text } : {}),
         text: "",
         status: "loading",
         req,
@@ -1795,9 +1796,9 @@ function PickCard({
       ...(req.ask ? { askLabel: req.ask } : {}),
     };
     const withHistory = { ...(history.length > 0 ? { history } : {}) };
-    // 用户在 AI 回答里划选的引用，随这次提问一起发；发完就清掉 chip
-    const withQuote = { ...(askQuote ? { quote: askQuote } : {}) };
-    setAskQuote(null);
+    // 用户在 AI 回答里划选、写了批注的回复，随这次提问一起发；发完就清掉输入框里的回复
+    const withQuote = { ...(sentReplies.length > 0 ? { replies: sentReplies } : {}) };
+    setReplies([]);
     // 两层上下文随每一轮请求发送：内容只由段落原文 + 锚点决定，逐轮逐字相同。
     // wholeSentence 分支原本写死 prefix/suffix 为空，那是「讲整句」拿不到指代背景的 bug，
     // 现在两条分支统一带 contextLayers，问什么都能看到所在句 + 近前文。
@@ -1889,7 +1890,10 @@ function PickCard({
   function editQuestion(index: number) {
     const t = turnsRef.current[index];
     const q = t?.req?.ask ?? t?.ask ?? "";
-    if (!q) return;
+    // 把这条的回复也放回输入框（原来带的回复在发送时已经清掉了）
+    const back = t?.req?.replies ?? t?.replies;
+    if (back?.length) setReplies(back.slice(0, MAX_REPLIES));
+    if (!q || q === REPLY_ONLY_ASK) return;
     setPrefill((prev) => ({ text: q, seq: (prev?.seq ?? 0) + 1 }));
   }
 
@@ -2050,7 +2054,14 @@ function PickCard({
                       if (!t.feedback) return;
                       void rate(i, t.feedback, r);
                     }}
-                    onQuote={(text) => setAskQuote({ text, turnIndex: i })}
+                    onReply={(text, note) =>
+                      setReplies((prev) =>
+                        prev.length >= MAX_REPLIES || prev.some((r) => r.text === text && (r.note ?? "") === note)
+                          ? prev
+                          : [...prev, { text, ...(note ? { note } : {}) }],
+                      )
+                    }
+                    repliesFull={replies.length >= MAX_REPLIES}
                   />
                 </Fragment>
               ));
@@ -2069,8 +2080,8 @@ function PickCard({
         cardTitle={pick.contextId ? undefined : "正在保存这条记录…"}
         onAsk={(req) => void triggerAI(req)}
         onMakeCard={makeCard}
-        quote={askQuote}
-        onClearQuote={() => setAskQuote(null)}
+        replies={replies}
+        onRemoveReply={(i) => setReplies((prev) => prev.filter((_, j) => j !== i))}
         prefill={prefill}
       />
     </div>

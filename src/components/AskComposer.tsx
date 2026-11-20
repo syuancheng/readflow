@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ASK_MAX_CHARS, type AskPreset, type AskReq } from "@/lib/ask-presets";
+import { REPLY_ONLY_ASK, REPLY_ONLY_PROMPT, type Reply } from "@/lib/ai-thread";
 import { MAX_QUICK_QUESTION_CHARS } from "@/lib/quick-questions";
 import { useQuickQuestions } from "@/lib/use-quick-questions";
 
@@ -18,8 +19,8 @@ export default function AskComposer({
   cardTitle,
   onAsk,
   onMakeCard,
-  quote,
-  onClearQuote,
+  replies = [],
+  onRemoveReply,
   prefill,
 }: {
   presets: AskPreset[];
@@ -31,9 +32,9 @@ export default function AskComposer({
   cardTitle?: string;
   onAsk: (req: AskReq) => void;
   onMakeCard: () => void;
-  /** 用户在 AI 回答里划选、要随这次提问一起发的引用；显示在输入框上方 */
-  quote?: { text: string; turnIndex: number } | null;
-  onClearQuote?: () => void;
+  /** 用户在 AI 回答里划选、写好批注、要随这次提问一起发的回复（P58，最多 5 条）；显示在输入框里面 */
+  replies?: Reply[];
+  onRemoveReply?: (index: number) => void;
   /** 从失败轮次「修改」过来的预填文字：填进输入框、聚焦、光标到末尾，不自动发送。序号变化才生效 */
   prefill?: { text: string; seq: number } | null;
 }) {
@@ -94,17 +95,18 @@ export default function AskComposer({
     run();
   }
 
-  // 所有提问都从这里走：有引用就自动带上，发送后由 Reader 清空 chip
+  // 所有提问都从这里走：有回复就自动带上，发送后由 Reader 清空
   function emit(req: AskReq) {
     if (busy) return;
-    onAsk({ ...req, ...(quote ? { quote } : {}) });
+    onAsk({ ...req, ...(replies.length > 0 ? { replies } : {}) });
   }
 
   function send() {
     const q = text.trim();
-    if (!q || busy) return;
+    // 底部没写字但有回复：照样能发（引用 + 批注就是这次的提问）
+    if ((!q && replies.length === 0) || busy) return;
     setText("");
-    emit({ ask: q, prompt: q, askKind: "custom" });
+    emit(q ? { ask: q, prompt: q, askKind: "custom" } : { ask: REPLY_ONLY_ASK, prompt: REPLY_ONLY_PROMPT, askKind: "custom" });
     box.current?.focus();
   }
 
@@ -200,18 +202,25 @@ export default function AskComposer({
         </div>
       )}
       <div className="rf-composer-box">
-        {quote && (
-          <div className="rf-quote-chip" role="group" aria-label="引用的回答片段">
-            <span className="rf-quote-chip-text" title={quote.text}>{quote.text}</span>
-            <button
-              type="button"
-              className="rf-quote-chip-del"
-              aria-label="移除引用"
-              title="移除引用"
-              onClick={onClearQuote}
-            >
-              ×
-            </button>
+        {replies.length > 0 && (
+          <div className="rf-replies" role="group" aria-label="要回复的回答片段">
+            {replies.map((r, i) => (
+              <div className="rf-quote-chip" key={`${i}-${r.text.slice(0, 20)}`}>
+                <div className="rf-quote-chip-main">
+                  <span className="rf-quote-chip-text" title={r.text}>{r.text}</span>
+                  {r.note && <span className="rf-quote-chip-note" title={r.note}>{r.note}</span>}
+                </div>
+                <button
+                  type="button"
+                  className="rf-quote-chip-del"
+                  aria-label="移除这条回复"
+                  title="移除这条回复"
+                  onClick={() => onRemoveReply?.(i)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
         )}
         <button
@@ -245,7 +254,7 @@ export default function AskComposer({
             }
           }}
         />
-        {text.trim() !== "" && (
+        {(text.trim() !== "" || replies.length > 0) && (
           <button type="button" className="rf-composer-send" disabled={busy} onClick={send} aria-label="发送问题" title="发送（Enter）">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 19V5M5 12l7-7 7 7" />

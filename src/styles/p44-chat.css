@@ -78,8 +78,11 @@
 .rf-turn-action:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
 
 /* 用户气泡里的引用：左竖线 + 次要色文字（Claude Code 式），这次提问针对 AI 回答里的哪段话，回看也能追溯 */
+/* 一条回复 = 引用块 + 下面一行批注（P58）；多条依次排列 */
+.rf-bubble-reply { margin-bottom: var(--rf-space-1); }
+.rf-bubble-note { margin: 0; padding-top: var(--rf-space-1); color: var(--rf-text-primary); }
 .rf-bubble-quote {
-  margin-bottom: var(--rf-space-1);
+  margin-bottom: 0;
   padding-left: var(--rf-space-2);
   border-left: 3px solid var(--rf-border-strong);
   color: var(--rf-text-secondary);
@@ -300,12 +303,35 @@
   transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
 }
 .rf-selection-ask-btn svg { width: var(--rf-space-4); height: var(--rf-space-4); }
-.rf-selection-ask-btn:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-selection-ask-btn:hover:not(:disabled) { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-selection-ask-btn:disabled { opacity: 0.55; cursor: default; }
+/* 点「回复」后原地展开的单行批注输入（P58） */
+.rf-selection-ask-input {
+  max-width: 100%;
+  padding: var(--rf-space-1) var(--rf-space-2);
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--rf-text-sm);
+  line-height: var(--rf-leading-sm);
+  color: var(--rf-text-primary);
+}
+.rf-selection-ask-input::placeholder { color: var(--rf-text-secondary); }
+.rf-selection-ask:focus-within { box-shadow: var(--rf-focus-ring); border-color: var(--rf-border-focus); }
 .rf-selection-ask-btn:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
 
 /* 引用条：在输入框里面的第一行，左竖线 + 次要色单行文字（与对话气泡里的引用同一种语言），无底色、无图标 */
-.rf-quote-chip {
+/* 回复列表：输入框里的第一块，最多 5 条，超出约 4 条高度时内部滚动（P58） */
+.rf-replies {
   flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--rf-space-1);
+  max-height: 112px;
+  overflow-y: auto;
+}
+.rf-quote-chip {
   display: flex;
   align-items: center;
   gap: var(--rf-space-2);
@@ -318,12 +344,20 @@
   font-weight: 400;
   line-height: var(--rf-leading-sm);
 }
+.rf-quote-chip-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .rf-quote-chip-text {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 批注：比引用更醒目一点（主文字色），因为那是用户自己写的话 */
+.rf-quote-chip-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--rf-text-primary);
 }
 .rf-quote-chip-del {
   flex: none;

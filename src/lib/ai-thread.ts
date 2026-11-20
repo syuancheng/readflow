@@ -19,6 +19,10 @@ export type Reply = { text: string; note?: string };
 export const MAX_REPLIES = 5;
 export const REPLY_TEXT_MAX_CHARS = 500;
 export const REPLY_NOTE_MAX_CHARS = 200;
+/** 只发回复、底部没写字时的问题标题（存进对话串；气泡里不显示它，只显示回复） */
+export const REPLY_ONLY_ASK = "针对引用的回复";
+/** 这种情况下发给模型的问题 */
+export const REPLY_ONLY_PROMPT = "学生没有另外提问，请针对他引用的几处话和批注回答。";
 
 export type ThreadTurn = {
   /** 用户这次问的是什么；默认讲解为空 */

@@ -6,6 +6,7 @@
  * 「做成卡片」不走 /api/explain，不在这里（由输入区单独追加）。
  */
 import type { AskKind } from "./learner/types";
+import type { Reply } from "./ai-thread";
 
 /** 一次向 AI 提问的参数（原 Reader.tsx 的 AskReq） */
 export type AskReq = {
@@ -18,8 +19,8 @@ export type AskReq = {
   wholeSentence?: boolean;
   /** 这次讲解的种类，随 /api/explain 送给服务端记事件 */
   askKind?: AskKind;
-  /** 用户在 AI 回答里划选的片段（引用），随追问送给模型 */
-  quote?: { text: string; turnIndex: number };
+  /** 用户在 AI 回答里划选的片段 + 批注（P58，最多 5 条），随追问送给模型 */
+  replies?: Reply[];
 };
 
 /** 学生一次提问最多多少字：前端输入框和服务端都按它限制（P45） */
