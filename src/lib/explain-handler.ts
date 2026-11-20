@@ -8,6 +8,7 @@ import {
   EXPLAIN_PROMPT_MAX_CHARS,
   narrowHistory,
   narrowQuote,
+  narrowReplies,
   narrowContextLayers,
   type ExplainParams,
 } from "@/lib/ai";
@@ -333,6 +334,8 @@ export function explainParamsFromBody(body: Partial<ExplainParams>): ExplainPara
     anchor: narrowAnchor((body as { anchor?: unknown }).anchor),
     history: narrowHistory((body as { history?: unknown }).history),
     quote: narrowQuote((body as { quote?: unknown }).quote),
+    // P58：多条回复；有它时以它为准
+    replies: narrowReplies((body as { replies?: unknown }).replies),
   };
 }
 

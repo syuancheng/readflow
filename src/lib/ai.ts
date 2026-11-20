@@ -1,6 +1,7 @@
 import { ASK_MAX_CHARS } from "./ask-presets";
 import { planHistory } from "./history-compress";
 import { assembleExplain } from "./prompt/layers";
+import { MAX_REPLIES, REPLY_NOTE_MAX_CHARS, REPLY_TEXT_MAX_CHARS, type Reply } from "./ai-thread";
 import type { SentenceWindow } from "./prompt/sentence-window";
 import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
@@ -82,6 +83,8 @@ export type ExplainParams = {
   prompt?: string;       // 用户的自定义追问（对应 Readlang 的 askAI）
   /** 用户从 AI 回答里划选的引用片段；无引用时 user 消息逐字不变 */
   quote?: ExplainQuote;
+  /** P58：多条回复（引用 + 批注）。有它时以它为准；只有旧的 quote 时等价于一条无批注的回复 */
+  replies?: Reply[];
   withPrevSentence?: boolean; // 前文已包含上一句（「没看懂整句」信号触发），给模型加衔接提示
   /** 阅读器采集的客观信号（不是结论）。旧调用不带时模型仍可正常工作。 */
   signals?: SelectionSignals;
@@ -413,10 +416,8 @@ export function buildUserMessage(params: ExplainParams): string {
   const domain = params.domainBlock?.trim() ? `这篇文章：\n${params.domainBlock.trim()}\n\n` : "";
   // 用户在回答里划选的片段：明确告诉他这是模型自己上一轮说的原话，
   // 让模型把它当作「在澄清自己的表述」而不是一条新证据。无引用时不插入任何字符。
-  const quoteText = params.quote?.text?.trim();
-  const quote = quoteText
-    ? `\n你引用了自己上一条回答里的这段话：\n「${quoteText.slice(0, EXPLAIN_QUOTE_MAX_CHARS)}」`
-    : "";
+  const quoteSec = repliesSection(params);
+  const quote = quoteSec ? `\n${quoteSec}` : "";
   return `${domain}${learner}${contextBlock(params)}${quote}
 ${question}`;
 }
@@ -510,6 +511,47 @@ export function narrowHistory(v: unknown): ExplainHistoryTurn[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+/** 这次提问实际带的回复：replies 优先；只有旧的 quote 时当作一条无批注的回复 */
+export function effectiveReplies(params: Pick<ExplainParams, "replies" | "quote">): Reply[] {
+  if (params.replies?.length) return params.replies;
+  const t = params.quote?.text?.trim();
+  return t ? [{ text: t }] : [];
+}
+
+/**
+ * 提示词里的「引用 / 批注」段（P58）。
+ * 只有 1 条且没有批注时，与改前逐字相同（保证旧快照与旧行为不变）；其余按序号逐条列出。
+ * 没有回复时返回空串。
+ */
+export function repliesSection(params: Pick<ExplainParams, "replies" | "quote">): string {
+  const rs = effectiveReplies(params).slice(0, MAX_REPLIES);
+  if (rs.length === 0) return "";
+  const q = (r: Reply) => `「${r.text.trim().slice(0, REPLY_TEXT_MAX_CHARS)}」`;
+  if (rs.length === 1 && !rs[0].note?.trim()) return `你引用了自己上一条回答里的这段话：\n${q(rs[0])}`;
+  const items = rs.map((r, i) => {
+    const note = r.note?.trim() ? `\n   学生的批注：${r.note.trim().slice(0, REPLY_NOTE_MAX_CHARS)}` : "";
+    return `${i + 1}. ${q(r)}${note}`;
+  });
+  return `你引用了自己前面回答里的几处话，并写了批注（按顺序）：\n${items.join("\n")}`;
+}
+
+/** 回复白名单（P58）：只取 text（≤500）与 note（≤200），最多 5 条，空文本整条丢弃；非法结构丢弃 */
+export function narrowReplies(v: unknown): Reply[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: Reply[] = [];
+  for (const item of v) {
+    if (out.length >= MAX_REPLIES) break;
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.text !== "string") continue;
+    const text = o.text.trim().slice(0, REPLY_TEXT_MAX_CHARS);
+    if (!text) continue;
+    const note = typeof o.note === "string" ? o.note.trim().slice(0, REPLY_NOTE_MAX_CHARS) : "";
+    out.push({ text, ...(note ? { note } : {}) });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 /** 引用片段白名单：只取 text（裁剪字数）与 turnIndex（非负整数），非法输入丢弃 */
 export function narrowQuote(v: unknown): ExplainQuote | undefined {
   if (!v || typeof v !== "object") return undefined;
@@ -564,10 +606,7 @@ export function buildUserTail(params: ExplainParams, variantBlock: string): stri
     ? `学生的问题: ${params.prompt}`
     : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
   const sentence = (params.sentenceWindow?.sentence || params.contextLayers?.sentence || params.signals?.sentence || "").trim();
-  const quoteText = params.quote?.text?.trim();
-  const quote = quoteText
-    ? `你引用了自己上一条回答里的这段话：\n「${quoteText.slice(0, EXPLAIN_QUOTE_MAX_CHARS)}」`
-    : "";
+  const quote = repliesSection(params);
   // observations() 在有 contextLayers 时不重复所在句；v2 所在句单独成行，所以这里同样跳过
   const obs = observations({ ...params, contextLayers: params.contextLayers ?? { sentence, nearContext: [] } });
   return [

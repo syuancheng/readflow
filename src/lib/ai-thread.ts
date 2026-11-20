@@ -12,26 +12,46 @@
  * 纯函数、无依赖，前后端与单测共用。
  */
 
+/** 一条「回复」（P58）：用户在 AI 回答里划选的原话 + 他针对这段话写的批注（可空） */
+export type Reply = { text: string; note?: string };
+
+/** 一次提问最多带几条回复；引用 / 批注的字数上限（前后端、存储共用） */
+export const MAX_REPLIES = 5;
+export const REPLY_TEXT_MAX_CHARS = 500;
+export const REPLY_NOTE_MAX_CHARS = 200;
+
 export type ThreadTurn = {
   /** 用户这次问的是什么；默认讲解为空 */
   ask?: string;
-  /** 用户在 AI 回答里划选、这次提问所针对的原文片段（可空） */
+  /** 用户在 AI 回答里划选、这次提问所针对的原文片段（可空）。= replies 的第一条原话，保留给旧调用方 */
   quote?: string;
+  /** P58：这次提问带的全部回复（引用 + 批注），按顺序；旧数据里只有单条引用时也会还原成一条 */
+  replies?: Reply[];
   text: string;
 };
 
 const ASK_LINE = /^【追问】(.*)$/;
 const QUOTE_LINE = /^【引用】(.*)$/;
+const NOTE_LINE = /^【批注】(.*)$/;
 /** 引用片段压成一行存：换行换成空格，避免破坏「一行一标记」的格式 */
 const oneLine = (s: string) => s.replace(/\s*\r?\n\s*/g, " ").trim();
+
+/** 一轮的引用 / 批注行：一条引用 + 可选批注为一组，按顺序；只有一条无批注时与旧格式逐字相同 */
+function quoteLines(t: ThreadTurn): string {
+  const replies: Reply[] = t.replies?.length ? t.replies : t.quote?.trim() ? [{ text: t.quote }] : [];
+  return replies
+    .slice(0, MAX_REPLIES)
+    .filter((r) => r.text?.trim())
+    .map((r) => `【引用】${oneLine(r.text)}\n${r.note?.trim() ? `【批注】${oneLine(r.note)}\n` : ""}`)
+    .join("");
+}
 
 export function serializeThread(turns: readonly ThreadTurn[]): string {
   return turns
     .filter((t) => t.text.trim())
     .map((t, i) => {
       if (i === 0 && !t.ask) return t.text.trim();
-      const quote = t.quote?.trim() ? `【引用】${oneLine(t.quote)}\n` : "";
-      return `${quote}【追问】${(t.ask ?? "").trim()}\n${t.text.trim()}`;
+      return `${quoteLines(t)}【追问】${(t.ask ?? "").trim()}\n${t.text.trim()}`;
     })
     .join("\n\n");
 }
@@ -40,21 +60,29 @@ export function parseThread(raw: string | null | undefined): ThreadTurn[] {
   if (!raw || !raw.trim()) return [];
   const turns: ThreadTurn[] = [];
   let cur: ThreadTurn = { text: "" };
-  let pendingQuote: string | undefined;
+  // 引用 / 批注行一定紧跟在【追问】之前；暂存到下一条追问用（一条引用 + 可选批注为一组）
+  let pending: Reply[] = [];
   for (const line of raw.split(/\r?\n/)) {
     const q = line.match(QUOTE_LINE);
     if (q) {
-      // 引用行一定紧跟在【追问】之前；暂存到下一条追问用
-      if (q[1].trim()) pendingQuote = q[1].trim();
+      if (q[1].trim() && pending.length < MAX_REPLIES) pending.push({ text: q[1].trim() });
+      continue;
+    }
+    const n = line.match(NOTE_LINE);
+    if (n) {
+      // 批注只认紧跟在引用后面的；前面没有引用的孤立批注丢弃
+      const last = pending[pending.length - 1];
+      if (last && !last.note && n[1].trim()) last.note = n[1].trim();
       continue;
     }
     const m = line.match(ASK_LINE);
     if (m) {
       if (cur.text.trim() || cur.ask !== undefined) turns.push({ ...cur, text: cur.text.trim() });
       cur = { ask: m[1].trim(), text: "" };
-      if (pendingQuote) {
-        cur.quote = pendingQuote;
-        pendingQuote = undefined;
+      if (pending.length > 0) {
+        cur.quote = pending[0].text;
+        cur.replies = pending;
+        pending = [];
       }
     } else {
       cur.text += (cur.text ? "\n" : "") + line;
