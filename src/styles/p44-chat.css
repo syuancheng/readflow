@@ -77,42 +77,20 @@
 }
 .rf-turn-action:hover { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
 
-/* 用户气泡里的引用行：这次提问针对 AI 回答里的哪段话，回看也能追溯 */
+/* 用户气泡里的引用：左竖线 + 次要色文字（Claude Code 式），这次提问针对 AI 回答里的哪段话，回看也能追溯 */
 .rf-bubble-quote {
-  display: flex;
-  align-items: center;
-  gap: var(--rf-space-2);
-  margin-bottom: var(--rf-space-2);
-  padding: var(--rf-space-2);
-  border-radius: var(--rf-radius-md);
-  background: var(--rf-bg-surface);
-  text-align: left;
-}
-.rf-bubble-quote-badge {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--rf-space-8);
-  height: var(--rf-space-8);
-  padding: 0 var(--rf-space-1);
-  border-radius: var(--rf-radius-sm);
-  background: var(--rf-bg-subtle);
+  margin-bottom: var(--rf-space-1);
+  padding-left: var(--rf-space-2);
+  border-left: 3px solid var(--rf-border-strong);
   color: var(--rf-text-secondary);
-  font-size: var(--rf-text-xs);
-  font-weight: 700;
-}
-.rf-bubble-quote-body { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
-.rf-bubble-quote-text {
+  font-weight: 400;
+  text-align: left;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
-  font-weight: 700;
-  color: var(--rf-text-primary);
 }
-.rf-bubble-quote-label { font-size: var(--rf-text-xs); color: var(--rf-text-secondary); }
 
 .rf-ai-reply { min-width: 0; }
 

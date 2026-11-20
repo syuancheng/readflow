@@ -108,11 +108,7 @@ export default function ChatTurn({
       <div className="rf-bubble-user">
         {turn.quote && (
           <div className="rf-bubble-quote" title={turn.quote}>
-            <span className="rf-bubble-quote-badge">AI</span>
-            <span className="rf-bubble-quote-body">
-              <span className="rf-bubble-quote-text">{turn.quote}</span>
-              <span className="rf-bubble-quote-label">Selected Text</span>
-            </span>
+            {turn.quote}
           </div>
         )}
         {question}

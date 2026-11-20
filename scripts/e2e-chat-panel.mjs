@@ -201,6 +201,38 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 7 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
   const seq = await page.evaluate(() => [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].map((b) => b.textContent));
   check("C18 做卡之后再追问：状态块留在原位，新追问接在后面", seq.join("|") === "这个词在这句里什么意思|再给个例句|讲讲句子结构|为什么用 tracks？|为什么用 skills？|做成卡片|整句没看懂", seq.join("|"));
+  // 引用 AI 回答里的一段话再提问：气泡里是 Claude Code 式的左竖线引用，不是带「AI」方块的卡片
+  await page.evaluate(() => {
+    const md = [...document.querySelectorAll(".rf-ai-reply .rf-md")].at(-1);
+    const range = document.createRange();
+    range.selectNodeContents(md);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    md.closest(".rf-ai-reply").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.locator(".rf-selection-ask-btn").click();
+  await page.locator(".rf-composer-input").fill("这一段是什么意思？");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelectorAll(".rf-ai-reply").length === 8 && !document.querySelector(".rf-chat-status"), null, { timeout: 15000 });
+  const qb = await page.evaluate(() => {
+    const bubble = [...document.querySelectorAll(".rf-chat-turns .rf-bubble-user")].at(-1);
+    const q = bubble.querySelector(".rf-bubble-quote");
+    if (!q) return null;
+    const cs = getComputedStyle(q);
+    const root = getComputedStyle(document.documentElement);
+    return {
+      text: q.textContent.trim().slice(0, 12),
+      borderLeft: cs.borderLeftWidth,
+      borderColor: cs.borderLeftColor,
+      weight: cs.fontWeight,
+      color: cs.color,
+      noBadge: !bubble.querySelector(".rf-bubble-quote-badge") && !/Selected Text/.test(bubble.textContent),
+      height: Math.round(q.getBoundingClientRect().height),
+      question: bubble.textContent.includes("这一段是什么意思？"),
+    };
+  });
+  check("C36 引用 AI 回答里的话再提问：气泡里是带左竖线的引用（3px、次要色、非粗体），没有「AI」方块和「Selected Text」，最多两行", qb && qb.borderLeft === "3px" && Number(qb.weight) <= 400 && qb.noBadge && qb.question && qb.height <= 50, JSON.stringify(qb));
   const note = await page.evaluate(() => {
     const n = document.querySelector(".rf-compress-note");
     const replies = [...document.querySelectorAll(".rf-chat-turns .rf-ai-reply")];
@@ -248,7 +280,7 @@ try {
   await page.locator(".rf-composer").waitFor();
   await page.waitForTimeout(1500);
   const re = await page.evaluate(() => ({ bubbles: document.querySelectorAll(".rf-bubble-user").length, block: document.querySelector(".rf-run-block")?.getAttribute("data-state") }));
-  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 8 && re.block === "ready", JSON.stringify(re));
+  check("C19 回看：首次讲解的默认问题、追问都在，做卡状态块也恢复（放在对话最后）", re.bubbles === 9 && re.block === "ready", JSON.stringify(re));
 
   // ===== 自动触发的回答（词典查不到的短语）：右边同样有一条用户问题 =====
   await page.keyboard.press("Escape");
