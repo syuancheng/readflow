@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { explainTurns, type ExplainParams } from "../../src/lib/ai";
 import { buildL0, buildL1, buildL3, windowFromLayers } from "../../src/lib/prompt/layers";
-import { paragraphWindowOf, WINDOW_WHOLE_MAX_WORDS } from "../../src/lib/prompt/paragraph-window";
+import { NEIGHBOR_MAX_CHARS, SENTENCE_MAX_CHARS, sentenceWindowOf } from "../../src/lib/prompt/sentence-window";
 import { buildLearnerBlock } from "../../src/lib/learner/profile-text";
 import { planHistory } from "../../src/lib/history-compress";
 
@@ -17,12 +17,12 @@ const PARAS = [
 ];
 
 function base(over: Partial<ExplainParams> = {}): ExplainParams {
-  const win = paragraphWindowOf(PARAS, 1, 4, 9);
+  const win = sentenceWindowOf(PARAS, 1, 4, 9);
   return {
     word: "decides",
     context: "",
     layout: "v2",
-    paragraphWindow: win,
+    sentenceWindow: win,
     articleBlock: "标题：How agents work\n用户设定分类：技术文档",
     teachingRules: "学生希望老师做的：\n- 讲得简短",
     learnerStable: "学生档案（供你判断）：\n- 身份：大学生",
@@ -64,13 +64,18 @@ test("尾部确实随这些变化：制卡关闭有一行指令；domain 带领�
   assert.doesNotMatch(tail(base()), /资深的专业技术人员|带学生拆开/);
 });
 
-test("同段内点不同的词，前缀逐字相同（段落窗口只取决于段落原文）", () => {
-  const a = base({ paragraphWindow: paragraphWindowOf(PARAS, 1, 4, 9), word: "decides" });
-  const b = base({ paragraphWindow: paragraphWindowOf(PARAS, 1, 60, 70), word: "tool" });
-  const c = base({ paragraphWindow: paragraphWindowOf(PARAS, 1, 85, 90), word: "idea" });
+test("同一句里点不同的词，前缀逐字相同（上下文窗口只取决于所在句的位置）", () => {
+  const a = base({ sentenceWindow: sentenceWindowOf(PARAS, 1, 4, 11), word: "decides" });
+  const b = base({ sentenceWindow: sentenceWindowOf(PARAS, 1, 29, 33), word: "next" });
   assert.equal(prefix(a), prefix(b));
-  assert.equal(prefix(a), prefix(c));
-  assert.notEqual(tail(a), tail(b)); // 但尾部不同（所在句、选中词）
+  assert.notEqual(tail(a), tail(b)); // 但尾部不同（选中词）
+});
+
+test("换另一句：只有上下文层（L3）变，人设 / 用户层 / 文章层不变", () => {
+  const a = explainTurns(base({ sentenceWindow: sentenceWindowOf(PARAS, 1, 4, 11) }));
+  const b = explainTurns(base({ sentenceWindow: sentenceWindowOf(PARAS, 1, 60, 70) }));
+  assert.deepEqual(a.slice(0, 3), b.slice(0, 3));
+  assert.notEqual(a[3].content, b[3].content);
 });
 
 test("换用户设置才改 L1；换文章才改 L2；换段落才改 L3", () => {
@@ -84,13 +89,13 @@ test("换用户设置才改 L1；换文章才改 L2；换段落才改 L3", () =>
   assert.equal(art[1].content, ref[1].content);
   assert.notEqual(art[2].content, ref[2].content);
   assert.equal(art[3].content, ref[3].content);
-  const para = explainTurns(base({ paragraphWindow: paragraphWindowOf(PARAS, 0, 0, 6) }));
+  const para = explainTurns(base({ sentenceWindow: sentenceWindowOf(PARAS, 0, 0, 6) }));
   assert.equal(para[2].content, ref[2].content);
   assert.notEqual(para[3].content, ref[3].content);
 });
 
 test("没有用户层 / 文章层 / 段落层时整层省略，不留空 system", () => {
-  const turns = explainTurns(base({ teachingRules: undefined, learnerStable: undefined, personalized: false, articleBlock: undefined, paragraphWindow: undefined }));
+  const turns = explainTurns(base({ teachingRules: undefined, learnerStable: undefined, personalized: false, articleBlock: undefined, sentenceWindow: undefined }));
   assert.equal(turns.length, 2); // L0 + 尾部
   assert.equal(turns.every((t) => t.content.trim().length > 0), true);
 });
@@ -124,67 +129,79 @@ test("v2 不带 monolingual；monolingual 为真时退回 v1（原有两条 mess
 
 test("layout 缺省或 v1：与不带 v2 字段时完全相同（回退安全）", () => {
   const plain: ExplainParams = { word: "decides", context: "x", personalized: false, cardsEnabled: true };
-  assert.deepEqual(explainTurns({ ...plain, layout: "v1", paragraphWindow: PARAS_WIN() }), explainTurns(plain));
+  assert.deepEqual(explainTurns({ ...plain, layout: "v1", sentenceWindow: SENT_WIN() }), explainTurns(plain));
 });
-function PARAS_WIN() {
-  return paragraphWindowOf(PARAS, 1, 0, 3);
+function SENT_WIN() {
+  return sentenceWindowOf(PARAS, 1, 0, 3);
 }
 
 test("L1 / L3 纯函数：空输入返回空串", () => {
   assert.equal(buildL1({ personalized: false }), "");
   assert.equal(buildL3(undefined), "");
-  assert.equal(buildL3({ prevTail: "", body: "  ", sentence: "" }), "");
+  assert.equal(buildL3({ prev: "", sentence: "  ", next: "" }), "");
 });
 
 test("客户端回退：两层上下文折成窗口（前文恢复成原文顺序）", () => {
   const w = windowFromLayers({ sentence: "S.", nearContext: ["C closest.", "B.", "A earliest."] });
-  assert.equal(w.prevTail, "A earliest. B. C closest.");
-  assert.equal(w.body, "S.");
+  assert.equal(w.prev, "A earliest. B. C closest.");
+  assert.equal(w.sentence, "S.");
+  assert.equal(w.next, "");
 });
 
-// ---------- 段落窗口 ----------
+// ---------- 句子窗口 ----------
 
-const sentence = (i: number) => `Sentence number ${i} has exactly eight words total.`;
-const longPara = Array.from({ length: 60 }, (_, i) => sentence(i + 1)).join(" "); // 60×8 = 480 词
-
-test("短段落：整段 + 前面各段末尾；所在句正确；不跨段取后文", () => {
-  const w = paragraphWindowOf(PARAS, 1, 4, 9);
-  assert.equal(w.body, PARAS[1].content);
+test("窗口三段：前文（原文顺序）+ 所在句 + 同段后一句", () => {
+  const w = sentenceWindowOf(PARAS, 1, 4, 11); // "decides"，在本段第 1 句
   assert.equal(w.sentence, "The model decides what to do next.");
-  assert.match(w.prevTail, /Agents loop over tools/);
-  assert.doesNotMatch(w.body + w.prevTail, /Tail paragraph/);
+  assert.equal(w.next, "It may call a tool again.");
+  assert.match(w.prev, /Agents loop over tools\. Each call returns a result\./); // 跨到上一段，原文顺序
+  assert.equal(w.prev.indexOf("Agents loop") < w.prev.indexOf("Each call"), true);
 });
 
-test("首段没有前文；越界下标返回空", () => {
-  assert.equal(paragraphWindowOf(PARAS, 0, 0, 3).prevTail, "");
-  assert.deepEqual(paragraphWindowOf(PARAS, 9, 0, 3), { prevTail: "", body: "", sentence: "" });
+test("后一句只取同段：所在句是段末就没有，不去下一段拿", () => {
+  const w = sentenceWindowOf(PARAS, 1, 105, 110); // "stops." 在本段最后一句
+  assert.match(w.sentence, /The loop ends when the model stops\./);
+  assert.equal(w.next, "");
+  assert.doesNotMatch(JSON.stringify(w), /Tail paragraph/);
+  // 整段只有一句的段落：也没有后一句
+  assert.equal(sentenceWindowOf(PARAS, 2, 0, 4).next, "");
 });
 
-test("跨句选区：所在句合并", () => {
-  const w = paragraphWindowOf(PARAS, 1, 4, 60);
+test("首段第一句没有前文；越界下标返回空", () => {
+  assert.equal(sentenceWindowOf(PARAS, 0, 0, 6).prev, "");
+  assert.deepEqual(sentenceWindowOf(PARAS, 9, 0, 3), { prev: "", sentence: "", next: "" });
+});
+
+test("跨句选区：所在句合并成连续几句；后一句是最后覆盖的那句之后", () => {
+  const w = sentenceWindowOf(PARAS, 1, 4, 60);
   assert.match(w.sentence, /decides what to do next\. It may call a tool again\./);
+  assert.equal(w.next.startsWith("That is the whole idea"), true);
 });
 
-test("长段落：同一块里不同句的窗口完全相同；跨块才变", () => {
-  const paras = [{ content: "Intro." }, { content: longPara }];
-  assert.equal(longPara.split(/\s+/).length > WINDOW_WHOLE_MAX_WORDS, true);
-  const pos = (n: number) => longPara.indexOf(sentence(n));
-  const a = paragraphWindowOf(paras, 1, pos(20), pos(20) + 5);
-  const b = paragraphWindowOf(paras, 1, pos(22), pos(22) + 5);
-  assert.equal(a.body, b.body);
-  assert.equal(a.prevTail, b.prevTail);
-  assert.notEqual(a.sentence, b.sentence);
-  const far = paragraphWindowOf(paras, 1, pos(55), pos(55) + 5);
-  assert.notEqual(far.body, a.body);
-  assert.equal(a.body.length < longPara.length, true); // 确实是切块，不是整段
-  assert.match(a.body, new RegExp(sentence(20))); // 所在句在窗口里
+test("同一句里不同位置的窗口完全相同；换句才变", () => {
+  const a = sentenceWindowOf(PARAS, 1, 4, 11);
+  const b = sentenceWindowOf(PARAS, 1, 29, 33);
+  assert.deepEqual(a, b);
+  assert.notDeepEqual(a, sentenceWindowOf(PARAS, 1, 40, 44));
 });
 
-test("长段落窗口不从段首开始时，不再取前面各段（前面的内容已在上一块里）", () => {
-  const paras = [{ content: "Intro words here." }, { content: longPara }];
-  const mid = longPara.indexOf(sentence(40));
-  assert.equal(paragraphWindowOf(paras, 1, mid, mid + 5).prevTail, "");
-  assert.match(paragraphWindowOf(paras, 1, 0, 5).prevTail, /Intro words here/);
+test("没有标点的超长文本：各段都有字符上限，不会塞进几千词", () => {
+  const blob = "word ".repeat(3000).trim(); // 一整个没有句号的长文本
+  const paras = [{ content: blob }, { content: blob }, { content: blob + ". Tail sentence here." }];
+  const w = sentenceWindowOf(paras, 1, 100, 110);
+  assert.equal(w.sentence.length <= SENTENCE_MAX_CHARS + 1, true);
+  assert.equal(w.prev.length <= (NEIGHBOR_MAX_CHARS + 1) * 40, true);
+  assert.equal(w.next.length <= NEIGHBOR_MAX_CHARS + 1, true);
+  assert.equal(JSON.stringify(w).length < 6000, true);
+});
+
+test("单句超长（有标点）：所在句按字符截断，同一位置结果稳定", () => {
+  const long = "A very long sentence " + "with many words ".repeat(300) + "ends here.";
+  const paras = [{ content: long + " Next one is short." }];
+  const a = sentenceWindowOf(paras, 0, 30, 35);
+  assert.equal(a.sentence.length <= SENTENCE_MAX_CHARS + 1, true);
+  assert.equal(a.next, "Next one is short.");
+  assert.deepEqual(a, sentenceWindowOf(paras, 0, 60, 65));
 });
 
 // ---------- 档案拆分 ----------

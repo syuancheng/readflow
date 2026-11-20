@@ -1,7 +1,7 @@
 import { ASK_MAX_CHARS } from "./ask-presets";
 import { planHistory } from "./history-compress";
 import { assembleExplain } from "./prompt/layers";
-import type { ParagraphWindow } from "./prompt/paragraph-window";
+import type { SentenceWindow } from "./prompt/sentence-window";
 import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
 import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
@@ -122,8 +122,8 @@ export type ExplainParams = {
    * v2 只支持中文讲解（monolingual 为真时自动退回 v1）。
    */
   layout?: "v1" | "v2";
-  /** v2 L3：段落窗口，由服务端按 textId + anchor 算，客户端传值只作回退 */
-  paragraphWindow?: ParagraphWindow;
+  /** v2 L3：句子窗口（前文 + 所在句 + 同段后一句），由服务端按 textId + anchor 算，客户端传值只作回退 */
+  sentenceWindow?: SentenceWindow;
   /** v2 L1：学习档案里变动慢的部分（身份、阅读目的、备考、风格、老师笔记） */
   learnerStable?: string;
   /** v2 L5：学习档案里变动快的部分（水平、难点、反馈） */
@@ -563,7 +563,7 @@ export function buildUserTail(params: ExplainParams, variantBlock: string): stri
   const question = params.prompt
     ? `学生的问题: ${params.prompt}`
     : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
-  const sentence = (params.paragraphWindow?.sentence || params.contextLayers?.sentence || params.signals?.sentence || "").trim();
+  const sentence = (params.sentenceWindow?.sentence || params.contextLayers?.sentence || params.signals?.sentence || "").trim();
   const quoteText = params.quote?.text?.trim();
   const quote = quoteText
     ? `你引用了自己上一条回答里的这段话：\n「${quoteText.slice(0, EXPLAIN_QUOTE_MAX_CHARS)}」`

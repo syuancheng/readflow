@@ -17,7 +17,7 @@ import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import type { SelectionSignals } from "@/lib/sentence";
 import { learnerBlockFor, linkExplainContext, logExplain, recordExplainUsage, saveAnswer } from "@/lib/learner-store";
 import type { ChatUsage } from "@/lib/providers";
-import { paragraphWindowFor, promptLayout } from "@/lib/prompt/layout-flag";
+import { sentenceWindowFor, promptLayout } from "@/lib/prompt/layout-flag";
 import { windowFromLayers } from "@/lib/prompt/layers";
 import { buildRulesSystemPrompt } from "@/lib/learner/teaching-rules";
 import { narrowAskKind } from "@/lib/learner/ask-kind";
@@ -172,8 +172,8 @@ export async function handleExplain(
           learnerStable: profile.stable || undefined,
           learnerVolatile: profile.volatile || undefined,
           articleBlock: domainBlockFor(params.textId, user.id) || undefined,
-          paragraphWindow:
-            paragraphWindowFor(user.id, params.textId, params.anchor) ??
+          sentenceWindow:
+            sentenceWindowFor(user.id, params.textId, params.anchor) ??
             (params.contextLayers ? windowFromLayers(params.contextLayers) : undefined),
         }
       : {};

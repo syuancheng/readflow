@@ -24,14 +24,14 @@ export function promptLayout(): PromptLayout {
   }
 }
 
-/** 按 textId + 锚点从库里取段落窗口（只取这个用户自己的文章）。取不到返回 null，调用方回退到客户端传来的上下文 */
-import { paragraphWindowOf, type ParagraphWindow } from "./paragraph-window";
+/** 按 textId + 锚点从库里取句子窗口（只取这个用户自己的文章）。取不到返回 null，调用方回退到客户端传来的上下文 */
+import { sentenceWindowOf, type SentenceWindow } from "./sentence-window";
 
-export function paragraphWindowFor(
+export function sentenceWindowFor(
   userId: string,
   textId: string | undefined,
   anchor: { paragraphId: string; start: number; end: number } | undefined,
-): ParagraphWindow | null {
+): SentenceWindow | null {
   if (!textId || !anchor) return null;
   try {
     const rows = sqlite
@@ -44,8 +44,8 @@ export function paragraphWindowFor(
       .all(textId, userId) as { id: string; content: string }[];
     const at = rows.findIndex((r) => r.id === anchor.paragraphId);
     if (at < 0) return null;
-    const win = paragraphWindowOf(rows, at, anchor.start, anchor.end);
-    return win.body ? win : null;
+    const win = sentenceWindowOf(rows, at, anchor.start, anchor.end);
+    return win.sentence ? win : null;
   } catch (err) {
     console.error("[prompt] 读取段落窗口失败，回退到客户端上下文:", err);
     return null;

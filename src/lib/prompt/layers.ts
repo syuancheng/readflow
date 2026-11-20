@@ -22,7 +22,7 @@ import {
   type ExplainParams,
 } from "../ai";
 import type { ChatTurn } from "../providers";
-import type { ParagraphWindow } from "./paragraph-window";
+import type { SentenceWindow } from "./sentence-window";
 
 /** L0：中文人设 + 制卡建议规则。制卡开关关闭时由 L5 的一行指令抑制，这里永远带着 */
 export function buildL0(): string {
@@ -46,17 +46,21 @@ export function buildL2(articleBlock?: string): string {
   return b ? `【这篇文章】\n${b}` : "";
 }
 
-/** L3：段落层。只含段落原文，与选区、问法、开关都无关 */
-export function buildL3(win?: ParagraphWindow): string {
-  if (!win || !win.body.trim()) return "";
-  const prev = win.prevTail.trim()
-    ? `前文（背景，原文顺序）：\n${win.prevTail.trim()}\n\n`
+/** L3：上下文层（前文 + 所在句 + 同段后一句）。只含原文，与选区、问法、开关都无关 */
+export function buildL3(win?: SentenceWindow): string {
+  if (!win || !win.sentence.trim()) return "";
+  const prev = win.prev.trim() ? `前文（背景，原文顺序）：\n${win.prev.trim()}\n\n` : "";
+  const next = win.next.trim()
+    ? `\n\n后一句（背景，同一段里紧接着的一句）：\n${win.next.trim()}`
     : "";
-  return `【文章原文：背景，不是学生的问题】
-学生选中的词／短语所在的句子，会在最后一条消息里单独给出，那才是你要讲的对象。下面的原文只用来理解指代（that / it / the one）、承接、省略和上下文语气：其中没被选中的句子不要翻译，也不要当成学生的问题；后面的句子只在「当前句要靠后文才讲得通」时才用。
+  return `【文章上下文：三处不同，别混用】
+- 「所在句」是学生选中的词／短语直接所在的那句，是你要讲的对象：词义、搭配、句法都以它为准。
+- 「前文」只用来理解 that / it / the one 这类指代、承接与省略。
+- 「后一句」只在所在句要靠后文才讲得通时才用（比如 "This is because…" 的原因在后面）。
+前文和后一句都是背景，不是学生选中的内容：不要把它们翻译成中文，也不要把它们当成学生的问题。
 
-${prev}当前段落：
-${win.body.trim()}`;
+${prev}所在句（讲的对象）：
+${win.sentence.trim()}${next}`;
 }
 
 /** L5 里的变体指令（只写需要的，没有就是空串） */
@@ -80,7 +84,7 @@ export function assembleExplain(params: ExplainParams): ChatTurn[] {
     stableProfile: params.learnerStable,
   });
   const l2 = buildL2(params.articleBlock);
-  const l3 = buildL3(params.paragraphWindow);
+  const l3 = buildL3(params.sentenceWindow);
   return [
     { role: "system", content: buildL0() },
     ...(l1 ? [{ role: "system" as const, content: l1 }] : []),
@@ -94,11 +98,11 @@ export function assembleExplain(params: ExplainParams): ChatTurn[] {
 /** L4 历史压缩的分块大小：每攒满 3 轮才压缩一批，压后不再改 */
 export const HISTORY_BLOCK = 3;
 
-/** 客户端只传了两层上下文（没有 textId / 锚点）时的回退：把它折成一个窗口，结构仍是 v2 */
-export function windowFromLayers(layers: { sentence: string; nearContext: string[] }): ParagraphWindow {
+/** 客户端只传了两层上下文（没有 textId / 锚点）时的回退：折成句子窗口，结构仍是 v2（没有后一句） */
+export function windowFromLayers(layers: { sentence: string; nearContext: string[] }): SentenceWindow {
   return {
-    prevTail: [...layers.nearContext].reverse().join(" "),
-    body: layers.sentence,
+    prev: [...layers.nearContext].reverse().join(" "),
     sentence: layers.sentence,
+    next: "",
   };
 }

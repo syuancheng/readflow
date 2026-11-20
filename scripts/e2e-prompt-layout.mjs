@@ -138,15 +138,20 @@ try {
   };
   const at = (s) => P2.indexOf(s);
 
-  // ---- 同段内点两个不同的词：前缀应共用整段 ----
+  // ---- 同一句里点两个词（前缀应全部命中），再换另一句 ----
   const r1 = await ask("decides", at("decides"), at("decides") + 7);
+  const r1b = await ask("model", at("model"), at("model") + 5);
   const r2 = await ask("tool", at("tool"), at("tool") + 4);
   const sys = (r) => r.messages.filter((m) => m.role === "system");
-  check("V1 v2 结构：第一条 system 是人设，没有拆句/领域内容", r1.messages[0].role === "system" && /英语为母语/.test(r1.messages[0].content));
-  check("V2 段落层带整段原文（包含后面的句子），且不跨段取下一段", sys(r1).some((m) => m.content.includes("That is the whole idea")) && !sys(r1).some((m) => m.content.includes("later paragraph")));
-  check("V3 文章层带标题与分类", sys(r1).some((m) => /How agents work/.test(m.content) && /技术文档/.test(m.content)));
   const tailStart = (r) => flat(r.messages).lastIndexOf("<user>");
-  check("V4 同段第二次点击：命中覆盖了除尾部之外的全部前缀", r2.hit >= tailStart(r2) - 5, `hit=${r2.hit} 尾部起点=${tailStart(r2)}`);
+  const l3Start = (r) => flat(r.messages).indexOf("【文章上下文");
+  check("V1 v2 结构：第一条 system 是人设，没有拆句/领域内容", r1.messages[0].role === "system" && /英语为母语/.test(r1.messages[0].content));
+  const l3 = sys(r1).find((m) => m.content.includes("【文章上下文"))?.content ?? "";
+  check("V2 上下文层：前文（上一段）+ 所在句 + 同段后一句；不含更后面的句子，不跨段取后文",
+    /Agents loop over tools/.test(l3) && /The model decides what to do next\./.test(l3) && /后一句[^]*It may call a tool again\./.test(l3) && !l3.includes("That is the whole idea") && !l3.includes("later paragraph"), l3.slice(-200));
+  check("V3 文章层带标题与分类", sys(r1).some((m) => /How agents work/.test(m.content) && /技术文档/.test(m.content)));
+  check("V4 同一句里点第二个词：命中覆盖了除尾部之外的全部前缀", r1b.hit >= tailStart(r1b) - 5, `hit=${r1b.hit} 尾部起点=${tailStart(r1b)}`);
+  check("V4b 换到另一句：人设 / 用户层 / 文章层仍然命中，只有上下文层重算", r2.hit >= l3Start(r2) - 5 && r2.hit < tailStart(r2), `hit=${r2.hit} 上下文层起点=${l3Start(r2)}`);
   check("V5 尾部（user）含所在句与选中词", /所在句: "It may call a tool again\./.test(r2.messages.at(-1).content) && /用户选中: "tool"/.test(r2.messages.at(-1).content));
 
   // ---- 切换问法：拆句 / 领域，前缀不变 ----
@@ -157,7 +162,7 @@ try {
 
   // ---- 用量落库 ----
   const ev = dbq("SELECT layout, para_click_n, prompt_tokens, cache_hit_tokens FROM explain_events ORDER BY created_at");
-  check("V8 用量落库：每次请求都有 prompt/命中 token，layout=v2，同段次数递增", ev.length === 4 && ev.every((e) => e.layout === "v2" && e.prompt_tokens > 0) && ev.map((e) => e.para_click_n).join() === "1,2,3,4", JSON.stringify(ev));
+  check("V8 用量落库：每次请求都有 prompt/命中 token，layout=v2，同段次数递增", ev.length === 5 && ev.every((e) => e.layout === "v2" && e.prompt_tokens > 0) && ev.map((e) => e.para_click_n).join() === "1,2,3,4,5", JSON.stringify(ev));
   check("V9 请求带了 stream_options.include_usage", requests.every((r) => r.streamOptions?.include_usage === true));
   check("V10 命中数是模型回传的真实值（第二次起 > 0）", ev[1].cache_hit_tokens > 0 && ev[0].cache_hit_tokens === 0, JSON.stringify(ev.map((e) => e.cache_hit_tokens)));
 
@@ -169,9 +174,10 @@ try {
   if (!(await waitServer())) { log("v1 服务器没起来"); process.exit(1); }
   const a1 = await ask("decides", at("decides"), at("decides") + 7);
   const a2 = await ask("tool", at("tool"), at("tool") + 4);
-  check("V11 回退到 v1：请求与原来一致（上下文在第 2 条 system 里，没有段落层）", a1.messages.length === 3 && !a1.messages.some((m) => m.content.includes("【文章原文")) && a1.messages.some((m) => m.content.includes("【文章上下文")), `messages=${a1.messages.length}`);
-  log(`      对照：v1 同段第二次点击 命中 ${a2.hit}/${a2.prompt} 字符；v2 命中 ${r2.hit}/${r2.prompt} 字符`);
-  check("V12 v2 的命中字符数 > v1（同段第二次点击）", r2.hit > a2.hit, `v2=${r2.hit} v1=${a2.hit}`);
+  const a3 = await ask("tool", at("tool"), at("tool") + 4, { askKind: "structure" });
+  check("V11 回退到 v1：请求与原来一致（上下文在第 2 条 system 里，没有 v2 的上下文层）", a1.messages.length === 3 && a1.messages.some((m) => m.content.includes("【文章上下文：两处不同")) && !a1.messages.some((m) => m.content.includes("【文章上下文：三处不同")), `messages=${a1.messages.length}`);
+  log(`      对照（点「讲讲句子结构」）：v1 命中 ${a3.hit}/${a3.prompt} 字符；v2 命中 ${r3.hit}/${r3.prompt} 字符`);
+  check("V12 v2 点「讲讲句子结构」命中的字符数 > v1（v1 的拆句方法插在前面，断了后面的缓存）", r3.hit > a3.hit, `v2=${r3.hit} v1=${a3.hit}`);
   const bad = serverLog.split("\n").filter((l) => /\b(Error|TypeError|SqliteError|unhandled)\b/.test(l));
   check("V13 服务端日志没有异常", bad.length === 0, bad.slice(0, 3).join(" | "));
 } catch (e) {

@@ -57,7 +57,7 @@
 | 文件 | 导出 | 说明 |
 |---|---|---|
 | `layers.ts` | `buildL0()` / `buildL1(...)` / `buildL2(...)` / `buildL3(...)` / `buildTail(...)` / `assembleExplain(params): ChatTurn[]` | 每层是纯函数，输入只含该层依赖的数据 |
-| `paragraph-window.ts` | `paragraphWindowOf(paragraphs, paraIdx, start, end)` | 返回 `{ prevTail: string, body: string, sentence: string }` |
+| `sentence-window.ts` | `sentenceWindowOf(paragraphs, paraIdx, start, end)` | 返回 `{ prev, sentence, next }` |
 | `profile-split.ts` | `splitLearnerBlock(input)` → `{ stable, volatile }` | 拆分档案文本 |
 
 `explainTurns`（`ai.ts:536`）在 `layout=v2` 时委托 `assembleExplain`；v1 保持原样，逐字不变（快照测试仍覆盖）。
@@ -69,7 +69,7 @@
 | L0 | 无 | 常量字符串 |
 | L1 | `teachingRules`、`stableProfile` | 固定模板；两者都为空则整层省略 |
 | L2 | `title`、`category` | 固定模板；都为空则省略 |
-| L3 | `paragraphWindow` | 固定模板；见 §3.3 |
+| L3 | `sentenceWindow` | 固定模板；见 §3.3 |
 | L4 | 历史 | 见 §3.5 |
 | L5 | 变体、易变档案、选区、所在句、观察、问题、引用 | 见 §3.6 |
 
@@ -81,26 +81,23 @@
 5. 改 L5 的任意输入，L0~L4 的拼接字节不变。
 6. 变体开关（个性化、制卡、monolingual、domain、structure）只影响 L5。
 
-### 3.3 段落窗口 `paragraphWindowOf`
+### 3.3 句子窗口 `sentenceWindowOf`（2026-11-20 评审后取代原"段落窗口"）
 
 ```
 输入：paragraphs[], paraIdx, start, end
-输出：
-  prevTail   前面各段末尾约 150 词（整句，原文顺序；沿用 NEAR_CONTEXT_MAX_WORDS）
-  body       当前段落（≤ 300 词整段；> 300 词按固定网格取块）
-  sentence   选区所在句（跨句选区合并，沿用 contextLayersOf 的逻辑）
+输出：{ prev, sentence, next }   // 都是原文顺序
+  prev      所在句之前约 150 词（整句，可跨到上一段；每句 ≤ 600 字符）
+  sentence  选区所在句（跨句合并；≤ 1500 字符）
+  next      同一段里紧接着的一句（段末则为空，不跨段；≤ 600 字符）
 ```
 
-- 网格：从段首起，按句子累加到约 120 词为一块；块号只由段落原文决定。取"含所在句的块"加"相邻后一块"（如存在）。
-- 标题段、代码块、表格段：`body` 只含本段，不取后文；`prevTail` 照常。
-- 复用：把 `contextLayersOf`（`sentence.ts:166`）里的 `splitSentences`、`wordsOf`、`NEAR_CONTEXT_MAX_WORDS` 提出来共用；旧函数保留（v1 与单测还在用）。
-- 阅读页（`Reader.tsx` 约 1516 行）与插件（`extension-record.ts:80-91`）都改调 `paragraphWindowOf`，保证同段同输出。
+复用 `contextLayersOf` 求所在句与前文，只多加"同段后一句"；原先的网格切块与超长段落处理整体删除。阅读页与插件都经服务端 `sentenceWindowFor` 计算，保证同输入同输出。设计依据见设计文档 §3.5。
 
 ### 3.4 请求体与白名单
 
-- `ExplainParams`（`ai.ts:66`）新增 `paragraphWindow?: { prevTail: string; body: string; sentence: string }`；`narrowParagraphWindow` 白名单校验（长度上限：prevTail 2000、body 4000、sentence 1000 字符，与 `narrowContextLayers` 同款，`ai.ts:246`）。
-- v2 时服务端优先用 `paragraphWindow`；缺失则按 v1 的 `contextLayers` 回退，不报错。
-- 也可由服务端按 `textId + anchor` 自己算（更可信，且客户端传的值无法污染缓存）。**推荐**：服务端算，客户端只传 `textId`、`paragraphId`、`anchor`；`paragraphWindow` 字段作为兼容回退。落地时二选一，在评审时确认。
+- `ExplainParams`（`ai.ts:66`）新增 `sentenceWindow?: { prev; sentence; next }`（服务端计算为准，客户端不传；回退用 `windowFromLayers`）。
+- v2 时服务端优先用 `sentenceWindowFor` 的结果；缺失则按 v1 的 `contextLayers` 回退，不报错。
+- 也可由服务端按 `textId + anchor` 自己算（更可信，且客户端传的值无法污染缓存）。**推荐**：服务端算，客户端只传 `textId`、`paragraphId`、`anchor`；`windowFromLayers` 作为兼容回退。落地时二选一，在评审时确认。
 
 ### 3.5 L4 历史分块压缩
 
@@ -131,7 +128,7 @@
 
 ### 3.7 做卡与插件
 
-- `cards/generate.ts buildRun` 无缓存分支（`generate.ts:262` 附近）：目前传 `contextLayers: { sentence, nearContext: [] }`；改为用 `paragraphWindowOf`（做卡上下文里已有 `paragraphOf(ctx)`，见 `cards/store.ts`），与讲解同一前缀。
+- `cards/generate.ts buildRun` 无缓存分支（`generate.ts:262` 附近）：目前传 `contextLayers: { sentence, nearContext: [] }`；后续可改为用 `sentenceWindowOf`（做卡上下文里已有 `paragraphOf(ctx)`，见 `cards/store.ts`），与讲解同一前缀。
 - 命中缓存分支：复用 `cached.messages`，不变。
 - `learnerBlockOfMessages`（`generate.ts`）从缓存 messages 里取学习档案的方式随之调整（档案拆成 L1 稳定段 + L5 易变段）。
 
@@ -156,7 +153,7 @@
 - **开关**：环境变量 `READFLOW_PROMPT_LAYOUT=v1|v2` 优先，其次站级设置行 `prompt.layout`（user_id=`local`），默认 v1；读取在每次请求时发生，改完立即生效。见 `src/lib/prompt/layout-flag.ts`（含一行 SQL）。
 - **L0 不带深度变体**：个性化用户的「答案深度」指引放在 **L1**（用户层，标题写明"替代上文答案深度"），L0 永远是同一份；制卡规则永远在 L0，关闭时尾部加一行"本次不要输出制卡建议行"。
 - **档案拆分与设计稿不同**：「估计水平」依赖提问次数、会随每次提问变化，所以**放在易变段（尾部）**；稳定段只含身份、阅读目的、备考、讲解风格、老师笔记。`buildLearnerBlock` 新增 `part: "stable" | "volatile"`，不传则与原来逐字一致。
-- **段落窗口服务端计算**：`paragraphWindowFor(userId, textId, anchor)`（只取该用户自己的文章）；取不到则用客户端的两层上下文折成窗口（`windowFromLayers`）。窗口不跨段取后文，长段落按固定网格取"前一块 + 所在块 + 后一块"。
+- **句子窗口（2026-11-20 评审后改）**：不再取整个段落。`sentenceWindowFor(userId, textId, anchor)`（只取该用户自己的文章）返回 `{ prev, sentence, next }`：前文约 150 词（可跨到上一段）、所在句、**同段**后一句（段末没有，不跨段）；每段有字符上限（所在句 1500，前文每句/后一句 600）。取不到则用客户端的两层上下文折成窗口（`windowFromLayers`，没有后一句）。原先的网格切块方案已删除。
 - **做卡**：讲解缓存新增 `learnerBlock` 字段（v2 的档案分在两处，不能再从第一条 user 里抠）；无缓存命中的重算分支仍按 v1 拼（做卡命中缓存时直接复用讲解的 messages，不受影响）。
 - **历史分块压缩**：`planHistory(input, budget, { blockSize })`；v2 用 3。阅读页界面的"更早的对话已压缩"提示仍按默认规则算，块内可能与服务端略有出入，只影响提示。
 - **测试**：`tests/unit/prompt-layers.test.ts`（前缀不变量、窗口、档案拆分、历史分块）与 `scripts/e2e-prompt-layout.mjs`（假模型模拟前缀缓存，对比 v1/v2，13 项）。
@@ -186,7 +183,7 @@
 | 用例 | 断言 |
 |---|---|
 | `prompt-layers.test.ts` | §3.2 的 6 条不变量；开关组合（个性化 × 制卡 × monolingual × domain × structure）下 L0~L4 字节不变，只有 L5 变 |
-| `paragraph-window.test.ts` | 整段、超长段落网格切块（同块内不同句输出相同）、标题/代码块不取后文、首段无前文、末段无后文、跨段前文取整句、中文/混排分句 |
+| `prompt-layers.test.ts`（句子窗口部分） | 三段结构、同段后一句、段末无后一句不跨段、首段无前文、跨句选区、同句同窗口、无标点超长文本与单句超长受字符上限约束 |
 | `profile-split.test.ts` | stable 与 volatile 不重叠；合并后与 v1 `buildLearnerBlock` 的信息集一致 |
 | `history-compress.test.ts`（更新） | 分块压缩：第 4、5、6 轮的历史前缀逐字相同，只在跨块边界时变；首次讲解钉住 |
 | `explain-turns-v2.test.ts` | v2 的 messages 结构；v1 快照不变；v2 对"同段不同词"产生相同的前 N 条 messages |
@@ -211,14 +208,14 @@
 
 | 风险 | 回滚/缓解 |
 |---|---|
-| 整段上下文导致越界翻译 | L5 加"只讲所在句"；评测统计；不达标则把 `body` 退成"所在句 + 前后各一句"（`paragraphWindowOf` 内一个参数） |
+| 整段上下文导致越界翻译 | L5 加"只讲所在句"；评测统计；不达标则去掉后一句（`sentenceWindowOf` 的 `next` 置空） |
 | 变体移尾后遵循度下降 | T-D 与评测覆盖；必要时把关键变体指令重复一句在 L5 末尾 |
-| 阅读页/插件窗口不一致 | 共用 `paragraphWindowOf` + T-F |
+| 阅读页/插件窗口不一致 | 共用 `sentenceWindowFor` + T-F |
 | 命中率提升不如预期 | 度量先行，按 `layout` 对比；v1 开关随时回退 |
 | 站点开关误开 | 默认 v1；灰度按用户 id |
 
 ## 8. 文件清单（预计）
 
-新增：`src/lib/prompt/{layers,paragraph-window,profile-split,l0-v2}.ts`、`scripts/prompt-cache-report.mjs`、`scripts/prompt-eval.mjs`、`tests/unit/prompt-*.test.ts`、`tests/fixtures/prompt-eval/`。
+新增：`src/lib/prompt/{layers,sentence-window,l0-v2}.ts`、`scripts/prompt-cache-report.mjs`、`scripts/prompt-eval.mjs`、`tests/unit/prompt-*.test.ts`、`tests/fixtures/prompt-eval/`。
 
 修改：`src/lib/ai.ts`、`src/lib/sentence.ts`、`src/lib/explain-handler.ts`、`src/lib/providers.ts`、`src/lib/learner-store.ts`、`src/lib/learner/profile-text.ts`、`src/lib/history-compress.ts`、`src/lib/extension-record.ts`、`src/lib/cards/generate.ts`、`src/components/Reader.tsx`、`src/db/ensure-auth.ts`（迁移）、`src/db/schema.ts`、设置项 `prompt.layout`。
