@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { explainTurns, type ExplainParams } from "../../src/lib/ai";
-import { DOMAIN_TRIGGER, buildL0, buildL1, buildL3, windowFromLayers } from "../../src/lib/prompt/layers";
+import { CUSTOM_ASK_TAIL_HINT, explainTurns, type ExplainParams } from "../../src/lib/ai";
+import { CUSTOM_TRIGGER, DOMAIN_TRIGGER, buildL0, buildL1, buildL3, windowFromLayers } from "../../src/lib/prompt/layers";
 import { NEIGHBOR_MAX_CHARS, SENTENCE_MAX_CHARS, sentenceWindowOf } from "../../src/lib/prompt/sentence-window";
 import { buildLearnerBlock } from "../../src/lib/learner/profile-text";
 import { planHistory } from "../../src/lib/history-compress";
@@ -46,23 +46,28 @@ test("L0 在任何输入下都相同，且不含「本次」类变体", () => {
   assert.match(turns[0].content, /制卡建议/); // 制卡规则永远在 L0
 });
 
-test("开关与变体不改前缀：制卡开关 / 领域 / 拆句 / 选区 / 问题 / 观察 只改尾部", () => {
+test("开关与变体不改前缀：制卡开关 / 领域 / 拆句 / 自由提问 / 选区 / 问题 / 观察 只改尾部", () => {
   const ref = prefix(base());
   assert.equal(prefix(base({ cardsEnabled: false })), ref);
   assert.equal(prefix(base({ askKind: "domain" })), ref);
   assert.equal(prefix(base({ askKind: "structure" })), ref);
+  assert.equal(prefix(base({ askKind: "custom", prompt: "我猜这句话的意思是……" })), ref);
   assert.equal(prefix(base({ word: "loop", prompt: "为什么？" })), ref);
   assert.equal(prefix(base({ learnerVolatile: "学生近况：\n- 估计水平：B2" })), ref);
   assert.equal(prefix(base({ quote: { text: "上一轮的话", turnIndex: 0 } })), ref);
 });
 
-test("尾部确实随这些变化：制卡关闭有一行指令；domain 带领域视角；structure 带拆句方法", () => {
+test("尾部确实随这些变化：制卡关闭有一行指令；domain 带领域视角；structure 带拆句方法；custom 带自由提问触发", () => {
   assert.match(tail(base({ cardsEnabled: false })), /本次不要输出「制卡建议」行/);
   assert.doesNotMatch(tail(base()), /本次不要输出「制卡建议」行/);
   assert.match(tail(base({ askKind: "domain" })), new RegExp(DOMAIN_TRIGGER));
   assert.doesNotMatch(tail(base({ askKind: "domain" })), /资深的专业技术人员/); // 领域视角全文在 L0，尾部只有触发行
   assert.match(tail(base({ askKind: "structure" })), /带学生拆开这个长句/);
-  assert.doesNotMatch(tail(base()), /资深的专业技术人员|带学生拆开|本轮：从内容角度/);
+  assert.doesNotMatch(tail(base()), /资深的专业技术人员|带学生拆开|本轮：从内容角度|本轮：直接回答/);
+  const customTail = tail(base({ askKind: "custom", prompt: "我猜这句话的意思是先买两小瓶样品" }));
+  assert.match(customTail, new RegExp(CUSTOM_TRIGGER));
+  assert.ok(customTail.includes(CUSTOM_ASK_TAIL_HINT));
+  assert.match(buildL0(), /【特殊问法：学生自己提问】/);
 });
 
 test("同一句里点不同的词，前缀逐字相同（上下文窗口只取决于所在句的位置）", () => {

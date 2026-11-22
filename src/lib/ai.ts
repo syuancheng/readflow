@@ -404,11 +404,21 @@ Never: phonetic symbols, greetings, fixed three-section headings, numbered lists
  * 默认释义与 Ask AI 追问共用同一套 system 和同一个上下文块，只有「学生的问题」一行不同：
  * 默认时把「判断卡在哪」交给老师，追问时换成用户自己的问题。
  */
+/** 学生通过输入框自由提问（askKind = custom）时的尾部聚焦提示：唤醒直接作答、解除默认词义模板 */
+export const CUSTOM_ASK_TAIL_HINT =
+  "（请直接、正面回答「学生的问题」：如果他在核对自己的理解或猜测，第一句话先明确回应他的理解对不对、哪处有偏差，再展开解释；不要套用默认的选区词义讲解模板，不要写「释义：」行，也不受「只答选区、不译选区外」的限制。）";
+
+function formatStudentQuestion(params: Pick<ExplainParams, "prompt" | "askKind">): string {
+  if (!params.prompt) {
+    return "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
+  }
+  const line = `学生的问题: ${params.prompt}`;
+  return params.askKind === "custom" ? `${line}\n${CUSTOM_ASK_TAIL_HINT}` : line;
+}
+
 /** 导出供单测做控制变量断言 */
 export function buildUserMessage(params: ExplainParams): string {
-  const question = params.prompt
-    ? `学生的问题: ${params.prompt}`
-    : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
+  const question = formatStudentQuestion(params);
   // P32：学生档案放在最前面；为空时不插入任何字符，旧调用的输出逐字不变
   const learner = params.learnerBlock?.trim() ? `${params.learnerBlock.trim()}\n\n` : "";
   // P40：领域块只由服务端按 textId 查库后注入；前端伪造的字段会在 handler 里被丢弃。
@@ -602,9 +612,7 @@ export function historyTurns(
  * 顺序固定、缺项整行省略；问题放最后。
  */
 export function buildUserTail(params: ExplainParams, variantBlock: string): string {
-  const question = params.prompt
-    ? `学生的问题: ${params.prompt}`
-    : "学生没有说出具体问题。请根据选区、所在句子和观察，判断他卡在哪里，然后直接回答。";
+  const question = formatStudentQuestion(params);
   const sentence = (params.sentenceWindow?.sentence || params.contextLayers?.sentence || params.signals?.sentence || "").trim();
   const quote = repliesSection(params);
   // observations() 在有 contextLayers 时不重复所在句；v2 所在句单独成行，所以这里同样跳过

@@ -45,6 +45,23 @@ ${DEPTH_GUIDANCE_ZH.split("\n").slice(1).join("\n")}`;
  */
 export const DOMAIN_TRIGGER = "【本轮：从内容角度讲讲这句】";
 
+/**
+ * 特殊问法「学生自己提问」（askKind = custom）：通过输入框自己发消息或点自定义常用问题。
+ * 规则静态写在 L0（保证所有请求 L0 逐字相同、缓存命中），由 L5 尾部的 CUSTOM_TRIGGER 触发，
+ * 解除默认词义讲解的「第一行写释义：」「只答选区、不译选区外」「主干必画句子地图」束缚，正面回答学生的问题。
+ */
+export const CUSTOM_TRIGGER = "【本轮：直接回答学生自己提出的问题】";
+
+function customAskSection(): string {
+  return `【特殊问法：学生自己提问】
+只有当最后一条消息含「${CUSTOM_TRIGGER}」时才用本节。此时学生不是让你按默认模板讲选区词义，而是自己在输入框里向你提了一个具体问题（或说出了他对这句话的理解／猜测请你确认）：
+- 第一优先级是**直接、正面回答「学生的问题」**，不要套用默认的词义讲解模板。
+- 如果学生在核对自己的理解或猜测（例如「我猜这句话的意思是…」「是不是指…」），**第一句话先明确回应他的理解对不对**：说对的部分直接肯定，有偏差、漏掉或修饰关系看错的地方精准点出，再补上必要的解释。
+- **不要写第一行「释义：」**（除非学生在问题里明确要求你给「释义：」行），第一句话直接回应他。
+- **不受「只答选区、不译选区外」的限制**——他虽然点在某个词上，但如果问的是半句、整句或上下文的意思，就按他问的范围正面作答，不算越界。
+- 除非他问到了句子结构，或者他的误读正好是把句子主干／修饰关系看错了，否则不要例行公事画句子地图。`;
+}
+
 function domainModeSection(): string {
   const body = buildDomainSystemPrompt();
   const i = body.indexOf("【你收到的信息】");
@@ -67,7 +84,7 @@ export function buildL0(): string {
   const j = base.indexOf("【硬性禁止】", i);
   if (i < 0 || j < 0) throw new Error("persona depth markers changed");
   const persona = `${base.slice(0, i)}${v2Depth()}\n\n${base.slice(j)}`;
-  return `${persona}\n\n${CARD_SUGGESTION_ZH}\n\n${domainModeSection()}`;
+  return `${persona}\n\n${CARD_SUGGESTION_ZH}\n\n${domainModeSection()}\n\n${customAskSection()}`;
 }
 
 /** L1：讲解要求 + 稳定档案；都为空则整层省略 */
@@ -107,6 +124,7 @@ export function buildVariantBlock(params: ExplainParams): string {
   if (params.cardsEnabled === false) lines.push("本次不要输出「制卡建议」行。");
   if (params.askKind === "domain") lines.push(DOMAIN_TRIGGER);
   if (params.askKind === "structure") lines.push(buildSentenceStructureMethodPrompt());
+  if (params.askKind === "custom" && params.prompt) lines.push(CUSTOM_TRIGGER);
   return lines.join("\n\n");
 }
 
