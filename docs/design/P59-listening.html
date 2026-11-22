@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P59 听力练习 · 阅读页原型</title>
+<style>
+/* 令牌：复刻 src/styles/tokens.css，仅用于视觉走查 */
+:root{
+  --rf-green-50:#f1fbe7;--rf-green-100:#d7ffb8;--rf-green-500:#58cc02;--rf-green-600:#58a700;--rf-green-700:#3f7f00;
+  --rf-gray-0:#fff;--rf-gray-50:#f6f8f4;--rf-gray-100:#edf2e9;--rf-gray-200:#e0e8da;--rf-gray-300:#cdd7c5;
+  --rf-gray-400:#a7b39d;--rf-gray-500:#84917a;--rf-gray-600:#5b6853;--rf-gray-800:#2a3326;--rf-gray-900:#1c2319;
+  --rf-forest-700:#153a29;
+  --rf-blue-50:#e8f6fe;--rf-blue-500:#1cb0f6;--rf-blue-700:#0a6fa3;
+  --rf-amber-50:#fff4d6;--rf-amber-700:#b35500;
+  --rf-text-primary:var(--rf-gray-800);--rf-text-secondary:var(--rf-gray-600);--rf-text-disabled:var(--rf-gray-400);
+  --rf-text-inverse:#fff;--rf-reading-ink:#1a1a1a;
+  --rf-bg-page:var(--rf-gray-0);--rf-bg-surface:var(--rf-gray-0);--rf-bg-subtle:var(--rf-gray-50);
+  --rf-bg-hover:var(--rf-gray-50);--rf-bg-selected:var(--rf-gray-100);
+  --rf-border:var(--rf-gray-200);--rf-border-strong:var(--rf-gray-300);--rf-border-focus:var(--rf-blue-500);
+  --rf-brand:var(--rf-green-500);--rf-brand-edge:var(--rf-green-600);
+  --rf-accent:var(--rf-forest-700);--rf-accent-edge:var(--rf-forest-700);--rf-accent-soft:var(--rf-gray-100);
+  --rf-brand-soft:var(--rf-green-100);
+  --rf-highlight-bg:var(--rf-green-100);--rf-highlight-line:var(--rf-green-500);
+  --rf-info-text:var(--rf-blue-700);--rf-info-soft:var(--rf-blue-50);
+  --rf-reward-soft:var(--rf-amber-50);--rf-reward-text:var(--rf-amber-700);
+  --rf-font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --rf-text-xs:12px;--rf-leading-xs:16px;--rf-text-sm:14px;--rf-leading-sm:20px;
+  --rf-text-md:16px;--rf-leading-md:24px;--rf-text-lg:18px;--rf-leading-lg:28px;
+  --rf-text-xl:20px;--rf-text-2xl:24px;--rf-leading-2xl:32px;--rf-text-reading:19px;--rf-leading-reading:36px;
+  --rf-weight-regular:400;--rf-weight-medium:600;--rf-weight-bold:700;--rf-weight-heavy:800;
+  --rf-space-1:4px;--rf-space-2:8px;--rf-space-3:12px;--rf-space-4:16px;--rf-space-5:20px;--rf-space-6:24px;--rf-space-8:32px;
+  --rf-radius-xs:4px;--rf-radius-sm:8px;--rf-radius-md:12px;--rf-radius-lg:16px;--rf-radius-full:999px;
+  --rf-border-width:1px;--rf-focus-ring:0 0 0 3px rgba(28,176,246,.25);
+  --rf-shadow-sm:0 1px 2px rgba(24,36,58,.06);--rf-shadow-md:0 8px 24px rgba(24,36,58,.12);
+  --rf-duration-fast:120ms;--rf-ease:cubic-bezier(.2,0,0,1);
+  --rf-bar-h:54px;
+  --duo-bg:var(--rf-bg-page);--duo-surface:var(--rf-bg-surface);--duo-border:var(--rf-border);
+  --duo-ink:var(--rf-text-primary);--duo-ink-soft:var(--rf-text-secondary);--duo-green:var(--rf-accent);
+  --duo-green-dark:var(--rf-forest-700);--duo-green-soft:var(--rf-green-50);--duo-blue:var(--rf-blue-500);
+  --reader-ink:var(--rf-reading-ink);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--rf-font-sans);color:var(--rf-text-primary);background:var(--rf-bg-page);
+  font-size:var(--rf-text-md);line-height:var(--rf-leading-md);-webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit}
+a{color:var(--duo-blue);text-decoration:none}
+
+/* ---------- 顶栏：复刻 ReadingChrome ---------- */
+.rf-topbar{
+  position:sticky;top:0;z-index:100;height:var(--rf-bar-h);display:flex;align-items:center;gap:var(--rf-space-4);
+  padding:0 var(--rf-space-5);background:var(--duo-bg);border-bottom:var(--rf-border-width) solid var(--duo-border);
+}
+.rf-tb-left,.rf-tb-right{display:flex;align-items:center;gap:var(--rf-space-3);min-width:0}
+.rf-tb-left{flex:1}
+.rf-tb-right{flex-shrink:0}
+.rf-tb-sep{width:1px;height:18px;background:var(--duo-border);flex-shrink:0}
+.rf-icon-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--rf-radius-sm);background:transparent;color:var(--duo-ink-soft);cursor:pointer;flex-shrink:0}
+.rf-icon-btn:hover{background:var(--duo-surface);color:var(--duo-ink)}
+.rf-icon-btn svg{width:17px;height:17px}
+.rf-back{display:inline-flex;align-items:center;gap:var(--rf-space-1);color:var(--duo-ink-soft);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-bold);white-space:nowrap;flex-shrink:0}
+.rf-tb-title{margin:0;font-size:var(--rf-text-sm);font-weight:var(--rf-weight-heavy);color:var(--duo-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rf-progress{font-size:var(--rf-text-xs);color:var(--duo-ink-soft);white-space:nowrap;font-variant-numeric:tabular-nums}
+.rf-progress b{font-size:var(--rf-text-sm);color:var(--duo-ink)}
+.rf-badge{display:inline-flex;align-items:center;height:24px;padding:0 var(--rf-space-2);border-radius:var(--rf-radius-sm);background:var(--rf-green-50);color:var(--rf-green-700);font-size:var(--rf-text-xs);font-weight:var(--rf-weight-medium)}
+.rf-done-btn{padding:var(--rf-space-1) var(--rf-space-3);border-radius:var(--rf-radius-sm);cursor:pointer;border:var(--rf-border-width) solid var(--duo-border);background:var(--duo-surface);color:var(--duo-ink-soft);font-size:var(--rf-text-xs);font-weight:var(--rf-weight-bold);white-space:nowrap}
+.rf-tb-progress{position:absolute;left:0;bottom:-1px;width:100%;height:2px}
+.rf-tb-progress i{display:block;height:100%;width:38%;background:var(--rf-brand)}
+
+/* ---------- 双栏 ---------- */
+.rf-reading-main{padding:var(--rf-space-6)}
+.page-inner{max-width:1440px;margin:0 auto}
+.reader-split{display:grid;grid-template-columns:minmax(0,61.8fr) minmax(0,38.2fr);gap:var(--rf-space-6);align-items:start}
+.reader-main{min-width:0}
+.duo-card{background:var(--duo-bg);border:2px solid var(--duo-border);border-radius:var(--rf-radius-lg)}
+.article-card{padding:var(--rf-space-8)}
+.article-title{margin:0 0 var(--rf-space-5);font-size:var(--rf-text-2xl);line-height:var(--rf-leading-2xl);font-weight:var(--rf-weight-heavy);color:var(--duo-ink)}
+.reading-body{font-family:var(--rf-font-sans);font-size:var(--rf-text-reading);line-height:1.85;letter-spacing:.006em;color:var(--reader-ink)}
+.reading-body p{margin:0 0 1.35em}
+.reading-body .word{background:var(--rf-highlight-bg);border-radius:var(--rf-radius-xs);padding:0 var(--rf-space-1);box-shadow:inset 0 -2px 0 var(--rf-highlight-line)}
+.reader-aside{position:sticky;top:calc(var(--rf-bar-h) + var(--rf-space-4));min-width:0}
+.note-head{font-size:var(--rf-text-xs);font-weight:var(--rf-weight-medium);color:var(--rf-text-secondary);margin:0 0 var(--rf-space-3)}
+.note-word{font-size:var(--rf-text-xl);font-weight:var(--rf-weight-heavy);color:var(--duo-ink);margin:0}
+.note-ipa{font-size:var(--rf-text-sm);color:var(--rf-text-secondary);margin:var(--rf-space-1) 0 var(--rf-space-4)}
+.note-def{font-size:var(--rf-text-md);line-height:var(--rf-leading-md);color:var(--rf-text-primary);margin:0 0 var(--rf-space-4)}
+.note-sent{border-left:2px solid var(--rf-border);padding-left:var(--rf-space-3);font-size:var(--rf-text-sm);color:var(--rf-text-secondary);margin:0}
+.note-hint{margin-top:var(--rf-space-6);font-size:var(--rf-text-xs);color:var(--rf-text-disabled)}
+
+/* ---------- 听力练习区（P59 新增） ---------- */
+.listening-card{margin-top:var(--rf-space-6);padding:var(--rf-space-6)}
+.ls-head{display:flex;align-items:center;gap:var(--rf-space-3);margin:0 0 var(--rf-space-4)}
+.ls-title{font-size:var(--rf-text-2xl);line-height:var(--rf-leading-2xl);font-weight:var(--rf-weight-heavy);color:var(--duo-ink);margin:0}
+.ls-count{font-size:var(--rf-text-xs);color:var(--rf-text-secondary)}
+.ls-group{display:flex;flex-direction:column;gap:var(--rf-space-2)}
+.ls-group + .ls-group{margin-top:var(--rf-space-4)}
+
+/* 材料行 */
+.ls-material{display:flex;align-items:center;flex-wrap:wrap;gap:var(--rf-space-2) var(--rf-space-4);padding:var(--rf-space-3) var(--rf-space-4);background:var(--rf-bg-subtle);border-radius:var(--rf-radius-md)}
+.ls-file{display:inline-flex;align-items:center;gap:var(--rf-space-2);font-size:var(--rf-text-sm);color:var(--rf-text-primary)}
+.ls-file .dot{width:8px;height:8px;border-radius:var(--rf-radius-full);background:var(--rf-green-500);flex-shrink:0}
+.ls-file.doc .dot{background:var(--rf-blue-500)}
+.ls-file small{color:var(--rf-text-secondary);font-size:var(--rf-text-xs)}
+.ls-link{margin-left:auto;background:none;border:0;color:var(--rf-info-text);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-medium);cursor:pointer;padding:var(--rf-space-1) var(--rf-space-2)}
+
+/* 播放控制 */
+.ls-controls{display:flex;align-items:center;flex-wrap:wrap;gap:var(--rf-space-3);padding:var(--rf-space-3) var(--rf-space-4);border:var(--rf-border-width) solid var(--duo-border);border-radius:var(--rf-radius-md)}
+.seg{display:inline-flex;padding:var(--rf-space-1);background:var(--rf-bg-subtle);border-radius:var(--rf-radius-md);gap:var(--rf-space-1)}
+.seg button{border:0;background:transparent;color:var(--rf-text-secondary);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-medium);padding:var(--rf-space-1) var(--rf-space-3);border-radius:var(--rf-radius-sm);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--rf-bg-surface);color:var(--rf-text-primary);box-shadow:var(--rf-shadow-sm)}
+.ls-repeat{display:inline-flex;align-items:center;gap:var(--rf-space-2);font-size:var(--rf-text-sm);color:var(--rf-text-secondary)}
+.stepper{display:inline-flex;align-items:center;border:var(--rf-border-width) solid var(--duo-border);border-radius:var(--rf-radius-sm);overflow:hidden}
+.stepper button{width:28px;height:28px;border:0;background:var(--rf-bg-surface);color:var(--rf-text-primary);font-size:var(--rf-text-md);cursor:pointer}
+.stepper button:hover{background:var(--rf-bg-hover)}
+.stepper span{min-width:40px;display:inline-flex;align-items:center;justify-content:center;font-size:var(--rf-text-sm);font-weight:var(--rf-weight-bold);color:var(--rf-text-primary);font-variant-numeric:tabular-nums}
+.ls-play{margin-left:auto;display:inline-flex;align-items:center;gap:var(--rf-space-2);padding:var(--rf-space-2) var(--rf-space-5);border:0;border-radius:var(--rf-radius-md);background:var(--rf-accent);color:var(--rf-text-inverse);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-bold);cursor:pointer}
+.ls-play:hover{background:var(--rf-forest-700)}
+.ls-play svg{width:14px;height:14px;fill:currentColor}
+.ls-progress{font-size:var(--rf-text-xs);color:var(--rf-text-secondary);font-variant-numeric:tabular-nums}
+
+/* 句子列表 */
+.ls-sentences{display:flex;flex-direction:column;gap:var(--rf-space-1)}
+.sent{display:flex;align-items:center;gap:var(--rf-space-3);padding:var(--rf-space-2) var(--rf-space-3);border-radius:var(--rf-radius-md);border-left:4px solid transparent;cursor:pointer}
+.sent:hover{background:var(--rf-bg-hover)}
+.sent.on{background:var(--rf-bg-selected);border-left-color:var(--rf-brand)}
+.sent .n{min-width:24px;font-size:var(--rf-text-sm);font-weight:var(--rf-weight-bold);color:var(--rf-text-disabled);font-variant-numeric:tabular-nums}
+.sent.on .n{color:var(--rf-green-700)}
+.sent .txt{flex:1;font-size:var(--rf-text-md);line-height:var(--rf-leading-md);color:var(--rf-text-primary);text-wrap:pretty}
+.sent.on .txt{font-weight:var(--rf-weight-medium)}
+.sent .play{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--rf-radius-full);background:transparent;color:var(--rf-text-secondary);cursor:pointer;flex-shrink:0}
+.sent .play:hover{background:var(--rf-bg-surface);color:var(--rf-text-primary)}
+.sent .play svg{width:14px;height:14px;fill:currentColor}
+.sent.hidden-text .txt{color:var(--rf-text-disabled);letter-spacing:.14em;user-select:none}
+
+/* 练习输入 */
+.ls-practice{margin-top:var(--rf-space-4);padding:var(--rf-space-4);border-top:var(--rf-border-width) solid var(--duo-border)}
+.practice-tabs{display:flex;gap:var(--rf-space-4);margin-bottom:var(--rf-space-3);border-bottom:var(--rf-border-width) solid var(--duo-border)}
+.practice-tabs button{border:0;background:none;padding:0 0 var(--rf-space-2);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-bold);color:var(--rf-text-secondary);cursor:pointer;border-bottom:2px solid transparent}
+.practice-tabs button[aria-selected="true"]{color:var(--rf-text-primary);border-bottom-color:var(--rf-accent)}
+.practice-label{margin:0 0 var(--rf-space-2);font-size:var(--rf-text-sm);color:var(--rf-text-secondary)}
+.practice-input{width:100%;min-height:88px;padding:var(--rf-space-3);border:var(--rf-border-width) solid var(--rf-border-strong);border-radius:var(--rf-radius-md);font-family:inherit;font-size:var(--rf-text-md);line-height:var(--rf-leading-md);color:var(--rf-text-primary);resize:vertical}
+.practice-input:focus{outline:none;border-color:var(--rf-border-focus);box-shadow:var(--rf-focus-ring)}
+.practice-actions{display:flex;align-items:center;gap:var(--rf-space-3);margin-top:var(--rf-space-3)}
+.btn-primary{padding:var(--rf-space-2) var(--rf-space-5);border:0;border-radius:var(--rf-radius-md);background:var(--rf-accent);color:var(--rf-text-inverse);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-bold);cursor:pointer}
+.btn-ghost{padding:var(--rf-space-2) var(--rf-space-4);border:var(--rf-border-width) solid var(--duo-border);border-radius:var(--rf-radius-md);background:var(--rf-bg-surface);color:var(--rf-text-secondary);font-size:var(--rf-text-sm);font-weight:var(--rf-weight-medium);cursor:pointer}
+.feedback{margin-top:var(--rf-space-3);padding:var(--rf-space-3);border-radius:var(--rf-radius-md);background:var(--rf-green-50);font-size:var(--rf-text-sm);color:var(--rf-text-primary);display:none}
+.feedback.show{display:block}
+.feedback b{color:var(--rf-green-700)}
+.feedback .ans{display:block;margin-top:var(--rf-space-2);color:var(--rf-text-secondary)}
+.badge-member{display:inline-flex;align-items:center;height:20px;padding:0 var(--rf-space-2);border-radius:var(--rf-radius-sm);background:var(--rf-reward-soft);color:var(--rf-reward-text);font-size:var(--rf-text-xs);font-weight:var(--rf-weight-medium)}
+
+@media (max-width:900px){
+  .reader-split{grid-template-columns:minmax(0,1fr)}
+  .reader-aside{position:static}
+}
+@media (max-width:640px){
+  .rf-reading-main{padding:var(--rf-space-4)}
+  .article-card,.listening-card{padding:var(--rf-space-4)}
+  .seg button{padding:var(--rf-space-1) var(--rf-space-2)}
+  .ls-play{margin-left:0}
+}
+@media print{
+  .rf-topbar,.ls-controls,.ls-practice{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="rf-topbar">
+  <div class="rf-tb-left">
+    <button class="rf-icon-btn" aria-label="展开目录">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <span class="rf-tb-sep"></span>
+    <a class="rf-back" href="#">← <span>返回我的文本</span></a>
+    <span class="rf-tb-sep"></span>
+    <h1 class="rf-tb-title">Why Quiet Matters</h1>
+  </div>
+  <div class="rf-tb-right">
+    <span class="rf-badge">B1 · 中等</span>
+    <span class="rf-progress">已读 <b>38</b>%</span>
+    <button class="rf-done-btn">标记已读完</button>
+  </div>
+  <div class="rf-tb-progress"><i></i></div>
+</header>
+
+<div class="rf-reading-main">
+<div class="page-inner">
+<div class="reader-split">
+
+  <div class="reader-main">
+    <!-- 正文卡片：沿用现有阅读页，不变 -->
+    <section class="duo-card article-card">
+      <h2 class="article-title">Why Quiet Matters</h2>
+      <div class="reading-body">
+        <p>Modern life is loud. Traffic, notifications, and open offices fill the day with <span class="word">noise</span>, and many people have forgotten what real silence feels like. Researchers now argue that quiet is not merely the absence of sound, but a resource that the brain needs to recover.</p>
+        <p>Studies show that short periods of silence can lower stress and improve attention. After a noisy task, the brain continues to process sound for a while. A few minutes of quiet gives it time to reset, which is why <span class="word">silence</span> after learning helps memory.</p>
+        <p>Quiet also changes how we think. When the background stops demanding attention, the mind is free to wander, and wandering is often when new ideas appear. Some of the most useful thoughts arrive in the shower, on a walk, or just before sleep.</p>
+        <p>Of course, not all noise is harmful. Music can lift mood, and conversation builds connection. The problem is constant, unwanted sound that we cannot control. The answer is not to eliminate every sound, but to protect small pockets of quiet in an otherwise full day.</p>
+      </div>
+    </section>
+
+    <!-- ===== P59 新增：听力练习区 ===== -->
+    <section class="duo-card listening-card" aria-label="听力练习">
+      <div class="ls-head">
+        <h3 class="ls-title">听力练习</h3>
+        <span class="ls-count">8 句 · 04:32</span>
+      </div>
+
+      <!-- 材料组 -->
+      <div class="ls-group">
+        <div class="ls-material">
+          <span class="ls-file doc"><span class="dot"></span>Why-Quiet-Matters.txt <small>612 词</small></span>
+          <span class="ls-file"><span class="dot"></span>quiet-matter.mp3 <small>4.3 MB</small></span>
+          <button class="ls-link" type="button">更换材料</button>
+        </div>
+      </div>
+
+      <!-- 播放控制组 -->
+      <div class="ls-group">
+        <div class="ls-controls">
+          <div class="seg" role="group" aria-label="播放方式">
+            <button type="button" aria-pressed="false" data-mode="whole">整篇播放</button>
+            <button type="button" aria-pressed="true" data-mode="sentence">按句播放</button>
+          </div>
+          <span class="ls-repeat">重复
+            <span class="stepper">
+              <button type="button" id="minus" aria-label="减少">−</button>
+              <span id="repeatN">2 次</span>
+              <button type="button" id="plus" aria-label="增加">+</button>
+            </span>
+          </span>
+          <span class="ls-progress" id="progress">3 / 8 句</span>
+          <button class="ls-play" type="button" id="playAll">
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span>播放</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 句子组 -->
+      <div class="ls-group">
+        <div class="ls-sentences" id="sentences">
+          <div class="sent" data-i="1"><span class="n">1</span><span class="txt">Modern life is loud.</span><button class="play" type="button" aria-label="播放第 1 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent" data-i="2"><span class="n">2</span><span class="txt">Traffic, notifications, and open offices fill the day with noise.</span><button class="play" type="button" aria-label="播放第 2 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent on" data-i="3"><span class="n">3</span><span class="txt">Many people have forgotten what real silence feels like.</span><button class="play" type="button" aria-label="播放第 3 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent" data-i="4"><span class="n">4</span><span class="txt">Researchers now argue that quiet is a resource the brain needs.</span><button class="play" type="button" aria-label="播放第 4 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent" data-i="5"><span class="n">5</span><span class="txt">Short periods of silence can lower stress and improve attention.</span><button class="play" type="button" aria-label="播放第 5 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent" data-i="6"><span class="n">6</span><span class="txt">A few minutes of quiet gives the brain time to reset.</span><button class="play" type="button" aria-label="播放第 6 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent" data-i="7"><span class="n">7</span><span class="txt">When the background stops demanding attention, the mind is free to wander.</span><button class="play" type="button" aria-label="播放第 7 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+          <div class="sent" data-i="8"><span class="n">8</span><span class="txt">The answer is to protect small pockets of quiet in a full day.</span><button class="play" type="button" aria-label="播放第 8 句"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></div>
+        </div>
+      </div>
+
+      <!-- 练习输入组 -->
+      <div class="ls-practice">
+        <div class="practice-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected="true" data-tab="dictation">听写</button>
+          <button type="button" role="tab" aria-selected="false" data-tab="translate">听译 <span class="badge-member">会员</span></button>
+        </div>
+        <p class="practice-label" id="practiceLabel">听第 3 句，写下你听到的英文：</p>
+        <textarea class="practice-input" id="answer" placeholder="在这里输入…"></textarea>
+        <div class="practice-actions">
+          <button class="btn-primary" type="button" id="submit">提交</button>
+          <button class="btn-ghost" type="button" id="reveal">显示答案</button>
+          <button class="btn-ghost" type="button" id="replay">再听一遍</button>
+        </div>
+        <div class="feedback" id="feedback"></div>
+      </div>
+    </section>
+    <!-- ===== /听力练习区 ===== -->
+  </div>
+
+  <aside class="reader-aside">
+    <p class="note-head">当前批注</p>
+    <p class="note-word">noise</p>
+    <p class="note-ipa">/nɔɪz/</p>
+    <p class="note-def">噪音，噪声。指不想要的、杂乱的声音；这里指填满日常的各种声响。</p>
+    <p class="note-sent">&ldquo;Traffic, notifications, and open offices fill the day with noise.&rdquo;</p>
+    <p class="note-hint">点正文里的词可查释义 · 选中句子可问 AI</p>
+  </aside>
+
+</div>
+</div>
+</div>
+
+<script>
+(function(){
+  var segs=document.querySelectorAll('.seg button');
+  var sents=Array.prototype.slice.call(document.querySelectorAll('.sent'));
+  var label=document.getElementById('practiceLabel');
+  var progress=document.getElementById('progress');
+  var n=2, current=3;
+
+  segs.forEach(function(b){
+    b.addEventListener('click',function(){
+      segs.forEach(function(x){x.setAttribute('aria-pressed','false')});
+      b.setAttribute('aria-pressed','true');
+    });
+  });
+  document.getElementById('minus').addEventListener('click',function(){
+    if(n>1){n--;document.getElementById('repeatN').textContent=n+' 次'}
+  });
+  document.getElementById('plus').addEventListener('click',function(){
+    if(n<5){n++;document.getElementById('repeatN').textContent=n+' 次'}
+  });
+  function select(el){
+    sents.forEach(function(s){s.classList.remove('on')});
+    el.classList.add('on');
+    current=el.getAttribute('data-i');
+    label.textContent='听第 '+current+' 句，写下你听到的英文：';
+    progress.textContent=current+' / 8 句';
+    document.getElementById('feedback').className='feedback';
+  }
+  sents.forEach(function(s){
+    s.addEventListener('click',function(){select(s)});
+    s.querySelector('.play').addEventListener('click',function(e){e.stopPropagation();select(s)});
+  });
+  var tabs=document.querySelectorAll('.practice-tabs button');
+  tabs.forEach(function(t){
+    t.addEventListener('click',function(){
+      tabs.forEach(function(x){x.setAttribute('aria-selected','false')});
+      t.setAttribute('aria-selected','true');
+      label.textContent=t.getAttribute('data-tab')==='dictation'
+        ? '听第 '+current+' 句，写下你听到的英文：'
+        : '听第 '+current+' 句，翻译成中文：';
+    });
+  });
+  document.getElementById('reveal').addEventListener('click',function(){
+    var on=document.querySelector('.sent.on .txt').textContent;
+    var f=document.getElementById('feedback');
+    f.innerHTML=`<span class="ans">原句：&ldquo;${on}&rdquo;</span>`;
+    f.className='feedback show';
+  });
+  document.getElementById('submit').addEventListener('click',function(){
+    var f=document.getElementById('feedback');
+    f.innerHTML='<b>判分结果（示意）</b>：8 个词中 7 个正确，正确率 88%。<span class="ans">忽略大小写与标点后比对；听译的 AI 打分需会员。</span>';
+    f.className='feedback show';
+  });
+  document.getElementById('playAll').addEventListener('click',function(){
+    var b=this.querySelector('span');
+    b.textContent=b.textContent==='播放'?'暂停':'播放';
+  });
+})();
+</script>
+</body>
+</html>
