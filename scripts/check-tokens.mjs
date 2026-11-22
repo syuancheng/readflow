@@ -14,6 +14,11 @@
  *        · font-medium / font-black / font-thin
  *        · style 里的 fontSize 数字、hex 颜色
  *
+ * 组件层（COMPONENTS 处方表，见下）：token 单独合法还不够，组合形态也要合规。
+ *   目前覆盖：小按钮尺寸/圆角、「标记已读完」三态的颜色语义。
+ *   新组件照 COMPONENTS 的格式加一条即可；需要例外时在对应 CSS 规则块内写
+ *   `token-ok: 原因`，组件层检查会跳过该规则块（token 层仍按行跳过）。
+ *
  * 确实需要例外时，在行尾写注释 `token-ok: 原因`（CSS 用 /* *\/，TSX 用 {/* *\/} 或 //）。
  */
 import fs from "node:fs";
@@ -24,6 +29,59 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "src");
 const SPACE = new Set([0, 1, 2, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64]);
 const WEIGHTS = new Set(["400", "600", "700", "800", "normal", "bold", "inherit"]);
+
+/**
+ * 组件处方表：token 层只管「单个值合法」，这里管「组合起来是否符合组件规范」。
+ * 格式：targets 为精确选择器；extends 声明继承链（如 .duo-btn-sm 继承 .duo-btn）；
+ * require 列出必须写出的声明及允许值；forbid 列出禁止的取值模式。
+ * 新组件直接在数组里追加一条，不需要改检查逻辑。
+ */
+const BTN_COLOR_FORBID = [
+  { prop: "background", re: /var\(--(?:duo-green-soft|rf-brand-soft|rf-highlight-bg|rf-brand)\)/, why: "按钮底色不得用亮绿/浅绿（§1.1）" },
+  { prop: "color", re: /var\(--(?:duo-green|duo-green-dark|rf-brand)\)/, why: "按钮文字不得用亮绿（§1.2）" },
+];
+
+const COMPONENTS = [
+  {
+    id: "BTN-SM",
+    targets: [".duo-btn-sm"],
+    extends: { ".duo-btn-sm": [".duo-btn"] },
+    require: {
+      "min-height": { allow: ["36px"], why: "小按钮高 36px（§8）" },
+      "font-size": { allow: ["var(--rf-text-sm)"], why: "小按钮字号 sm/14px（§8）" },
+      "border-radius": { allow: ["var(--rf-radius-md)"], why: "按钮圆角 md/12px（§4）" },
+    },
+    forbid: BTN_COLOR_FORBID,
+  },
+  {
+    id: "BTN-DONE-BASE",
+    targets: [".rf-done-btn"],
+    require: {
+      "min-height": { allow: ["28px"], why: "顶栏完成开关高 28px，与同行徽章体量对齐" },
+      "font-size": { allow: ["var(--rf-text-xs)"], why: "顶栏完成开关字号 xs/12px" },
+      "border-radius": { allow: ["var(--rf-radius-sm)"], why: "顶栏完成开关圆角 sm/8px（§4）" },
+    },
+    forbid: BTN_COLOR_FORBID,
+  },
+  {
+    id: "BTN-AT-BOTTOM",
+    targets: [".rf-done-btn.at-bottom"],
+    require: {
+      background: { allow: ["var(--rf-bg-surface)", "var(--rf-bg-selected)"], why: "100% 提示态仍用中性底（§1.1）" },
+      color: { allow: ["var(--rf-text-primary)", "var(--rf-accent-text)"], why: "100% 提示态文字用 primary / accent-text（§1.2）" },
+    },
+    forbid: BTN_COLOR_FORBID,
+  },
+  {
+    id: "BTN-DONE",
+    targets: [".rf-done-btn.done"],
+    require: {
+      background: { allow: ["var(--rf-success-soft)"], why: "已读完是成功状态标签，不是主按钮（§1.1 / P54）" },
+      color: { allow: ["var(--rf-success-text)"], why: "成功状态用 success-text（§1.2 / P54）" },
+    },
+    forbid: BTN_COLOR_FORBID,
+  },
+];
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -95,11 +153,79 @@ function checkTsx(file) {
   });
 }
 
+/** 按 CSS 规则块解析：拿到 { 选择器 → {文件, 行号, 声明集合} }，供组件处方表检查。 */
+function parseCssBlocks(files) {
+  const map = new Map();
+  for (const file of files) {
+    const raw = fs.readFileSync(file, "utf8");
+    // 注释原地替换为空格，保留行数；否则行号会漂移
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, (s) => s.replace(/[^\n]/g, " "));
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m;
+    while ((m = re.exec(src))) {
+      const selText = m[1].split("\n").filter((s) => s.trim()).pop()?.trim() ?? "";
+      if (!selText || selText.startsWith("@") || selText.includes("@media")) continue;
+      const line = src.slice(0, m.index + m[1].length).split("\n").length;
+      const decls = new Map();
+      for (const part of m[2].split(";")) {
+        const i = part.indexOf(":");
+        if (i < 0) continue;
+        const prop = part.slice(0, i).trim().toLowerCase();
+        const value = part.slice(i + 1).replace(/!important/g, "").trim();
+        if (prop) decls.set(prop, value);
+      }
+      for (const sel of selText.split(",").map((s) => s.trim())) {
+        if (!sel || sel.startsWith("@") || m[0].includes("token-ok")) continue;
+        if (!map.has(sel)) map.set(sel, []);
+        map.get(sel).push({ file, line, decls });
+      }
+    }
+  }
+  return map;
+}
+
+/** 把 extends 链上的声明先铺底，再用目标选择器自身覆盖，得到实际生效的集合。 */
+function effectiveDecls(map, selector, extendsMap) {
+  const decls = new Map();
+  for (const base of extendsMap[selector] ?? []) {
+    for (const block of map.get(base) ?? []) for (const [k, v] of block.decls) decls.set(k, v);
+  }
+  for (const block of map.get(selector) ?? []) for (const [k, v] of block.decls) decls.set(k, v);
+  return decls;
+}
+
+function checkComponents(files) {
+  const map = parseCssBlocks(files);
+  for (const profile of COMPONENTS) {
+    for (const target of profile.targets) {
+      const decls = effectiveDecls(map, target, profile.extends ?? {});
+      if (!decls.size) continue; // 组件未使用，不报
+      const source = (map.get(target) ?? [])[0];
+      for (const [prop, spec] of Object.entries(profile.require ?? {})) {
+        const value = decls.get(prop);
+        if (value === undefined) {
+          report(source.file, source.line, `[${profile.id}] ${target} 缺少 ${prop}：${spec.why}`, target);
+        } else if (!spec.allow.includes(value)) {
+          report(source.file, source.line, `[${profile.id}] ${target} 的 ${prop}=${value} 不合规（${spec.why}；允许：${spec.allow.join(" / ")}）`, `${prop}: ${value};`);
+        }
+      }
+      for (const bad of profile.forbid ?? []) {
+        const value = decls.get(bad.prop);
+        if (value && bad.re.test(value)) {
+          report(source.file, source.line, `[${profile.id}] ${target} 的 ${bad.prop}=${value}：${bad.why}`, `${bad.prop}: ${value};`);
+        }
+      }
+    }
+  }
+}
+
+const cssFiles = [];
 for (const f of walk(SRC)) {
   if (f.endsWith(path.join("styles", "tokens.css"))) continue;
-  if (f.endsWith(".css")) checkCss(f);
+  if (f.endsWith(".css")) { checkCss(f); cssFiles.push(f); }
   else checkTsx(f);
 }
+checkComponents(cssFiles);
 
 if (problems.length) {
   console.log(problems.join("\n"));

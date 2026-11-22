@@ -105,6 +105,7 @@ export default function ReadingChrome(props: Props) {
 
         <div className="rf-tb-right">
           <CefrBadge level={props.cefrLevel} score={props.cefrScore} detail={props.cefrDetail} />
+          {props.cefrLevel && <span className="rf-tb-sep" />}
           <span
             className="rf-progress"
             title="按滚动位置估算：往回翻会下降，滚到底为 100%。100% 不等于已读完"
@@ -127,14 +128,17 @@ export default function ReadingChrome(props: Props) {
             {done ? "✓ 已读完" : "标记已读完"}
           </button>
           {props.sourceUrl && (
-            <a
-              className="rf-source"
-              href={props.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              查看原文 ↗
-            </a>
+            <>
+              <span className="rf-tb-sep" />
+              <a
+                className="rf-source"
+                href={props.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                查看原文 ↗
+              </a>
+            </>
           )}
         </div>
 

@@ -187,6 +187,17 @@
   - 使用 `font-medium` 或 `font-black`。
   - style 里写死字号数字或 hex 颜色。
 
+组件层（2026-11-21 新增）：token 层只保证「单个值合法」，**组合形态**由同一脚本里的 `COMPONENTS` 处方表检查。当前登记：
+
+| 规则 ID | 选择器 | 约束 |
+|---|---|---|
+| `BTN-SM` | `.duo-btn-sm` | 高 36、字号 `sm`、圆角 `md`（从 `.duo-btn` 继承）；底色/文字不得用亮绿、浅绿 |
+| `BTN-DONE-BASE` | `.rf-done-btn` | 顶栏紧凑完成开关：高 28、字号 `xs`、圆角 `sm`，与同行徽章体量对齐；底色/文字不得用亮绿、浅绿 |
+| `BTN-AT-BOTTOM` | `.rf-done-btn.at-bottom` | 100% 提示态用中性底（`bg-surface` / `bg-selected`）+ primary 文字，不用绿色强调 |
+| `BTN-DONE` | `.rf-done-btn.done` | 「已读完」是成功状态：success 浅底 + success 文字，不涂成主按钮 |
+
+新增组件在 `scripts/check-tokens.mjs` 的 `COMPONENTS` 数组里追加一条即可，检查逻辑不用改。例外沿用 `token-ok: 原因`，组件层会跳过写了该注释的整个规则块。
+
 补充约定：
 
 - 间距可以直接写阶梯里的 px 数值，不强制写成 `var(--rf-space-*)`。

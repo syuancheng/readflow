@@ -391,3 +391,30 @@
 | 窄屏 | TIP-05 / H10 | 通过 | `flex-wrap`，气泡 `max-width:85%` 不溢出 |
 
 自动检查结论：四文件与改动前基线逐条比对，HARD / REVIEW 完全一致、零新增（ChatTurn / AskComposer / Reader 均 HARD=0 REVIEW=0，p44-chat.css HARD=0 REVIEW=4）。`node scripts/check-tokens.mjs`、`npm test` 651/651、`npm run typecheck`、`npm run build` 全通过。
+
+---
+
+# 阅读页顶栏「标记已读完」轻量化与亲密性分组（11-22 14:00）
+
+范围：`src/components/ReadingChrome.tsx`、`src/app/globals.css`、`scripts/check-tokens.mjs`、`docs/design-system.md`。
+
+1. **中心点（C-02）**：阅读页唯一中心点是文章正文；顶栏只是安静的辅助导航条。把 `.rf-done-btn` 从 36px/14px 粗体表单按钮（及旧版浅荧光绿底）收敛为 28px/12px/600 紧凑开关，消除右上角的视觉抢戏。
+2. **分组与亲密性（P-01 ~ P-05）**：顶栏右侧 `.rf-tb-right` 内，`难度 A1`（静态文章属性）与 `已读 N% + 标记已读完`（阅读进度组）之间插入 `.rf-tb-sep` 竖线分隔；组内间距由 12px 收紧至 8px，使「进度百分比」与「完成开关」结成紧密的一组。
+3. **对齐线（A-03）**：顶栏所有元素共享 54px 容器水平中轴线（`align-items: center`）；按钮高 28px 与 24px 的难度徽章体量对齐，不再突兀高出一截。
+4. **重复元素（R-01）**：**加强已有重复**——分隔线复用左侧 `.rf-tb-sep`（1px × 18px）；圆角 `var(--rf-radius-sm)`（8px）、字号 `var(--rf-text-xs)`（12px）、字重 `600` 与同行 `.duo-badge` 完全一致。
+5. **强对比与状态语义（C-03 / §1.1）**：
+   - 默认未读完：白底 `--rf-bg-surface` + 浅灰细描边 `--rf-border` + 次要文字色 `--rf-text-secondary`，安静退后；
+   - 滚到底 100%（`.at-bottom`）：中性选中底 `--rf-bg-selected` + `--rf-border-strong` + 主文字色 `--rf-text-primary`，**不用绿色**混淆「待点击」与「已完成」；
+   - 已读完（`.done`）：无边框成功标签（`--rf-success-soft` 浅绿底 + `--rf-success-text` 深绿字 + `✓ 已读完`），与首页文本列表的「✓ 已读完」状态统一。
+6. **配色关系（COL-05）**：全走既有语义令牌，零新增色值；控件态纯中性，仅完成态使用 `--rf-success-*`。
+7. **字体（TC / T）**：`--rf-font-sans`，12px / 600，无新增字族或字号档位。
+8. **媒介（TIP-05）**：900px 以下窄屏保持既有 `.rf-progress` 隐藏、按钮常驻不换行。
+
+人工验收：
+
+| 项 | 规则 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| 焦点唯一 | C-02 | 通过 | 顶栏右上角不再有 36px 大框或浅绿底，视线回到正文 |
+| 亲密性分组 | P-05 | 通过 | 难度与进度组之间有 `.rf-tb-sep` 分隔，组内 8px 紧凑成组 |
+| 重复一致 | R-01 | 通过 | 28px 高 / 12px / 600 / radius-sm 与同行徽章语言一致 |
+| 颜色语义 | §1.1 | 通过 | 待操作态中性色，仅 `done` 态用 success 绿 |

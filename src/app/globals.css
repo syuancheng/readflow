@@ -2691,7 +2691,7 @@ body {
 }
 .rf-tb-left, .rf-tb-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .rf-tb-left { flex: 1; }
-.rf-tb-right { flex-shrink: 0; }
+.rf-tb-right { flex-shrink: 0; gap: 8px; }
 .rf-tb-sep { width: 1px; height: 18px; background: var(--duo-border); flex-shrink: 0; }
 .rf-icon-btn {
   width: 30px; height: 30px;
@@ -2719,16 +2719,22 @@ body {
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 .rf-progress b { font-size: var(--rf-text-sm); color: var(--duo-ink); }
+/* 顶栏紧凑完成开关：高 28 / 12px / 圆角 sm，与同行徽章体量协调，中性细描边，不靠绿色强调可点性。
+   100% 提示态只加中性选中底与主文字色；「已读完」是成功状态，用 success token（P54），不是主按钮。 */
 .rf-done-btn {
-  padding: 4px 12px; border-radius: var(--rf-radius-sm); cursor: pointer;
-  border: 1px solid var(--duo-border); background: var(--duo-surface);
-  color: var(--duo-ink-soft); font-size: var(--rf-text-xs); font-weight: 700; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 28px; padding: 0 8px;
+  border: 1px solid var(--rf-border); border-radius: var(--rf-radius-sm);
+  background: var(--rf-bg-surface); color: var(--rf-text-secondary);
+  font-size: var(--rf-text-xs); font-weight: 600; white-space: nowrap; cursor: pointer;
 }
-.rf-done-btn:hover:not(:disabled) { border-color: var(--duo-green); color: var(--duo-green-dark); }
+.rf-done-btn:hover:not(:disabled) { background: var(--rf-bg-hover); border-color: var(--rf-border-strong); color: var(--rf-text-primary); }
 .rf-done-btn.at-bottom {
-  border-color: var(--duo-green); background: var(--duo-green-soft); color: var(--duo-green-dark);
+  background: var(--rf-bg-selected); border-color: var(--rf-border-strong); color: var(--rf-text-primary);
 }
-.rf-done-btn.done { border-color: var(--duo-green); background: var(--duo-green); color: var(--rf-text-inverse); }
+.rf-done-btn.done {
+  background: var(--rf-success-soft); color: var(--rf-success-text); border-color: transparent;
+}
 .rf-done-btn:disabled { opacity: .6; cursor: wait; }
 .rf-source { font-size: var(--rf-text-xs); color: var(--duo-blue); text-decoration: none; white-space: nowrap; }
 .rf-source:hover { text-decoration: underline; }
