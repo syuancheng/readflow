@@ -5,7 +5,7 @@ import { MAX_REPLIES, REPLY_NOTE_MAX_CHARS, REPLY_TEXT_MAX_CHARS, type Reply } f
 import type { SentenceWindow } from "./prompt/sentence-window";
 import { resolveProvider, STREAM_RESET, type EnvMap, type SettingsMap } from "./config";
 import { allSettings } from "./settings-store";
-import { backoffDelayMs, DEFAULT_RETRY, isRetryableError } from "./retry";
+import { backoffDelayMs, DEFAULT_RETRY, isRetryableError, sleepWithSignal } from "./retry";
 import { streamChat, type ChatTurn, type ChatUsage } from "./providers";
 import { NEAR_CONTEXT_MAX_SENTENCES, type ContextLayers, type SelectionSignals } from "./sentence";
 import { NO_MODEL_NOTICE } from "./explain-policy";
@@ -704,11 +704,11 @@ async function* streamTurns(
     return;
   }
 
-  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const attempts = DEFAULT_RETRY.attempts;
   let lastError: unknown;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
+    if (opts.signal?.aborted) return;
     if (attempt > 0) yield STREAM_RESET;
     try {
       for await (const chunk of streamChat(provider, turns, opts)) {
@@ -717,8 +717,9 @@ async function* streamTurns(
       return;
     } catch (err) {
       lastError = err;
-      if (attempt === attempts - 1 || !isRetryableError(err)) throw err;
-      await sleep(backoffDelayMs(attempt));
+      if (opts.signal?.aborted || attempt === attempts - 1 || !isRetryableError(err)) throw err;
+      const completed = await sleepWithSignal(backoffDelayMs(attempt), opts.signal);
+      if (!completed) return;
     }
   }
   throw lastError;

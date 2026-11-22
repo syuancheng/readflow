@@ -7,6 +7,7 @@ import { currentUser } from "@/lib/auth";
 import { aiContextFor } from "@/lib/user-secrets";
 import { consumeAiQuota, quotaExceededMessage } from "@/lib/ai-quota";
 import { hasModelConfigured, NO_MODEL_NOTICE, streamSectionSummary } from "@/lib/ai";
+import { enterForeground } from "@/lib/ai-priority";
 import { STREAM_RESET } from "@/lib/config";
 import { isProse, type BlockKind } from "@/lib/import/types";
 
@@ -170,7 +171,10 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
   let acc = "";
+  let cancelled = false;
   const abort = new AbortController();
+  // 分段小结是用户盯着等的前台流（P0）：登记前台活跃，让后台建卡 / 老师笔记先让路
+  const releaseForeground = enterForeground();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -179,10 +183,12 @@ export async function POST(req: NextRequest) {
           body: span.map((r) => r.content).join("\n\n"),
           paragraphCount: span.length,
         }, ai, abort.signal)) {
+          if (cancelled) break;
           acc += chunk;
           controller.enqueue(encoder.encode(chunk));
         }
 
+        if (cancelled || abort.signal.aborted) return;
         // 重试时上一段半成品会带上重置标记，只保留最后一次的完整输出
         const text = (acc.split(STREAM_RESET).pop() ?? "").trim();
         if (text && !text.startsWith("⚠️")) {
@@ -202,15 +208,18 @@ export async function POST(req: NextRequest) {
             .run();
         }
       } catch (err) {
-        if (abort.signal.aborted) return; // 主动取消不是错误，也别把半成品写回
+        if (cancelled || abort.signal.aborted) return; // 主动取消不是错误，也别把半成品写回
         const msg = err instanceof Error ? err.message : "summary failed";
         controller.enqueue(encoder.encode(`\n\n[Error: ${msg}]`));
       } finally {
-        controller.close();
+        releaseForeground();
+        if (!cancelled) controller.close();
       }
     },
     cancel() {
-      // 前端重新生成 / 切段时中止上游模型调用，别让这条流白占连接
+      // 前端重新生成 / 切段时中止上游模型调用，并立刻归还前台计数
+      cancelled = true;
+      releaseForeground();
       abort.abort();
     },
   });

@@ -10,7 +10,9 @@ import { randomUUID } from "node:crypto";
 import { sqlite } from "@/db/sqlite";
 import { resolveProvider, type ResolvedProvider } from "@/lib/config";
 import { aiContextFor } from "@/lib/user-secrets";
-import { completeJson, type ChatTurn } from "@/lib/providers";
+import { completeJson, type ChatOptions, type ChatTurn } from "@/lib/providers";
+import { withRetry } from "@/lib/retry";
+import { createLimiter } from "@/lib/request-gate";
 import { explainTurns } from "@/lib/ai";
 import { inlineGloss } from "@/lib/gloss";
 import { parseThread } from "@/lib/ai-thread";
@@ -27,7 +29,7 @@ import { examFamilyOf, examStyleLabel, stylePromptLines, type ExamFamily } from 
 import { checkComposition, NEED_PRODUCTIVE_REASON } from "./compose";
 import { audioTextsOf, type Voice } from "./audio";
 import { ensureAudio, ensureAudioAll } from "@/lib/tts";
-import { waitForForegroundIdle } from "@/lib/ai-priority";
+import { enterForeground, waitForForegroundIdle } from "@/lib/ai-priority";
 import {
   cardAudioVoice,
   cardsUsedToday,
@@ -65,6 +67,21 @@ type Usage = { promptTokens?: number; completionTokens?: number; cacheHitTokens?
  * 张数由 AI 按这个词决定（P35），正常一组约 700–1500 token。
  */
 const GEN_OPTS = { temperature: 0.4, maxTokens: null } as const;
+
+/**
+ * 后台建卡串行队列：同一进程内一次只跑 1 个词的生成流程。
+ * 连点多个词「做成卡片」时依次排队，既防多路并发打爆上游限流，
+ * 也避免前台讲解结束后多个等待任务在同一毫秒集体惊群。
+ */
+const cardGenQueue = createLimiter(1);
+
+/** 后台建卡专用 JSON 调用：每次尝试（含 429/5xx 退避重试）前都先给前台 P0 让路 */
+function callBgJson(provider: Provider, turns: ChatTurn[], opts: ChatOptions = {}) {
+  return withRetry(async () => {
+    await waitForForegroundIdle();
+    return completeJson(provider, turns, opts);
+  });
+}
 
 // ---------- 入口 ----------
 
@@ -115,8 +132,11 @@ export function startGenerate(
   const day = cardQuotaDay(now);
   if (ai.metered) reserveQuota(user.id, day);
 
-  // 后台执行，不 await（spec §7.3 第 4 步：立刻返回）
-  void (async () => {
+  // 后台排队执行，不 await（spec §7.3 第 4 步：立刻返回）
+  void cardGenQueue(async () => {
+    // 排队期间如果已经被 expireStaleSets 标成失败，就不再重复跑
+    const cur = sqlite.prepare("SELECT status FROM card_sets WHERE id = ?").get(setId) as { status: string } | undefined;
+    if (!cur || cur.status !== "generating") return;
     try {
       const r = await runGenerate(user, ctx, provider, setId, body.answerId);
       if (!r.ok) failSet(setId, user.id, r.reason, ai.metered ? day : null);
@@ -124,7 +144,7 @@ export function startGenerate(
       console.error("[cards] 生成失败:", err);
       failSet(setId, user.id, err instanceof Error ? err.message : "生成失败", ai.metered ? day : null);
     }
-  })();
+  });
 
   return { ok: true, setId, reused: false };
 }
@@ -147,8 +167,7 @@ async function runGenerate(
   let parsed = parseCardGen("");
   let finish: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    await waitForForegroundIdle(); // 用户正在看讲解时先让路（ai-priority.ts）
-    const res = await completeJson(provider, run.messages, GEN_OPTS);
+    const res = await callBgJson(provider, run.messages, GEN_OPTS);
     usage = res.usage;
     finish = res.finish;
     parsed = parseCardGen(res.text);
@@ -389,15 +408,13 @@ async function settleCard(
 
   if (!hasChoice(spec)) return { spec, needsReview: null };
 
-  await waitForForegroundIdle();
-  let review = await reviewChoice(provider, run.vctx.originalSentence, spec);
+  let review = await reviewChoice(provider, run.vctx.originalSentence, spec, { background: true });
   if (review === "ok") return { spec, needsReview: null };
 
   const again = await redo(provider, run, spec, REVIEW_REASON);
   if (again && validateCard(again, run.vctx).ok) {
     spec = again;
-    await waitForForegroundIdle();
-    review = hasChoice(spec) ? await reviewChoice(provider, run.vctx.originalSentence, spec) : "ok";
+    review = hasChoice(spec) ? await reviewChoice(provider, run.vctx.originalSentence, spec, { background: true }) : "ok";
     if (review === "ok") return { spec, needsReview: null };
   }
   return { spec, needsReview: REVIEW_REASON };
@@ -420,8 +437,7 @@ async function redo(provider: Provider, run: Run, prev: CardSpec, reason: string
     },
   ];
   try {
-    await waitForForegroundIdle();
-    const res = await completeJson(provider, turns, GEN_OPTS);
+    const res = await callBgJson(provider, turns, GEN_OPTS);
     const parsed = parseCardGen(res.text);
     return parsed.ok ? withStyle(parsed.cards[0], run.family) : null;
   } catch (err) {
@@ -441,8 +457,7 @@ async function redoSet(provider: Provider, run: Run, prev: CardSpec[]): Promise<
     },
   ];
   try {
-    await waitForForegroundIdle();
-    const res = await completeJson(provider, turns, GEN_OPTS);
+    const res = await callBgJson(provider, turns, GEN_OPTS);
     const parsed = parseCardGen(res.text);
     return parsed.ok ? parsed.cards : null;
   } catch (err) {
@@ -459,6 +474,7 @@ export async function reviewChoice(
   provider: Provider,
   sentence: string,
   spec: CardSpec,
+  opts?: { background?: boolean },
 ): Promise<"ok" | "mismatch"> {
   const choice = spec.front.find((b) => b.t === "choice");
   if (!choice || choice.t !== "choice") return "ok";
@@ -475,7 +491,9 @@ export async function reviewChoice(
     },
   ];
   try {
-    const res = await completeJson(provider, ask, { temperature: 0, maxTokens: 200 });
+    const res = opts?.background
+      ? await callBgJson(provider, ask, { temperature: 0, maxTokens: 200 })
+      : await withRetry(() => completeJson(provider, ask, { temperature: 0, maxTokens: 200 }));
     return samePossible(parseJsonLoose(res.text), expected) ? "ok" : "mismatch";
   } catch {
     return "mismatch";
@@ -531,20 +549,27 @@ export async function regenerateCard(user: Who, cardId: string): Promise<RegenOu
     },
   ];
 
+  // 「换一道」是用户在词库页盯着等的前台操作（P0）：登记前台活跃让后台建卡让路
+  const releaseForeground = enterForeground();
   let next: CardSpec;
+  let review: "ok" | "mismatch";
   try {
-    const res = await completeJson(provider, turns, GEN_OPTS);
-    const parsed = parseCardGen(res.text);
-    if (!parsed.ok) return { ok: false, status: 502, error: parsed.reason };
-    next = withStyle(parsed.cards[0], run.family);
-  } catch (err) {
-    return { ok: false, status: 502, error: err instanceof Error ? err.message : "模型调用失败" };
+    try {
+      const res = await withRetry(() => completeJson(provider, turns, GEN_OPTS));
+      const parsed = parseCardGen(res.text);
+      if (!parsed.ok) return { ok: false, status: 502, error: parsed.reason };
+      next = withStyle(parsed.cards[0], run.family);
+    } catch (err) {
+      return { ok: false, status: 502, error: err instanceof Error ? err.message : "模型调用失败" };
+    }
+
+    const v = validateCard(next, run.vctx);
+    if (!v.ok) return { ok: false, status: 400, error: `新卡片不合格：${v.reasons.join("；")}，再试一次` };
+
+    review = hasChoice(next) ? await reviewChoice(provider, run.vctx.originalSentence, next, { background: false }) : "ok";
+  } finally {
+    releaseForeground();
   }
-
-  const v = validateCard(next, run.vctx);
-  if (!v.ok) return { ok: false, status: 400, error: `新卡片不合格：${v.reasons.join("；")}，再试一次` };
-
-  const review = hasChoice(next) ? await reviewChoice(provider, run.vctx.originalSentence, next) : "ok";
   const rendered = renderCardChecked(
     next,
     { sourceTitle: ctx.text_title ?? "", audio: run.audio },

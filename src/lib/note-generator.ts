@@ -13,6 +13,7 @@
 import { allSettings } from "./settings-store";
 import { resolveProvider } from "./config";
 import { completeChat } from "./providers";
+import { waitForForegroundIdle } from "./ai-priority";
 import { answeredFeedbackFor, notePromptInputFor, recordNoteError, saveNote } from "./learner-store";
 import { validateNote } from "./learner/note";
 import { buildNightlyNotePrompt } from "./learner/nightly";
@@ -69,6 +70,8 @@ async function generateNote(userId: string): Promise<NoteRunResult> {
   let succeeded = false;
   try {
     const prompt = buildNightlyNotePrompt({ ...notePromptInputFor(userId), answered: answeredFeedbackFor(userId) });
+    // 后台补跑时若用户正在看讲解 / 小结，先让路（ai-priority.ts）
+    await waitForForegroundIdle();
     const raw = await completeChat(
       provider,
       [

@@ -685,6 +685,7 @@ export default function Reader({
   const bodyRef = useRef<HTMLDivElement>(null);
   // 分段小结的流：重新生成 / 切段时先中止上一条，避免多条 SSE 占满连接池
   const summaryAbortRef = useRef<AbortController | null>(null);
+  const activeSummaryIdxRef = useRef<number | null>(null);
   useEffect(() => () => summaryAbortRef.current?.abort(), []);
 
   // 用 ref 拿最新的批注列表，避免回看 / 复用释义时闭包停在弹层打开时的快照。
@@ -826,9 +827,24 @@ export default function Reader({
 
   /** 生成（或重新生成）某个区间的小结，流式回填 */
   async function runSummary(sec: Section, regenerate: boolean) {
+    const prevIdx = activeSummaryIdxRef.current;
     summaryAbortRef.current?.abort();
+    if (prevIdx !== null && prevIdx !== sec.endIdx) {
+      // 切去生成另一段时，清掉上一段半途而废的 loading/streaming（有旧缓存则恢复旧缓存），
+      // 否则下次点回上一段会永远卡在「正在生成」。
+      const prevCached = summaries[prevIdx];
+      setSecState((prev) => {
+        const cur = prev[prevIdx];
+        if (!cur || (cur.status !== "loading" && cur.status !== "streaming")) return prev;
+        if (prevCached) return { ...prev, [prevIdx]: { status: "done", content: prevCached } };
+        const next = { ...prev };
+        delete next[prevIdx];
+        return next;
+      });
+    }
     const controller = new AbortController();
     summaryAbortRef.current = controller;
+    activeSummaryIdxRef.current = sec.endIdx;
     setOpenSec(sec.endIdx);
     setSecState((prev) => ({ ...prev, [sec.endIdx]: { status: "loading", content: "" } }));
     try {
@@ -876,6 +892,8 @@ export default function Reader({
           content: err instanceof Error ? err.message : "生成失败",
         },
       }));
+    } finally {
+      if (summaryAbortRef.current === controller) activeSummaryIdxRef.current = null;
     }
   }
 

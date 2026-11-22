@@ -4,6 +4,7 @@ import {
   backoffDelayMs,
   errorStatus,
   isRetryableError,
+  sleepWithSignal,
   withRetry,
 } from "../../src/lib/retry";
 
@@ -105,4 +106,39 @@ test("自定义 shouldRetry 可覆盖默认判定", async () => {
     /nope/,
   );
   assert.equal(calls, 1);
+});
+
+test("sleepWithSignal：正常等完返回 true，已取消或中途 abort 立刻返回 false", async () => {
+  assert.equal(await sleepWithSignal(10), true);
+
+  const already = new AbortController();
+  already.abort();
+  const t0 = Date.now();
+  assert.equal(await sleepWithSignal(5000, already.signal), false);
+  assert.ok(Date.now() - t0 < 100);
+
+  const mid = new AbortController();
+  const t1 = Date.now();
+  setTimeout(() => mid.abort(), 15);
+  assert.equal(await sleepWithSignal(5000, mid.signal), false);
+  assert.ok(Date.now() - t1 < 200);
+});
+
+test("withRetry：退避等待期间被 abort 立刻结束，不再发起下一次重试", async () => {
+  const ac = new AbortController();
+  let calls = 0;
+  const t0 = Date.now();
+  setTimeout(() => ac.abort(), 20);
+  await assert.rejects(
+    withRetry(
+      async () => {
+        calls++;
+        throw Object.assign(new Error("429 rate limit"), { status: 429 });
+      },
+      { attempts: 5, baseDelayMs: 5000, jitter: 0, signal: ac.signal },
+    ),
+    /429 rate limit/,
+  );
+  assert.equal(calls, 1);
+  assert.ok(Date.now() - t0 < 200);
 });

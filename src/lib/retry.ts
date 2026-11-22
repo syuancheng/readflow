@@ -20,6 +20,8 @@ export type RetryOptions = {
   /** 注入时钟/随机源，方便单测 */
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** 外部取消信号：退避等待期间被中止时立刻退出，不再继续重试 */
+  signal?: AbortSignal;
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   shouldRetry?: (error: unknown) => boolean;
 };
@@ -104,7 +106,25 @@ export function backoffDelayMs(attempt: number, opts: RetryOptions = {}): number
   return Math.round(raw * (1 + (rnd() * 2 - 1) * jitter));
 }
 
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/**
+ * 可响应 AbortSignal 的等待：
+ * - 正常等完返回 true；
+ * - 已经或中途被 abort 立刻清理定时器并返回 false（不再傻等退避时间）。
+ */
+export function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, Math.max(0, ms));
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 /**
  * 执行 fn，失败按策略重试。次数用尽后抛出最后一次错误。
@@ -115,7 +135,8 @@ export async function withRetry<T>(
   opts: RetryOptions = {},
 ): Promise<T> {
   const attempts = Math.max(1, opts.attempts ?? DEFAULT_RETRY.attempts);
-  const sleep = opts.sleep ?? defaultSleep;
+  const sleep = opts.sleep;
+  const signal = opts.signal;
   const shouldRetry = opts.shouldRetry ?? isRetryableError;
   let lastError: unknown;
 
@@ -124,10 +145,16 @@ export async function withRetry<T>(
       return await fn(i);
     } catch (err) {
       lastError = err;
-      if (i === attempts - 1 || !shouldRetry(err)) throw err;
+      if (signal?.aborted || i === attempts - 1 || !shouldRetry(err)) throw err;
       const delayMs = backoffDelayMs(i, opts);
       opts.onRetry?.({ attempt: i + 1, error: err, delayMs });
-      await sleep(delayMs);
+      if (sleep) {
+        await sleep(delayMs);
+        if (signal?.aborted) throw err;
+      } else {
+        const completed = await sleepWithSignal(delayMs, signal);
+        if (!completed) throw err;
+      }
     }
   }
   throw lastError;

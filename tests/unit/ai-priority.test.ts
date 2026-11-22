@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { enterForeground, foregroundActive, waitForForegroundIdle } from "../../src/lib/ai-priority";
+import { createLimiter } from "../../src/lib/request-gate";
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -50,4 +51,30 @@ test("release 漏调：ttl 到点自动归还，不会永远挡住后台", async
   await new Promise((r) => setTimeout(r, 60));
   assert.equal(foregroundActive(), 0);
   await waitForForegroundIdle(10_000);
+});
+
+test("串行队列 + 前台让路：多个后台任务排队，前台释放后一次只唤醒一个（无惊群）", async () => {
+  const queue = createLimiter(1);
+  const release = enterForeground();
+  let inflight = 0;
+  let maxInflight = 0;
+  const order: number[] = [];
+
+  const runBg = (id: number) =>
+    queue(async () => {
+      await waitForForegroundIdle(10_000);
+      inflight++;
+      maxInflight = Math.max(maxInflight, inflight);
+      order.push(id);
+      await new Promise((r) => setTimeout(r, 15));
+      inflight--;
+    });
+
+  const jobs = [runBg(1), runBg(2), runBg(3)];
+  await tick();
+  assert.deepEqual(order, [], "前台讲解期间三个后台任务都不应启动");
+  release();
+  await Promise.all(jobs);
+  assert.deepEqual(order, [1, 2, 3]);
+  assert.equal(maxInflight, 1, "释放后严格串行，不会同时打出 3 个请求");
 });
