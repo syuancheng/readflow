@@ -28,6 +28,7 @@ import { siteCardsSettings } from "@/lib/cards/store";
 import { sqlite } from "@/db/sqlite";
 import { lemma as lemmaOf } from "@/lib/dict";
 import { STREAM_RESET } from "@/lib/config";
+import { enterForeground } from "@/lib/ai-priority";
 
 /**
  * P40：「从内容角度讲讲」需要知道文章属于哪个领域。标题 / 分类只从库里按 textId 取，
@@ -200,6 +201,8 @@ export async function handleExplain(
   let cancelled = false;
   let assistantText = ""; // P33：完整讲解全文（含建议行），缓存做卡用
   let streamDone = false; // 只缓存「完整成功」的结果（spec §7.2）
+  // 讲解期间让后台做卡的模型调用先等一等（见 ai-priority.ts）；流结束 / 取消 / 出错都要归还
+  const releaseForeground = enterForeground();
   const stream = new ReadableStream({
     async start(controller) {
       try {
@@ -250,12 +253,14 @@ export async function handleExplain(
           controller.enqueue(encoder.encode(`\n\n[Error: ${msg}]`));
         }
       } finally {
+        releaseForeground();
         if (!cancelled) controller.close();
       }
     },
     // 前端切到别的词会 abort 请求：顺着 return() 关掉上游模型流，别继续烧 token
     cancel() {
       cancelled = true;
+      releaseForeground();
       // 不 abort 的话，SDK 那次调用会继续跑到超时，连接也一直占着
       abort.abort();
       void iter.return?.(undefined);

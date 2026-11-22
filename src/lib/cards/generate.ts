@@ -27,6 +27,7 @@ import { examFamilyOf, examStyleLabel, stylePromptLines, type ExamFamily } from 
 import { checkComposition, NEED_PRODUCTIVE_REASON } from "./compose";
 import { audioTextsOf, type Voice } from "./audio";
 import { ensureAudio, ensureAudioAll } from "@/lib/tts";
+import { waitForForegroundIdle } from "@/lib/ai-priority";
 import {
   cardAudioVoice,
   cardsUsedToday,
@@ -146,6 +147,7 @@ async function runGenerate(
   let parsed = parseCardGen("");
   let finish: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
+    await waitForForegroundIdle(); // 用户正在看讲解时先让路（ai-priority.ts）
     const res = await completeJson(provider, run.messages, GEN_OPTS);
     usage = res.usage;
     finish = res.finish;
@@ -186,7 +188,7 @@ async function runGenerate(
   }
   if (settled.length === 0) return { ok: false, reason: "所有卡片都没有通过校验" };
 
-  // 4) 渲染（开了配音就带占位符）→ 合成句子音频（最多等 AUDIO_BUDGET_MS，失败不影响）→ 落库
+  // 4) 渲染（开了配音就带占位符）→ 落库 → 后台预热句子音频（不阻塞完成，失败不影响）
   const rows: { spec: CardSpec; content: string; needsReview: string | null }[] = [];
   for (const { spec, needsReview } of settled) {
     const rendered = renderCardChecked(
@@ -198,11 +200,6 @@ async function runGenerate(
   }
   if (rows.length === 0) return { ok: false, reason: "所有卡片渲染失败" };
 
-  if (run.audio) {
-    const texts = [...new Set(rows.flatMap((r) => audioTextsOf(r.spec)))];
-    const got = await ensureAudioAll(texts, AUDIO_BUDGET_MS, run.audio);
-    if (got < texts.length) console.warn("[cards] 句子音频没有全部合成", { setId, total: texts.length, got });
-  }
   const now = Date.now();
 
   sqlite.transaction(() => {
@@ -220,6 +217,17 @@ async function runGenerate(
       )
       .run(usage.cacheHitTokens ?? null, usage.promptTokens ?? null, usage.completionTokens ?? null, now, setId);
   })();
+
+  // 卡片已落库（前端马上能看到 ready，轮询到此为止）；句子音频在后台预热，不再卡着建卡完成：
+  // 预览（/api/tts/[key]）和推送（pusher）拿不到文件时本来就会现场合成。
+  if (run.audio) {
+    const texts = [...new Set(rows.flatMap((r) => audioTextsOf(r.spec)))];
+    void ensureAudioAll(texts, AUDIO_BUDGET_MS, run.audio)
+      .then((got) => {
+        if (got < texts.length) console.warn("[cards] 句子音频没有全部合成", { setId, total: texts.length, got });
+      })
+      .catch((err) => console.error("[cards] 句子音频预热失败:", err));
+  }
   return { ok: true };
 }
 
@@ -381,12 +389,14 @@ async function settleCard(
 
   if (!hasChoice(spec)) return { spec, needsReview: null };
 
+  await waitForForegroundIdle();
   let review = await reviewChoice(provider, run.vctx.originalSentence, spec);
   if (review === "ok") return { spec, needsReview: null };
 
   const again = await redo(provider, run, spec, REVIEW_REASON);
   if (again && validateCard(again, run.vctx).ok) {
     spec = again;
+    await waitForForegroundIdle();
     review = hasChoice(spec) ? await reviewChoice(provider, run.vctx.originalSentence, spec) : "ok";
     if (review === "ok") return { spec, needsReview: null };
   }
@@ -410,6 +420,7 @@ async function redo(provider: Provider, run: Run, prev: CardSpec, reason: string
     },
   ];
   try {
+    await waitForForegroundIdle();
     const res = await completeJson(provider, turns, GEN_OPTS);
     const parsed = parseCardGen(res.text);
     return parsed.ok ? withStyle(parsed.cards[0], run.family) : null;
@@ -430,6 +441,7 @@ async function redoSet(provider: Provider, run: Run, prev: CardSpec[]): Promise<
     },
   ];
   try {
+    await waitForForegroundIdle();
     const res = await completeJson(provider, turns, GEN_OPTS);
     const parsed = parseCardGen(res.text);
     return parsed.ok ? parsed.cards : null;

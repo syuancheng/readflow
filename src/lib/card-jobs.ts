@@ -60,6 +60,8 @@ export type JobTrackerDeps = {
   /** 定时器：返回取消函数（测试里换成假的） */
   schedule: (fn: () => void, ms: number) => () => void;
   onToast: (toast: CardToast) => void;
+  /** 每次查到最新状态（不论是否弹通知）都广播一下，右栏按钮订阅它，不用自己再开一路轮询 */
+  onState?: (contextId: string, state: CardStateLite) => void;
   /** 多久查一次，默认 3 秒（比右栏按钮的 2 秒慢一点：它只是兜底，别多占连接） */
   pollMs?: number;
   /** 最多查几次，默认 110 次（约 5.5 分钟；服务端 5 分钟没结束会自己标失败） */
@@ -86,6 +88,13 @@ export function createCardJobTracker(deps: JobTrackerDeps) {
         st = null; // 网络抖一下不算失败，下一轮再查
       }
       if (!active.has(job.contextId)) return; // 查的过程中被取消了
+      if (st) {
+        try {
+          deps.onState?.(job.contextId, st);
+        } catch {
+          /* 订阅者出错不能打断跟踪 */
+        }
+      }
       const toast = st ? toastOf(job, st) : null;
       if (toast) {
         finish();

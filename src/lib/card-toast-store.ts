@@ -111,7 +111,25 @@ const tracker = createCardJobTracker({
     return () => clearTimeout(t);
   },
   onToast: pushToast,
+  onState: (contextId, st) => {
+    for (const l of stateListeners.get(contextId) ?? []) l(st);
+  },
 });
+
+/**
+ * 订阅某条批注的做卡状态：全站只有跟踪器这一路轮询（每 3 秒），右栏按钮订阅它的结果，
+ * 不再自己再开一路 2 秒轮询（之前两路同时查同一个接口，请求翻倍）。
+ */
+const stateListeners = new Map<string, Set<(st: CardStateLite) => void>>();
+export function subscribeCardState(contextId: string, listener: (st: CardStateLite) => void): () => void {
+  let set = stateListeners.get(contextId);
+  if (!set) stateListeners.set(contextId, (set = new Set()));
+  set.add(listener);
+  return () => {
+    set.delete(listener);
+    if (set.size === 0) stateListeners.delete(contextId);
+  };
+}
 
 /** 开始做卡（或发现这个词正在做卡）时登记；做完 / 失败会自动弹通知。重复登记同一个词无副作用 */
 export function trackCardJob(job: CardJob): void {

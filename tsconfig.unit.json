@@ -15,6 +15,7 @@
   "include": [
     "src/lib/config.ts",
     "src/lib/retry.ts",
+    "src/lib/ai-priority.ts",
     "src/lib/providers.ts",
     "src/lib/gloss.ts",
     "src/lib/markdown-inline.ts",

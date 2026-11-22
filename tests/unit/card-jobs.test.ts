@@ -134,3 +134,47 @@ test("P43 通知列表：新的在最上面，同一个词只留一条，最多 
   assert.deepEqual(removeToast(list, "d").map((t) => t.id), ["c", "b"]);
   assert.deepEqual(removeToast(list, "zzz").map((t) => t.id), ["c", "d", "b"]);
 });
+
+test("跟踪器 onState：每次查到状态都广播（含最后一次 ready），查不到 / 抛错不广播；订阅者抛错不打断跟踪", async () => {
+  const seen: [string, string][] = [];
+  const toasts: CardToast[] = [];
+  const states: Array<CardStateLite | null | "throw"> = [st(), "throw", null, st({ state: "ready", count: 1, wordId: "w1" })];
+  let pending: (() => void) | null = null;
+  const tracker = createCardJobTracker({
+    fetchState: async () => {
+      const next = states.shift();
+      if (next === "throw") throw new Error("断网");
+      return next ?? null;
+    },
+    schedule: (fn) => { pending = fn; return () => { pending = null; }; },
+    onToast: (t) => toasts.push(t),
+    onState: (id, s) => {
+      seen.push([id, s.state]);
+      if (seen.length === 1) throw new Error("订阅者出错");
+    },
+  });
+  const tick = async () => { const fn = pending; pending = null; fn?.(); await new Promise((r) => setImmediate(r)); };
+  tracker.track({ contextId: "c1", word: "fight", setId: "s1" });
+  for (let i = 0; i < 4; i++) await tick();
+  assert.deepEqual(seen, [["c1", "generating"], ["c1", "ready"]]);
+  assert.equal(toasts.length, 1);
+});
+
+test("跟踪器 onState：状态里是别的组时仍广播（过滤交给订阅者），但不弹通知", async () => {
+  const seen: string[] = [];
+  const toasts: CardToast[] = [];
+  let pending: (() => void) | null = null;
+  const tracker = createCardJobTracker({
+    fetchState: async () => st({ state: "ready", setId: "old", count: 2 }),
+    schedule: (fn) => { pending = fn; return () => { pending = null; }; },
+    onToast: (t) => toasts.push(t),
+    onState: (_id, s) => seen.push(`${s.state}:${s.setId}`),
+    maxPolls: 1,
+  });
+  tracker.track({ contextId: "c1", word: "fight", setId: "new" });
+  const fn = pending as (() => void) | null;
+  fn?.();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(seen, ["ready:old"]);
+  assert.equal(toasts.length, 0);
+});
