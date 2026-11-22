@@ -254,7 +254,7 @@
   background: var(--rf-bg-surface);
   transition: border-color var(--rf-duration-fast) ease, box-shadow var(--rf-duration-fast) ease;
 }
-.rf-composer-box:focus-within {
+.rf-composer-box:has(.rf-composer-input:focus) {
   border-color: var(--rf-border-focus);
   box-shadow: var(--rf-focus-ring);
 }
@@ -467,21 +467,33 @@
 .rf-menu {
   position: absolute;
   left: var(--rf-space-1);
-  bottom: calc(100% - var(--rf-space-1));
+  bottom: calc(100% + var(--rf-space-1));
   width: min(280px, calc(100% - var(--rf-space-2)));
   max-height: 50vh;
   overflow-y: auto;
   padding: var(--rf-space-1);
-  border: var(--rf-border-width) solid var(--rf-border);
+  border: var(--rf-border-width) solid var(--rf-border-strong);
   border-radius: var(--rf-radius-md);
   background: var(--rf-bg-surface);
-  box-shadow: var(--rf-shadow-md);
+  box-shadow: var(--rf-shadow-lg);
   z-index: var(--rf-z-dropdown);
 }
-.rf-menu-group { display: flex; flex-direction: column; }
-.rf-menu-group + .rf-menu-group { margin-top: var(--rf-space-2); }
-.rf-menu-row { display: flex; align-items: center; gap: var(--rf-space-1); }
+.rf-menu-group { display: flex; flex-direction: column; gap: 2px; }
+.rf-menu-group + .rf-menu-group {
+  margin-top: var(--rf-space-1);
+  padding-top: var(--rf-space-1);
+  border-top: var(--rf-border-width) solid var(--rf-border);
+}
+.rf-menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--rf-space-1);
+  border-radius: var(--rf-radius-sm);
+  transition: background var(--rf-duration-fast) ease;
+}
+.rf-menu-row:hover { background: var(--rf-bg-hover); }
 .rf-menu-row .rf-menu-item { flex: 1; min-width: 0; }
+.rf-menu-row .rf-menu-item:hover:not(:disabled) { background: transparent; }
 .rf-menu-item {
   display: block;
   width: 100%;
@@ -499,40 +511,59 @@
   cursor: pointer;
   transition: background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
 }
-.rf-menu-item:hover:not(:disabled) { background: var(--rf-ai-soft); color: var(--rf-ai-text); }
-.rf-menu-item:disabled { opacity: 0.55; cursor: default; }
+.rf-menu-item:hover:not(:disabled) { background: var(--rf-bg-hover); color: var(--rf-text-primary); }
+.rf-menu-item:disabled { color: var(--rf-text-disabled); cursor: default; }
 .rf-menu-del {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: var(--rf-space-6);
   height: var(--rf-space-6);
+  margin-right: 2px;
   padding: 0;
   border: 0;
-  border-radius: var(--rf-radius-full);
+  border-radius: var(--rf-radius-sm);
   background: transparent;
   font-size: var(--rf-text-md);
-  line-height: var(--rf-leading-xs);
+  line-height: 1;
   color: var(--rf-text-secondary);
+  opacity: 0;
   cursor: pointer;
+  transition: opacity var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease, color var(--rf-duration-fast) ease;
 }
+.rf-menu-row:hover .rf-menu-del,
+.rf-menu-row:focus-within .rf-menu-del { opacity: 1; }
 .rf-menu-del:hover { background: var(--rf-danger-soft); color: var(--rf-danger-text); }
 .rf-menu-item:focus-visible,
 .rf-menu-del:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
-.rf-menu-add { display: flex; flex-wrap: wrap; align-items: center; gap: var(--rf-space-1); padding: 0; margin-top: var(--rf-space-1); }
+/* 底部「添加常用问题」：不嵌套独立描边方框（§5），用顶部分隔线 + 无框输入，左边缘与上方菜单项对齐 */
+.rf-menu-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rf-space-1);
+  margin-top: var(--rf-space-1);
+  padding-top: var(--rf-space-1);
+  border-top: var(--rf-border-width) solid var(--rf-border);
+}
 .rf-menu-input {
   flex: 1;
   min-width: 0;
   padding: var(--rf-space-1) var(--rf-space-2);
-  border: var(--rf-border-width) solid var(--rf-border-strong);
+  border: 0;
   border-radius: var(--rf-radius-sm);
   font: inherit;
   font-size: var(--rf-text-sm);
   line-height: var(--rf-leading-sm);
   color: var(--rf-text-primary);
-  background: var(--rf-bg-surface);
+  background: transparent;
+  transition: background var(--rf-duration-fast) ease;
 }
 .rf-menu-input::placeholder { color: var(--rf-text-secondary); }
-.rf-menu-input:focus { outline: none; border-color: var(--rf-border-focus); box-shadow: var(--rf-focus-ring); }
-/* 输入框右边的小勾：有内容才亮，点一下（或按 Enter）保存 */
+.rf-menu-input:hover { background: var(--rf-bg-subtle); }
+.rf-menu-input:focus { outline: none; background: var(--rf-bg-subtle); }
+/* 输入框右边的小勾：有内容才显现，点一下（或按 Enter）保存 */
 .rf-menu-check {
   flex: none;
   display: inline-flex;
@@ -540,19 +571,27 @@
   justify-content: center;
   width: var(--rf-space-6);
   height: var(--rf-space-6);
+  margin-right: 2px;
   padding: 0;
   border: 0;
-  border-radius: var(--rf-radius-full);
+  border-radius: var(--rf-radius-sm);
   background: transparent;
-  color: var(--rf-ai-text);
+  color: var(--rf-accent-text);
   cursor: pointer;
-  transition: background var(--rf-duration-fast) ease;
+  transition: opacity var(--rf-duration-fast) ease, background var(--rf-duration-fast) ease;
 }
 .rf-menu-check svg { width: var(--rf-space-4); height: var(--rf-space-4); }
-.rf-menu-check:hover:not(:disabled) { background: var(--rf-ai-soft); }
-.rf-menu-check:disabled { color: var(--rf-text-secondary); opacity: 0.45; cursor: default; }
+.rf-menu-check:hover:not(:disabled) { background: var(--rf-bg-selected); }
+.rf-menu-check:disabled { color: var(--rf-text-disabled); opacity: 0.4; cursor: default; }
 .rf-menu-check:focus-visible { outline: none; box-shadow: var(--rf-focus-ring); }
-.rf-menu-error { flex: 1 0 100%; margin: 0; font-size: var(--rf-text-xs); line-height: var(--rf-leading-xs); color: var(--rf-danger-text); }
+.rf-menu-error {
+  flex: 1 0 100%;
+  margin: 0;
+  padding: 0 var(--rf-space-2) var(--rf-space-1);
+  font-size: var(--rf-text-xs);
+  line-height: var(--rf-leading-xs);
+  color: var(--rf-danger-text);
+}
 
 @media print { .rf-composer { display: none; } }
 
