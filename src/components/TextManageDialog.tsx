@@ -2,20 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-
-/** 分类预设。存库的是字符串本身；自定义值直接入库，前端映射放这里 */
-export const CATEGORIES = [
-  "技术文档",
-  "文学",
-  "博客",
-  "新闻",
-  "论文",
-  "教程",
-  "其他",
-] as const;
+import { MAX_CATEGORY } from "@/lib/categories";
 
 const MAX_TITLE = 200;
-const MAX_CATEGORY = 30;
 
 export type TextMeta = {
   id: string;
@@ -35,11 +24,14 @@ export type TextMeta = {
  */
 export default function TextManageDialog({
   meta,
+  categories,
   onClose,
   onSaved,
   onDeleted,
 }: {
   meta: TextMeta;
+  /** 全部分类候选（预设 + 库中自定义），与导入下拉、筛选行同源 */
+  categories: readonly string[];
   onClose: () => void;
   /** 元数据保存成功（父组件刷新列表或同步本地状态） */
   onSaved: (next: { title: string; category: string | null }) => void;
@@ -50,9 +42,7 @@ export default function TextManageDialog({
   const [title, setTitle] = useState(meta.title);
   const [category, setCategory] = useState<string | null>(meta.category);
   const [customInput, setCustomInput] = useState(
-    meta.category && !CATEGORIES.includes(meta.category as (typeof CATEGORIES)[number])
-      ? meta.category
-      : "",
+    meta.category && !categories.includes(meta.category) ? meta.category : "",
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -84,7 +74,7 @@ export default function TextManageDialog({
 
   function pickCategory(c: string | null) {
     setCategory(c);
-    setCustomInput(c === null ? "" : CATEGORIES.includes(c as (typeof CATEGORIES)[number]) ? "" : c);
+    setCustomInput(c === null ? "" : categories.includes(c) ? "" : c);
   }
 
   async function save() {
@@ -183,7 +173,7 @@ export default function TextManageDialog({
             >
               未分类
             </button>
-            {CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <button
                 key={c}
                 type="button"

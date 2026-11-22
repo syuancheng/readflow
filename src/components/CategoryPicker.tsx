@@ -1,15 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CATEGORIES } from "@/components/TextManageDialog";
-
-const MAX_CATEGORY = 30;
+import { MAX_CATEGORY } from "@/lib/categories";
 
 /**
  * 分类选择：自绘的下拉（不用浏览器原生弹层，避免系统深色模式下变成半透明黑）。
- * 除预设分类外，最后一项「自定义…」可直接输入新的分类名。
+ * 候选分类由外部传入（预设 + 库中自定义，与编辑弹窗同源），末尾可再输入新分类。
  */
-export default function CategoryPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export default function CategoryPicker({
+  value,
+  categories,
+  onChange,
+}: {
+  value: string;
+  /** 全部分类候选（预设 + 库中自定义） */
+  categories: readonly string[];
+  onChange: (v: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -63,7 +70,7 @@ export default function CategoryPicker({ value, onChange }: { value: string; onC
     );
   }
 
-  const isPreset = (CATEGORIES as readonly string[]).includes(value);
+  const isPreset = categories.includes(value);
   return (
     <div className="rf-catpick mb-3" ref={rootRef}>
       <button
@@ -78,7 +85,7 @@ export default function CategoryPicker({ value, onChange }: { value: string; onC
       </button>
       {open && (
         <ul className="rf-catpick-list" role="listbox" aria-label="文章分类">
-          {[...CATEGORIES].map((c) => (
+          {categories.map((c) => (
             <li key={c} role="option" aria-selected={value === c}>
               <button type="button" className={`rf-catpick-opt${value === c ? " rf-catpick-opt-on" : ""}`} onClick={() => pick(c)}>
                 {c}

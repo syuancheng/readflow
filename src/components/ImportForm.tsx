@@ -21,7 +21,7 @@ const FORMATS: { key: ImportFormatChoice; label: string }[] = [
   { key: "markdown", label: "Markdown" },
 ];
 
-export default function ImportForm() {
+export default function ImportForm({ categories }: { categories: readonly string[] }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("paste");
   const [title, setTitle] = useState("");
@@ -115,7 +115,7 @@ export default function ImportForm() {
         onChange={(e) => setTitle(e.target.value)}
       />
 
-      <CategoryPicker value={category} onChange={setCategory} />
+      <CategoryPicker value={category} categories={categories} onChange={setCategory} />
 
       {mode === "url" ? (
         <input

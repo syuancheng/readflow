@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import CefrBadge from "./CefrBadge";
-import TextManageDialog, { CATEGORIES, type TextMeta } from "./TextManageDialog";
+import TextManageDialog, { type TextMeta } from "./TextManageDialog";
 import { asCefrLevel, parseCefrDetail } from "@/lib/cefr";
 import Icon from "@/components/Icon";
 
@@ -62,22 +62,11 @@ function CompletedBadge({ completedAt }: { completedAt: number | null }) {
  * 几条到几十条数据量不需要 URL 参数与路由参与。
  * 编辑（重命名 / 分类 / 删除）收敛在 TextManageDialog。
  */
-export default function TextList({ rows }: { rows: TextCardRow[] }) {
+export default function TextList({ rows, categories }: { rows: TextCardRow[]; categories: readonly string[] }) {
   const [list, setList] = useState(rows);
   const [category, setCategory] = useState<string | "all">("all");
   const [level, setLevel] = useState<string | "all">("all");
   const [editing, setEditing] = useState<TextMeta | null>(null);
-
-  // 文库里出现过的自定义分类也进筛选行（按数量排序，最多展示前 10 个）
-  const customCats = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of list) {
-      if (r.category && !CATEGORIES.includes(r.category as (typeof CATEGORIES)[number])) {
-        counts.set(r.category, (counts.get(r.category) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c]) => c);
-  }, [list]);
 
   const catCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -153,18 +142,15 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
         </span>
       </div>
 
-      {/* 筛选行：有分类数据才显示，避免空环境里两排无意义的 chip */}
-      {(list.length > 0 && (catCounts.size > 1 || customCats.length > 0)) && (
+      {/* 筛选行：只列出库里实际用到的分类，且顺序与编辑弹窗 / 导入下拉同源 */}
+      {(list.length > 0 && catCounts.size > 1) && (
         <div className="tm-filter-row">
           <div className="flex flex-wrap items-center gap-2">
             <span className="tm-filter-label">分类</span>
             {renderChip("all", "全部", undefined, category === "all", () => setCategory("all"))}
             {unclassified > 0 &&
               renderChip("", "未分类", unclassified, category === "", () => setCategory(""))}
-            {CATEGORIES.filter((c) => (catCounts.get(c) ?? 0) > 0).map((c) =>
-              renderChip(c, c, catCounts.get(c), category === c, () => setCategory(c)),
-            )}
-            {customCats.map((c) =>
+            {categories.filter((c) => (catCounts.get(c) ?? 0) > 0).map((c) =>
               renderChip(c, c, catCounts.get(c), category === c, () => setCategory(c)),
             )}
           </div>
@@ -255,6 +241,7 @@ export default function TextList({ rows }: { rows: TextCardRow[] }) {
       {editing && (
         <TextManageDialog
           meta={editing}
+          categories={categories}
           onClose={() => setEditing(null)}
           onSaved={(next) => applySaved(editing.id, next)}
           onDeleted={applyDeleted}

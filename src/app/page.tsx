@@ -7,6 +7,7 @@ import ImportForm from "@/components/ImportForm";
 import TextList, { type TextCardRow } from "@/components/TextList";
 import SurveyPrompt from "@/components/SurveyPrompt";
 import { getLearner, needsSurvey } from "@/lib/learner-store";
+import { allCategories } from "@/lib/categories";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,10 @@ export default async function Home() {
     completedAt: t.completedAt,
   }));
 
+  // 分类候选全集：预设 + 库里出现过的自定义值。编辑弹窗、导入下拉、筛选行共用它，
+  // 保证三处选项一致（自定义分类在任一处创建后，另两处都能选到）。
+  const categories = allCategories(rows.map((t) => t.category));
+
   // P32：没填过问卷、也没点过「以后再说」的老用户，在首页看到一次提示卡片
   const showSurvey = needsSurvey(getLearner(user.id));
 
@@ -56,7 +61,7 @@ export default async function Home() {
         {/* ===== 左：文本列表（筛选 / 编辑 / 删除在 TextList 内）=====
             lg:pt-6 = 右栏卡片的内边距，让「我的文本」和「导入文本」两个标题落在同一水平线 */}
         <div className="lg:pt-6">
-          <TextList rows={cards} />
+          <TextList rows={cards} categories={categories} />
 
           {/* 空状态时给点游戏化引导 */}
           {rows.length === 0 && (
@@ -90,7 +95,7 @@ export default async function Home() {
         {/* ===== 右：导入文本 =====
             不钉住：跟着页面一起滚，整页只有一条滚动条。窄屏退回单列，排在列表下方（TIP-05）。 */}
         <div>
-          <ImportForm />
+          <ImportForm categories={categories} />
         </div>
       </div>
     </div>
