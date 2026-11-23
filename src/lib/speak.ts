@@ -147,3 +147,45 @@ export function speak(text: string) {
 
 export const canSpeak =
   typeof window !== "undefined" && "speechSynthesis" in window;
+
+// ---------- 词典真人发音（有道）----------
+
+let dictAudio: HTMLAudioElement | null = null;
+let dictSeq = 0;
+
+/**
+ * 优先播服务端返回的真人音频；失败（未登录 / 接口挂了 / 手势被拒）回退浏览器朗读。
+ * 口音由服务端按当前用户设置决定，前端不传、也不缓存状态。
+ * 快速连点：递增序号丢弃旧请求结果，新请求先停掉上一段音频。
+ */
+export async function speakWithDict(text: string): Promise<void> {
+  const t = String(text ?? "").trim();
+  if (!t) return;
+  const seq = ++dictSeq;
+  dictAudio?.pause();
+  dictAudio = null;
+
+  try {
+    const res = await fetch(`/api/pronounce?text=${encodeURIComponent(t)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`发音接口 ${res.status}`);
+    const blob = await res.blob();
+    if (seq !== dictSeq) return; // 已经被更新的一次调用取代
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    dictAudio = audio;
+    audio.onended = () => URL.revokeObjectURL(url);
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      if (seq === dictSeq) speak(t);
+    };
+    try {
+      await audio.play();
+    } catch {
+      // 异步返回时用户手势可能已失效（NotAllowedError）→ 回退同步路径的浏览器朗读
+      URL.revokeObjectURL(url);
+      if (seq === dictSeq) speak(t);
+    }
+  } catch {
+    if (seq === dictSeq) speak(t);
+  }
+}

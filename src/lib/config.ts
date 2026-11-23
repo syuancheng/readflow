@@ -93,6 +93,8 @@ export const SETTINGS_KEYS = {
   ttsVoice: "tts.voice",
   /** P33：墨墨会员档位 basic / pro，**按账号**（决定每张卡的字数上限），不回退站级 */
   markjiMembership: "markji.membership",
+  /** 阅读器发音的英美音偏好（按账号），us=美音（默认）/ gb=英音 */
+  pronunciationAccent: "pronunciation.accent",
   // 个人资料：按账号隔离（profile.* 不回退站级），见 lib/settings-store.ts
   profileName: "profile.displayName",
   profileFullName: "profile.fullName",

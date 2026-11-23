@@ -70,6 +70,8 @@ type SettingsPayload = {
   /** P37：语音合成 Key 的状态（只有主账号能看到）；source = 正在用哪一个 Key */
   tts?: { configured: boolean; maskedKey: string; source: "setting" | "env" | "qwen" | null; voice: string };
   markjiMembership?: "basic" | "pro";
+  /** 阅读器发音口音：个人偏好 */
+  pronunciationAccent?: "us" | "gb";
   profile?: Profile;
 };
 
@@ -1171,8 +1173,29 @@ export default function SettingsDialog({
 
                       <div className="st-reading-row st-reading-row-static">
                         <span className="st-reading-text">
-                          <b>发音音色</b>
-                          <span>朗读单词与释义时使用的本地英文音色，切换后立即试听</span>
+                          <b>发音口音</b>
+                          <span>朗读单词与释义时使用美音或英音的真人发音，切换后立即生效</span>
+                        </span>
+                        <div className="duo-tabs">
+                          {(["us", "gb"] as const).map((k) => (
+                            <button
+                              key={k}
+                              type="button"
+                              className={`duo-tab ${(data?.pronunciationAccent ?? "us") === k ? "duo-tab-active" : ""}`}
+                              aria-pressed={(data?.pronunciationAccent ?? "us") === k}
+                              disabled={isBusy}
+                              onClick={() => void put({ pronunciationAccent: k })}
+                            >
+                              {k === "us" ? "美音" : "英音"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="st-reading-row st-reading-row-static">
+                        <span className="st-reading-text">
+                          <b>备用音色</b>
+                          <span>真人发音不可用时，回退到本设备英文音色；切换后立即试听</span>
                         </span>
                         <div className="st-reading-voice">
                           <VoicePicker />
@@ -1181,7 +1204,7 @@ export default function SettingsDialog({
                       </div>
                     </div>
                     <p className="st-security">
-                      发音音色保存在这台电脑的浏览器里（localStorage），不上传云端；换浏览器或清空站点数据会恢复默认。
+                      发音口音保存在你的账号里；备用音色保存在这台电脑的浏览器里（localStorage），换浏览器或清空站点数据会恢复默认。
                     </p>
                   </section>
                 )}

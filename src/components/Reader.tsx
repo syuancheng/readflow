@@ -7,7 +7,7 @@ import { isProse, type BlockKind, type BlockMeta, type InlineRange } from "@/lib
 import { contextLayersOf, selectionSignals, type ContextLayers, type SelectionSignals } from "@/lib/sentence";
 import { planSections, type Section } from "@/lib/sections";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
-import { speak, canSpeak } from "@/lib/speak";
+import { speakWithDict } from "@/lib/speak";
 import { STREAM_RESET } from "@/lib/config";
 import { bgFetch } from "@/lib/bg-fetch";
 import { createCoalescer } from "@/lib/request-gate";
@@ -1958,35 +1958,33 @@ function PickCard({
             {dict?.entry?.phonetic && (
               <button
                 className="rf-ipa hover:text-ink cursor-pointer"
-                onClick={() => speak(quote)}
+                onClick={() => void speakWithDict(quote)}
                 title="点击朗读"
               >
                 /{normalizePhonetic(dict.entry.phonetic)}/
               </button>
             )}
-            {canSpeak && (
-              <button
-                className="duo-speak-btn"
-                onClick={() => speak(quote)}
-                aria-label="发音"
-                title="发音"
+            <button
+              className="duo-speak-btn"
+              onClick={() => void speakWithDict(quote)}
+              aria-label="发音"
+              title="发音"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="12"
-                  height="12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
-                  <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                  <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
-                </svg>
-              </button>
-            )}
+                <path d="M11 5 6.5 8.5H3v7h3.5L11 19V5Z" />
+                <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+              </svg>
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">

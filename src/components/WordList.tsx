@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { normalizePhonetic, normalizeTranslation } from "@/lib/text";
-import { speak } from "@/lib/speak";
+import { speakWithDict } from "@/lib/speak";
 import MarkdownText from "@/components/MarkdownText";
 import type { ExportBadge, Snippet } from "@/lib/word-library";
 import { textFragmentUrl } from "@/lib/web-anchor";
@@ -422,7 +422,7 @@ export default function WordList({
                                 className="wl-icon-btn"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  speak(w.displayForm);
+                                  void speakWithDict(w.displayForm);
                                 }}
                                 aria-label="发音"
                                 title="发音"

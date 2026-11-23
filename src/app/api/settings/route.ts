@@ -57,6 +57,8 @@ export async function GET() {
   // P35：卡片句子配音（默认 on）；ttsKeyReady 只给主账号看（Key 状态属于站级配置）
   const cardsAudio = settings[SETTINGS_KEYS.cardsAudio] === "off" ? "off" : "on";
   const markjiMembership = userMembership(user.id) === "pro" ? "pro" : "basic";
+  // 阅读器发音口音：个人偏好，默认美音
+  const pronunciationAccent = settings[SETTINGS_KEYS.pronunciationAccent] === "gb" ? "gb" : "us";
 
   // P28：普通账号只看到、只改自己的模型 Key 和墨墨 Token（主账号的站级密钥一概不露），
   // 没填自己的 Key 时用站点模型、按天限次，这里一并返回额度情况
@@ -74,6 +76,7 @@ export async function GET() {
       cardsEnabled,
       cardsListening,
       markjiMembership,
+      pronunciationAccent,
       aiQuota: {
         ownKey: hasOwnModel(user.id),
         siteAvailable: resolveProvider(allSettings(), process.env) !== null,
@@ -105,6 +108,7 @@ export async function GET() {
     // 设置 → 模型 →「语音合成模型」：只给主账号；只回脱敏值和来源，不回 Key 本身
     tts: { configured: ttsKeyAvailable(), maskedKey: maskSecret(ttsKey()), source: ttsKeySource(), voice: currentVoice().voice },
     markjiMembership,
+    pronunciationAccent,
     profile: profileFromSettings(settings),
   });
 }
@@ -136,6 +140,8 @@ type PutBody = {
   ttsVoice?: string;
   /** P33：本人的墨墨会员档位 */
   markjiMembership?: "basic" | "pro";
+  /** 阅读器发音口音：个人偏好 */
+  pronunciationAccent?: "us" | "gb";
   /** 本地个人资料：提交完整四字段，空串表示恢复默认值 */
   profile?: Partial<Profile>;
   profileReset?: boolean;
@@ -219,6 +225,14 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "会员档位只能是 basic 或 pro" }, { status: 400 });
     }
     setSetting(SETTINGS_KEYS.markjiMembership, body.markjiMembership, user.id);
+  }
+
+  // 阅读器发音口音：个人偏好，写到本人行
+  if (body.pronunciationAccent !== undefined) {
+    if (body.pronunciationAccent !== "us" && body.pronunciationAccent !== "gb") {
+      return NextResponse.json({ error: "发音口音只能是 us 或 gb" }, { status: 400 });
+    }
+    setSetting(SETTINGS_KEYS.pronunciationAccent, body.pronunciationAccent, user.id);
   }
 
   if (body.activeProvider !== undefined) {

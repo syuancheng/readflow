@@ -40,6 +40,7 @@
     "src/lib/cards/audio.ts",
     "src/lib/cards/compose.ts",
     "src/lib/cards/tts-api.ts",
+    "src/lib/dictvoice-core.ts",
     "src/lib/cards/voices.ts",
     "src/db/alter.ts",
     "src/db/ensure-usage.ts",
