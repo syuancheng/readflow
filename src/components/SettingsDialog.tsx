@@ -239,6 +239,13 @@ function SvgIcon({ name, size = 18 }: { name: string; size?: number }) {
           <path d="M7 18h10.5a3.5 3.5 0 0 0 .3-7A5.5 5.5 0 0 0 7.2 9.6 4.2 4.2 0 0 0 7 18Z" />
         </svg>
       );
+    case "plug":
+      return (
+        <svg {...common}>
+          <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8Z" />
+          <path d="M12 17v4" />
+        </svg>
+      );
     case "external":
       return (
         <svg {...common} width={14} height={14}>
@@ -260,6 +267,7 @@ const NAV_ICON: Record<NavId, string> = {
   features: "model",
   reading: "speaker",
   extension: "puzzle",
+  mcp: "plug",
   storage: "shield",
 };
 
@@ -1419,8 +1427,12 @@ export default function SettingsDialog({
                       插件里的「服务地址」填你打开 ReadFlow 用的地址（比如 {typeof window === "undefined" ? "" : window.location.origin}）。
                       安装：Chrome 打开 chrome://extensions → 开启开发者模式 →「加载已解压的扩展程序」→ 选项目里的 extension/ 目录。
                     </p>
+                  </section>
+                )}
 
-                    <div className="st-panel mt-6">
+                {tab === "mcp" && (
+                  <section className="st-section">
+                    <div className="st-panel">
                       <div className="st-panel-row">
                         <div>
                           <h3 className="st-panel-title">MCP 接入（外部 AI 客户端）</h3>
@@ -1449,7 +1461,7 @@ export default function SettingsDialog({
                                 {mcpConfigCopied ? "配置已复制 ✓" : "复制 JSON 配置"}
                               </button>
                             </div>
-                            <pre className="st-token mt-3 overflow-x-auto whitespace-pre text-xs">
+                            <pre className="st-code-block mt-3">
                               {buildMcpConfigSnippet(freshMcpToken)}
                             </pre>
                             <p className="st-help">
@@ -1486,6 +1498,9 @@ export default function SettingsDialog({
                         )}
                       </div>
                     </div>
+                    <p className="st-security">
+                      已开放 5 个工具：读取学习档案（get_learner_profile）、查看阅读与听力战绩（get_learning_stats）、查看在学生词（list_learning_words）、记录听力时长（log_listening）、导入英文文章（import_article）。
+                    </p>
                   </section>
                 )}
 

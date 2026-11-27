@@ -2023,6 +2023,21 @@ body {
   color: var(--wb-ink-soft);
 }
 
+.st-code-block {
+  display: block;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--wb-line);
+  border-radius: var(--rf-radius-sm);
+  background: var(--wb-bg);
+  font-family: var(--rf-font-mono);
+  font-size: var(--rf-text-xs);
+  line-height: 1.6;
+  color: var(--wb-ink-soft);
+}
+
 /* ---- 表单通用 ---- */
 .st-field { margin-bottom: 20px; }
 .st-field:last-child { margin-bottom: 0; }
