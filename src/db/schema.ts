@@ -20,57 +20,61 @@ import {
  */
 export const LOCAL_USER = "local";
 
-export const texts = sqliteTable("texts", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull().default(LOCAL_USER),
-  title: text("title").notNull(),
-  sourceType: text("source_type").notNull(), // paste | file | url
-  sourceUrl: text("source_url"),
-  language: text("language").notNull().default("en"),
-  wordCount: integer("word_count").notNull().default(0),
-  createdAt: integer("created_at").notNull(),
-  /**
-   * 导入时算一次的 CEFR 粗估（见 src/lib/cefr.ts）。
-   * 全部可空：词典没装、非英文、文本太短时写 null，前端就不显示徽章。
-   * 分数存连续值而不是只存级别 —— 算法以后重新校准时可以不用重读原文就重算。
-   */
-  cefrLevel: text("cefr_level"),
-  cefrScore: real("cefr_score"),
-  /** CefrDetail 的 JSON 字符串，供徽章弹层展示各档词汇占比与判定明细 */
-  cefrDetail: text("cefr_detail"),
-  cefrMethod: text("cefr_method"),
-  /** 用户手改过级别后为 1，算法升级时不再覆盖 */
-  cefrOverridden: integer("cefr_overridden").notNull().default(0),
-  /**
-   * 导入源与原始内容。存 source_raw 是因为上一版只存了「压平后的纯文本」，
-   * 结果表格换行被 normalize() 吃掉后无法重解析，旧文章只能让用户重新导入。
-   * 有原始源，以后换解析器可以直接重跑，不必再麻烦用户。
-   */
-  sourceFormat: text("source_format").notNull().default("plain"),
-  sourceRaw: text("source_raw"),
-  /**
-   * 用户自定分类（技术文档 / 文学 / 博客 / 新闻 / 论文 / 教程 / 其他，
-   * 或自定义字符串）。可空 = 未分类。存自由字符串而不是外键表：
-   * 单用户应用不需要归一化，将来换分类体系只改前端映射，不动数据。
-   */
-  category: text("category"),
-  /**
-   * 阅读进度（P6b / P18 修订）。
-   * read_idx   = 上次离开时读到的段落 idx（续读书签）；
-   * read_ratio = 0–1 的滚动位置比例（实时、可下降，滚到底＝1；冗余存一份，
-   *   让列表页不 join paragraphs 就能出徽章）。
-   * 两列都是「位置估算」，覆盖写、不再单调合并 —— 否则一旦误写 1.0 就
-   * 永远降不回来（P18 修的正是这个 bug）。可空 = 还没读过。
-   */
-  readIdx: integer("read_idx"),
-  readRatio: real("read_ratio"),
-  /**
-   * 是否已读完（P18）：用户显式点「标记已读完」才写入时间戳，可空＝未标记。
-   * 与 read_ratio 完全解耦：滚到 100% 不等于读完；按钮再点一次传 null 取消。
-   * 不做「重置」按钮 —— 进度可下降 + 完成状态可取消已经覆盖所有修正路径。
-   */
-  completedAt: integer("completed_at"),
-});
+export const texts = sqliteTable(
+  "texts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().default(LOCAL_USER),
+    title: text("title").notNull(),
+    sourceType: text("source_type").notNull(), // paste | file | url
+    sourceUrl: text("source_url"),
+    language: text("language").notNull().default("en"),
+    wordCount: integer("word_count").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    /**
+     * 导入时算一次的 CEFR 粗估（见 src/lib/cefr.ts）。
+     * 全部可空：词典没装、非英文、文本太短时写 null，前端就不显示徽章。
+     * 分数存连续值而不是只存级别 —— 算法以后重新校准时可以不用重读原文就重算。
+     */
+    cefrLevel: text("cefr_level"),
+    cefrScore: real("cefr_score"),
+    /** CefrDetail 的 JSON 字符串，供徽章弹层展示各档词汇占比与判定明细 */
+    cefrDetail: text("cefr_detail"),
+    cefrMethod: text("cefr_method"),
+    /** 用户手改过级别后为 1，算法升级时不再覆盖 */
+    cefrOverridden: integer("cefr_overridden").notNull().default(0),
+    /**
+     * 导入源与原始内容。存 source_raw 是因为上一版只存了「压平后的纯文本」，
+     * 结果表格换行被 normalize() 吃掉后无法重解析，旧文章只能让用户重新导入。
+     * 有原始源，以后换解析器可以直接重跑，不必再麻烦用户。
+     */
+    sourceFormat: text("source_format").notNull().default("plain"),
+    sourceRaw: text("source_raw"),
+    /**
+     * 用户自定分类（技术文档 / 文学 / 博客 / 新闻 / 论文 / 教程 / 其他，
+     * 或自定义字符串）。可空 = 未分类。存自由字符串而不是外键表：
+     * 单用户应用不需要归一化，将来换分类体系只改前端映射，不动数据。
+     */
+    category: text("category"),
+    /**
+     * 阅读进度（P6b / P18 修订）。
+     * read_idx   = 上次离开时读到的段落 idx（续读书签）；
+     * read_ratio = 0–1 的滚动位置比例（实时、可下降，滚到底＝1；冗余存一份，
+     *   让列表页不 join paragraphs 就能出徽章）。
+     * 两列都是「位置估算」，覆盖写、不再单调合并 —— 否则一旦误写 1.0 就
+     * 永远降不回来（P18 修的正是这个 bug）。可空 = 还没读过。
+     */
+    readIdx: integer("read_idx"),
+    readRatio: real("read_ratio"),
+    /**
+     * 是否已读完（P18）：用户显式点「标记已读完」才写入时间戳，可空＝未标记。
+     * 与 read_ratio 完全解耦：滚到 100% 不等于读完；按钮再点一次传 null 取消。
+     * 不做「重置」按钮 —— 进度可下降 + 完成状态可取消已经覆盖所有修正路径。
+     */
+    completedAt: integer("completed_at"),
+  },
+  (t) => [index("idx_texts_user_completed").on(t.userId, t.completedAt)],
+);
 
 export const paragraphs = sqliteTable(
   "paragraphs",
@@ -414,6 +418,33 @@ export const pushJobs = sqliteTable("push_jobs", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+/**
+ * P60：听力有效投入记录（手动录入，同时预留 source / text_id 衔接未来 P59 站内音频自动入账）。
+ * minutes 为 REAL 浮点数，支持记录 30 秒（0.5 分钟）等短音频。
+ */
+export const listeningLogs = sqliteTable(
+  "listening_logs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    /** 本地日期 YYYY-MM-DD，方便按天聚合与补录 */
+    logDate: text("log_date").notNull(),
+    /** 彻底听懂的净时长（分钟，浮点数） */
+    minutes: real("minutes").notNull(),
+    /** 'intensive'（精听）| 'extensive'（泛听） */
+    mode: text("mode").notNull().default("intensive"),
+    /** 选填备注（材料名/主题，最长 200 字） */
+    note: text("note"),
+    /** 'manual'（手动）| 'audio'（预留给 P59 自动入账） */
+    source: text("source").notNull().default("manual"),
+    /** 预留外键：未来 P59 关联具体文章 ID，可空 */
+    textId: text("text_id"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("idx_listening_logs_user_date").on(t.userId, t.logDate)],
+);
+
 export type CardSet = typeof cardSets.$inferSelect;
 export type CardRow = typeof cards.$inferSelect;
 export type PushJob = typeof pushJobs.$inferSelect;
+export type ListeningLog = typeof listeningLogs.$inferSelect;
