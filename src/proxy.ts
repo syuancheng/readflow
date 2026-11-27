@@ -20,6 +20,7 @@ export function proxy(req: NextRequest) {
 
   if (pathname.startsWith("/api/auth/")) return NextResponse.next();
   if (pathname.startsWith("/api/extension/")) return NextResponse.next();
+  if (pathname === "/api/mcp" || pathname.startsWith("/api/mcp/")) return NextResponse.next();
 
   if (pathname === "/login" || pathname === "/setup" || pathname === "/register") {
     // 已登录就不该再看到登录 / 注册页；/setup 保持可访问由接口自己判 hasAnyUser

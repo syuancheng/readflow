@@ -56,6 +56,9 @@ type SettingsPayload = {
   /** 插件 Token 状态（P30 每人一个，只存哈希；明文只在生成那次的 newExtensionToken 里） */
   extension: { hasToken: boolean; hint: string | null; createdAt: number | null; lastUsedAt: number | null };
   newExtensionToken?: string;
+  /** MCP 接入 Token 状态（P61 每人一个，只存哈希；明文只在生成那次的 newMcpToken 里） */
+  mcp?: { hasToken: boolean; hint: string | null; createdAt: number | null; lastUsedAt: number | null };
+  newMcpToken?: string;
   /** 主账号：改的是站级配置（所有人共用的默认模型等）；普通账号改的是自己的 Key / Token */
   canEditSite?: boolean;
   /** 普通账号才有：自己有没有 Key、站点模型每天的免费次数（P28） */
@@ -299,6 +302,10 @@ export default function SettingsDialog({
   /** 刚生成的插件 Token 明文：只在本次打开的弹窗里显示，关掉就再也看不到 */
   const [freshToken, setFreshToken] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
+  /** 刚生成的 MCP Token 明文：只在本次打开的弹窗里显示，关掉就再也看不到 */
+  const [freshMcpToken, setFreshMcpToken] = useState<string | null>(null);
+  const [mcpTokenCopied, setMcpTokenCopied] = useState(false);
+  const [mcpConfigCopied, setMcpConfigCopied] = useState(false);
   const [profileDraft, setProfileDraft] = useState<Profile>(DEFAULT_PROFILE);
   const [profileErrors, setProfileErrors] = useState<ProfileErrors>({});
   const modelInputRef = useRef<HTMLInputElement>(null);
@@ -611,6 +618,54 @@ export default function SettingsDialog({
       setTokenCopied(true);
     } catch {
       setNotice({ kind: "err", text: "复制失败，请手动选中 Token 复制" });
+    }
+  }
+
+  async function regenerateMcpToken() {
+    if (data?.mcp?.hasToken && !window.confirm("重新生成后，AI 客户端里旧的 MCP Token 会立即失效，需要更新配置。继续吗？")) return;
+    const payload = await put({ regenerateMcpToken: true });
+    if (payload?.newMcpToken) {
+      setFreshMcpToken(payload.newMcpToken);
+      setMcpTokenCopied(false);
+      setMcpConfigCopied(false);
+      setNotice({ kind: "ok", text: "已生成新的 MCP Token：现在就复制配置，关掉设置后就看不到明文了" });
+    }
+  }
+
+  async function revokeMcpToken() {
+    if (!window.confirm("作废后外部 AI 客户端将立即断开，需要重新生成才能再用。继续吗？")) return;
+    const payload = await put({ revokeMcpToken: true });
+    if (payload) {
+      setFreshMcpToken(null);
+      setNotice({ kind: "ok", text: "MCP Token 已作废" });
+    }
+  }
+
+  function buildMcpConfigSnippet(tokenValue: string): string {
+    const origin = typeof window === "undefined" ? "https://your-readflow-domain" : window.location.origin;
+    return JSON.stringify(
+      {
+        mcpServers: {
+          readflow: {
+            url: `${origin}/api/mcp`,
+            headers: {
+              Authorization: `Bearer ${tokenValue}`,
+            },
+          },
+        },
+      },
+      null,
+      2,
+    );
+  }
+
+  async function copyMcpText(text: string, which: "token" | "config") {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (which === "token") setMcpTokenCopied(true);
+      else setMcpConfigCopied(true);
+    } catch {
+      setNotice({ kind: "err", text: "复制失败，请手动选中复制" });
     }
   }
 
@@ -1364,6 +1419,73 @@ export default function SettingsDialog({
                       插件里的「服务地址」填你打开 ReadFlow 用的地址（比如 {typeof window === "undefined" ? "" : window.location.origin}）。
                       安装：Chrome 打开 chrome://extensions → 开启开发者模式 →「加载已解压的扩展程序」→ 选项目里的 extension/ 目录。
                     </p>
+
+                    <div className="st-panel mt-6">
+                      <div className="st-panel-row">
+                        <div>
+                          <h3 className="st-panel-title">MCP 接入（外部 AI 客户端）</h3>
+                          <p className="st-panel-desc">
+                            连接 Claude Desktop、Cursor、Antigravity、Gemini CLI 等客户端，直接通过对话
+                            <b>记录听力时长</b>、<b>上传英文文章</b>，并把你的<b>英语学习档案与生词</b>提供给 AI。
+                          </p>
+                        </div>
+                      </div>
+                      <div className="st-field">
+                        <label className="st-label">MCP Token</label>
+                        {freshMcpToken ? (
+                          <>
+                            <div className="st-input-row">
+                              <code className="st-token" data-testid="fresh-mcp-token">{freshMcpToken}</code>
+                              <button
+                                className="st-btn st-btn-ghost"
+                                onClick={() => void copyMcpText(freshMcpToken, "token")}
+                              >
+                                {mcpTokenCopied ? "已复制 ✓" : "复制 Token"}
+                              </button>
+                              <button
+                                className="st-btn st-btn-primary"
+                                onClick={() => void copyMcpText(buildMcpConfigSnippet(freshMcpToken), "config")}
+                              >
+                                {mcpConfigCopied ? "配置已复制 ✓" : "复制 JSON 配置"}
+                              </button>
+                            </div>
+                            <pre className="st-token mt-3 overflow-x-auto whitespace-pre text-xs">
+                              {buildMcpConfigSnippet(freshMcpToken)}
+                            </pre>
+                            <p className="st-help">
+                              只显示这一次：现在就复制 JSON 配置粘贴到你的 AI 客户端里。关掉设置后不再显示明文，忘了只能重新生成。
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="st-input-row">
+                              <code className="st-token">
+                                {data?.mcp?.hasToken ? `已生成 · 末尾 …${data.mcp.hint}` : "尚未生成"}
+                              </code>
+                              <button
+                                className={data?.mcp?.hasToken ? "st-btn st-btn-ghost" : "st-btn st-btn-primary"}
+                                disabled={isBusy}
+                                onClick={() => void regenerateMcpToken()}
+                              >
+                                {data?.mcp?.hasToken ? "重新生成" : "生成 MCP Token"}
+                              </button>
+                              {data?.mcp?.hasToken && (
+                                <button className="st-btn st-btn-quiet" disabled={isBusy} onClick={() => void revokeMcpToken()}>
+                                  作废
+                                </button>
+                              )}
+                            </div>
+                            <p className="st-help">
+                              {data?.mcp?.hasToken
+                                ? `生成于 ${fmtTime(data.mcp.createdAt)} · ${
+                                    data.mcp.lastUsedAt ? `最近使用 ${fmtTime(data.mcp.lastUsedAt)}` : "还没被 AI 客户端用过"
+                                  }。端点地址：${typeof window === "undefined" ? "" : `${window.location.origin}/api/mcp`}`
+                                : "生成后即可在 Claude Desktop、Cursor、Antigravity、Gemini CLI 等客户端配置连接。每个账号独立隔离。"}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </section>
                 )}
 

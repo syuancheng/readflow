@@ -22,6 +22,7 @@ import { userMembership } from "@/lib/cards/store";
 import { aiUsedToday, dailyAiQuota } from "@/lib/ai-quota";
 import { currentUser } from "@/lib/auth";
 import { extensionTokenStatus, issueExtensionToken, revokeExtensionToken } from "@/lib/extension-tokens";
+import { issueMcpToken, mcpTokenStatus, revokeMcpToken } from "@/lib/mcp-tokens";
 import {
   isAvatarImage,
   normalizeProfile,
@@ -71,6 +72,7 @@ export async function GET() {
       providers: providerStatuses(own, {}),
       markji: { configured: Boolean(ownMarkji), maskedToken: maskSecret(ownMarkji), fromEnv: false },
       extension: extensionTokenStatus(user.id),
+      mcp: mcpTokenStatus(user.id),
       canEditSite: false,
       aiPersonalized,
       cardsEnabled,
@@ -99,6 +101,8 @@ export async function GET() {
     },
     // P30：插件 Token 每人一个，只代表本人
     extension: extensionTokenStatus(user.id),
+    // P61：MCP 接入 Token 每人一个，只代表本人
+    mcp: mcpTokenStatus(user.id),
     canEditSite: user.isOwner,
     aiPersonalized,
     cardsEnabled,
@@ -127,6 +131,8 @@ type PutBody = {
   markjiClear?: boolean;
   regenerateExtensionToken?: boolean;
   revokeExtensionToken?: boolean;
+  regenerateMcpToken?: boolean;
+  revokeMcpToken?: boolean;
   /** P32：站级「个性化讲解」开关，只有主账号能改 */
   aiPersonalized?: "on" | "off";
   /** P33：站级做卡 / 听力开关，只有主账号能改 */
@@ -277,6 +283,13 @@ export async function PUT(req: Request) {
     revokeExtensionToken(user.id);
   }
 
+  let newMcpToken: string | null = null;
+  if (body.regenerateMcpToken === true) {
+    newMcpToken = issueMcpToken(user.id);
+  } else if (body.revokeMcpToken === true) {
+    revokeMcpToken(user.id);
+  }
+
   const PROFILE_KEYS = [
     SETTINGS_KEYS.profileName,
     SETTINGS_KEYS.profileFullName,
@@ -301,7 +314,11 @@ export async function PUT(req: Request) {
   }
 
   const res = await GET();
-  if (!newExtensionToken) return res;
+  if (!newExtensionToken && !newMcpToken) return res;
   // 新 Token 的明文只在这一次响应里返回，设置页提示用户立刻复制
-  return NextResponse.json({ ...(await res.json()), newExtensionToken });
+  return NextResponse.json({
+    ...(await res.json()),
+    ...(newExtensionToken ? { newExtensionToken } : {}),
+    ...(newMcpToken ? { newMcpToken } : {}),
+  });
 }

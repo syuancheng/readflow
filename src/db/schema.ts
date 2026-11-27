@@ -444,6 +444,14 @@ export const listeningLogs = sqliteTable(
   (t) => [index("idx_listening_logs_user_date").on(t.userId, t.logDate)],
 );
 
+export const mcpTokens = sqliteTable("mcp_tokens", {
+  userId: text("user_id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  tokenHint: text("token_hint").notNull(),
+  createdAt: integer("created_at").notNull(),
+  lastUsedAt: integer("last_used_at"),
+});
+
 export type CardSet = typeof cardSets.$inferSelect;
 export type CardRow = typeof cards.$inferSelect;
 export type PushJob = typeof pushJobs.$inferSelect;

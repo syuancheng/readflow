@@ -6,6 +6,7 @@ import { ensureBlockColumns } from "./ensure-blocks";
 import { ensureTextMetaColumns } from "./ensure-text-meta";
 import { ensureQuickQuestions } from "./ensure-quick-questions";
 import { ensureListeningLogs } from "./ensure-listening-logs";
+import { ensureMcpTokens } from "./ensure-mcp-tokens";
 import { addColumnIfMissing } from "./alter";
 
 /**
@@ -198,6 +199,8 @@ function migrate(): void {
   ensureQuickQuestions(sqlite);
   // 听力战绩日志与完读索引（P60）
   ensureListeningLogs(sqlite);
+  // MCP 接入 Token 表（P61）
+  ensureMcpTokens(sqlite);
 
   const cols = sqlite.prepare("PRAGMA table_info(exports)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "card_type")) {

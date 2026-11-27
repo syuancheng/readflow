@@ -47,6 +47,8 @@
     "src/db/ensure-audio.ts",
     "src/db/ensure-answers.ts",
     "src/db/ensure-listening-logs.ts",
+    "src/db/ensure-mcp-tokens.ts",
+    "src/lib/mcp/protocol.ts",
     "src/lib/streak.ts",
     "src/lib/listening.ts",
     "src/lib/cefr.ts",
